@@ -23,9 +23,10 @@ const RotuloPaneCentral = "orq · "
 
 // PaneCentral é o que orq central abrir fez com o pane de um coordenador.
 type PaneCentral struct {
-	Coordenador string `json:"coordenador"`
-	PaneID      string `json:"pane_id"`
-	Acao        string `json:"acao"` // criado, mantido, fechado
+	Coordenador string  `json:"coordenador"`
+	PaneID      string  `json:"pane_id"`
+	Acao        string  `json:"acao"`    // criado, mantido, relancado, fechado, ocupado
+	Detalhe     *string `json:"detalhe"` // o que impediu ou o que ficou estranho; nulo quando tudo certo
 }
 
 // ResultadoCentral é a saída de orq central abrir.
@@ -46,9 +47,13 @@ func (a *App) centralCmd() *cobra.Command {
 		Short: "Cria ou reaproveita o workspace Central com um pane orq tui --coord X por coordenador com onda aberta",
 		Long: `Cria o workspace (pelo rótulo, --nome) se ele não existe e deixa nele um pane rodando
 orq tui --coord X para cada coordenador com onda aberta. Idempotente: os panes são reconhecidos
-pelo rótulo "orq · <coordenador>"; o que já existe fica, o que falta é criado, e o pane de um
-coordenador que não tem mais onda aberta é fechado (ele não teria o que mostrar; a próxima
+pelo rótulo "orq · <coordenador>" e conferidos com herdr pane process-info. Com o TUI rodando,
+o pane fica (mantido); de volta ao shell (o TUI saiu com q, caiu ou não subiu), o TUI é
+lançado de novo no mesmo pane (relancado); com outro processo em primeiro plano, nada é
+mandado para ele (ocupado). O que falta é criado, e o pane de um coordenador que não tem mais
+onda aberta é fechado, se estiver no TUI ou no shell (ele não teria o que mostrar; a próxima
 chamada o recria quando houver onda). Panes sem esse rótulo no workspace não são tocados.
+Depois de lançar, espera até 5 s o TUI aparecer; se não aparece, o detalhe da ação diz.
 Sem --sem-foco, foca o workspace no fim. Sem --nome, vale $ORQ_CENTRAL_NOME (que o orq.env do
 plugin pode definir) e, sem ela, Central.`,
 		Args: cobra.NoArgs,
@@ -91,8 +96,13 @@ func textoCentral(w io.Writer, r ResultadoCentral) error {
 		return err
 	}
 	for _, p := range r.Panes {
-		if _, err := fmt.Fprintf(w, "  %-8s %s  %s\n", p.Acao, p.PaneID, q(p.Coordenador)); err != nil {
+		if _, err := fmt.Fprintf(w, "  %-9s %s  %s\n", p.Acao, p.PaneID, q(p.Coordenador)); err != nil {
 			return err
+		}
+		if p.Detalhe != nil {
+			if _, err := fmt.Fprintf(w, "            %s\n", q(*p.Detalhe)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -253,7 +263,25 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 	for _, c := range coords {
 		quer[c] = true
 		if p, ok := existentes[c]; ok {
-			r.Panes = append(r.Panes, PaneCentral{c, p, "mantido"})
+			// O rótulo não basta: o TUI pode ter saído (q), caído ou nunca subido, e o pane
+			// ficou no shell. Só o shell recebe o comando de novo; outro processo no pane é
+			// do usuário e fica.
+			st, detalhe, err := estadoPane(ctx, f, p, c)
+			if err != nil {
+				return r, err
+			}
+			switch st {
+			case paneTUI:
+				r.Panes = append(r.Panes, PaneCentral{c, p, "mantido", nil})
+			case paneShell:
+				if err := herdrJSON(ctx, f, nil, "pane", "run", p, comandoShell(exe, "tui", "--coord", c)); err != nil {
+					return r, err
+				}
+				r.Panes = append(r.Panes, PaneCentral{c, p, "relancado", esperarTUI(ctx, f, p, c)})
+			default:
+				r.Panes = append(r.Panes, PaneCentral{c, p, "ocupado", &detalhe})
+			}
+			ultimo = p
 			continue
 		}
 		pane := livre
@@ -278,7 +306,7 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 			return r, err
 		}
 		ultimo = pane
-		r.Panes = append(r.Panes, PaneCentral{c, pane, "criado"})
+		r.Panes = append(r.Panes, PaneCentral{c, pane, "criado", esperarTUI(ctx, f, pane, c)})
 	}
 	var sobras []string
 	for c := range existentes {
@@ -288,10 +316,19 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 	}
 	sort.Strings(sobras)
 	for _, c := range sobras {
-		if err := herdrJSON(ctx, f, nil, "pane", "close", existentes[c]); err != nil {
+		p := existentes[c]
+		st, detalhe, err := estadoPane(ctx, f, p, c)
+		if err != nil {
 			return r, err
 		}
-		r.Panes = append(r.Panes, PaneCentral{c, existentes[c], "fechado"})
+		if st == paneOutro {
+			r.Panes = append(r.Panes, PaneCentral{c, p, "ocupado", &detalhe})
+			continue
+		}
+		if err := herdrJSON(ctx, f, nil, "pane", "close", p); err != nil {
+			return r, err
+		}
+		r.Panes = append(r.Panes, PaneCentral{c, p, "fechado", nil})
 	}
 	if focar && len(coords) > 0 {
 		if err := herdrJSON(ctx, f, nil, "workspace", "focus", ws); err != nil {
@@ -300,4 +337,78 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 		r.Focado = true
 	}
 	return r, nil
+}
+
+// Estado do processo em primeiro plano num pane da Central.
+const (
+	paneTUI   = "tui"   // orq tui --coord <coord> rodando
+	paneShell = "shell" // o shell do pane, ocioso
+	paneOutro = "outro" // qualquer outra coisa: não é do orq mexer
+)
+
+// esperaTUI é quanto orq central abrir espera o TUI aparecer no pane depois de lançá-lo.
+var esperaTUI = 5 * time.Second
+
+// estadoPane lê `herdr pane process-info` e diz o que roda em primeiro plano no pane.
+func estadoPane(ctx context.Context, f enriquecer.Ferramentas, pane, coord string) (string, string, error) {
+	var pi struct {
+		ProcessInfo struct {
+			Grupo     int `json:"foreground_process_group_id"`
+			Shell     int `json:"shell_pid"`
+			Processos []struct {
+				PID  int      `json:"pid"`
+				Argv []string `json:"argv"`
+			} `json:"foreground_processes"`
+		} `json:"process_info"`
+	}
+	if err := herdrJSON(ctx, f, &pi, "pane", "process-info", "--pane", pane); err != nil {
+		return "", "", err
+	}
+	info := pi.ProcessInfo
+	var cmds []string
+	for _, p := range info.Processos {
+		if ehTUI(p.Argv, coord) {
+			return paneTUI, "", nil
+		}
+		cmds = append(cmds, strings.Join(p.Argv, " "))
+	}
+	if info.Shell != 0 && info.Grupo == info.Shell {
+		return paneShell, "", nil
+	}
+	return paneOutro, "o pane roda " + strings.Join(cmds, "; ") + ", não o orq tui nem o shell; o orq não mexe nele", nil
+}
+
+// ehTUI reconhece `<orq> tui --coord <coord>` (ou --coord=<coord>) num argv.
+func ehTUI(argv []string, coord string) bool {
+	tui := false
+	for i, a := range argv {
+		switch {
+		case a == "tui":
+			tui = true
+		case tui && a == "--coord" && i+1 < len(argv) && argv[i+1] == coord:
+			return true
+		case tui && a == "--coord="+coord:
+			return true
+		}
+	}
+	return false
+}
+
+// esperarTUI confere que o TUI subiu no pane; devolve o detalhe quando ele não aparece.
+func esperarTUI(ctx context.Context, f enriquecer.Ferramentas, pane, coord string) *string {
+	limite := time.Now().Add(esperaTUI)
+	for {
+		st, _, err := estadoPane(ctx, f, pane, coord)
+		if err == nil && st == paneTUI {
+			return nil
+		}
+		if time.Now().After(limite) || ctx.Err() != nil {
+			d := fmt.Sprintf("o orq tui não apareceu no pane em %s; veja o pane (herdr pane read %s). A próxima chamada relança se o pane voltar ao shell", esperaTUI, pane)
+			if err != nil {
+				d += ": " + err.Error()
+			}
+			return &d
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }

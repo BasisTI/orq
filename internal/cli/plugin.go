@@ -58,9 +58,10 @@ roda o check de novo e, se ele reprovar, restaura o arquivo anterior.`,
 	desconfigurar := &cobra.Command{
 		Use:   "desconfigurar [--config <arquivo>]",
 		Short: "Tira do config.toml do Herdr só o que orq plugin configurar acrescentou",
-		Long: `Tira os tokens $orq e $orq_mrs das linhas da sidebar (e a linha que ficar vazia) e os
-[[keys.command]] das ações orq.*, com o comentário "# orq:" logo acima. O resto do arquivo fica
-como está. Mesmo backup e mesmo check de configurar.`,
+		Long: `Tira as linhas [{ token = "$orq" }] e [{ token = "$orq_mrs" }] das rows da sidebar e os
+[[keys.command]] que têm o comentário "# orq:" logo acima, pelo texto. Token do orq numa linha
+do usuário e tecla do usuário para uma ação orq.* (sem a marca) ficam, como o resto do arquivo.
+Mesmo backup e mesmo check de configurar.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := caminho()

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // herdrCentral é um herdr falso com o mínimo de estado para orq central abrir: o workspace
@@ -23,6 +24,11 @@ case "$1 $2" in
 "pane split") n=$(cat "$d/n" 2>/dev/null || echo 1); n=$((n+1)); echo $n > "$d/n"; echo "{\"result\":{\"pane\":{\"pane_id\":\"wT:p$n\"}}}" ;;
 "plugin list") cat "$d/plugins.json" 2>/dev/null || echo '{"result":{"plugins":[]}}' ;;
 "config check") if grep -q REPROVAR "$HERDR_CONFIG_PATH" 2>/dev/null; then echo 'config: issues found'; echo 'unknown config key x' >&2; exit 1; fi; echo 'config: ok' ;;
+"pane run") f="$d/proc-$(printf %s "$3" | tr ':' '_').json"
+	if [ ! -f "$d/tui-nao-sobe" ]; then cmd=$4; eval "set -- $cmd"; a=""; for x in "$@"; do a="$a\"$x\","; done
+		echo "{\"result\":{\"process_info\":{\"shell_pid\":10,\"foreground_process_group_id\":20,\"foreground_processes\":[{\"pid\":20,\"argv\":[${a%,}]}]}}}" > "$f"; fi ;;
+"pane process-info") f="$d/proc-$(printf %s "$4" | tr ':' '_').json"
+	if [ -f "$f" ]; then cat "$f"; else echo '{"result":{"process_info":{"shell_pid":10,"foreground_process_group_id":10,"foreground_processes":[{"pid":10,"argv":["/usr/bin/zsh"]}]}}}'; fi ;;
 "agent focus") if [ "$3" = "wX:p0" ]; then echo '{"error":{"code":"agent_not_found","message":"no agent"}}'; exit 1; fi; echo '{"result":{}}' ;;
 *) echo '{"result":{}}' ;;
 esac
@@ -71,7 +77,7 @@ func TestCentralAbrirIdempotente(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !r.Criado || r.WorkspaceID == nil || *r.WorkspaceID != "wT" || r.Focado ||
-		len(r.Panes) != 2 || r.Panes[0] != (PaneCentral{"a", "wT:p1", "criado"}) || r.Panes[1] != (PaneCentral{"b", "wT:p2", "criado"}) {
+		len(r.Panes) != 2 || r.Panes[0] != (PaneCentral{"a", "wT:p1", "criado", nil}) || r.Panes[1] != (PaneCentral{"b", "wT:p2", "criado", nil}) {
 		t.Fatalf("r = %+v", r)
 	}
 	log := strings.Join(chamadas(t, dir), "\n")
@@ -101,7 +107,7 @@ func TestCentralAbrirIdempotente(t *testing.T) {
 	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste")), &r); err != nil {
 		t.Fatal(err)
 	}
-	quer := []PaneCentral{{"b", "wT:p2", "mantido"}, {"c", "wT:p3", "criado"}, {"a", "wT:p1", "fechado"}}
+	quer := []PaneCentral{{"b", "wT:p2", "mantido", nil}, {"c", "wT:p3", "criado", nil}, {"a", "wT:p1", "fechado", nil}}
 	if r.Criado || !r.Focado || len(r.Panes) != 3 {
 		t.Fatalf("r = %+v", r)
 	}
@@ -118,6 +124,97 @@ func TestCentralAbrirIdempotente(t *testing.T) {
 	}
 	if strings.Contains(log, "wT:p9") || strings.Contains(log, "workspace|create") {
 		t.Errorf("tocou no pane do usuário ou recriou o workspace:\n%s", log)
+	}
+}
+
+// S1 da revisão r1: o TUI saiu com q (ou caiu) e o pane voltou ao shell; abrir de novo relança
+// o TUI no mesmo pane. Pane com outro processo não recebe comando.
+func TestCentralAbrirRelancaTUI(t *testing.T) {
+	dir, env := novoHerdrCentral(t)
+	for _, c := range []string{"a", "b", "c"} {
+		ok(t, env, "coord", "registrar", c, "--pane", "wB:p"+c, "--projeto", "orq")
+		ok(t, env, "--coord", c, "onda", "criar", "o"+c, "--us", map[string]string{"a": "1", "b": "2", "c": "3"}[c])
+	}
+	escrever(t, filepath.Join(dir, "criado"), "")
+	escrever(t, filepath.Join(dir, "panes.json"), `{"result":{"panes":[{"pane_id":"wT:p1","label":"orq · a"},{"pane_id":"wT:p2","label":"orq · b"},{"pane_id":"wT:p3","label":"orq · c"}]}}`)
+	exe, _ := os.Executable()
+	// a: TUI vivo; b: sem arquivo, o falso responde shell ocioso; c: o usuário rodou vim ali.
+	escrever(t, filepath.Join(dir, "proc-wT_p1.json"), `{"result":{"process_info":{"shell_pid":10,"foreground_process_group_id":20,"foreground_processes":[{"pid":20,"argv":["`+exe+`","tui","--coord","a"]}]}}}`)
+	escrever(t, filepath.Join(dir, "proc-wT_p3.json"), `{"result":{"process_info":{"shell_pid":10,"foreground_process_group_id":30,"foreground_processes":[{"pid":30,"argv":["vim","notas.md"]}]}}}`)
+	var r ResultadoCentral
+	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste", "--sem-foco")), &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Panes) != 3 || r.Panes[0] != (PaneCentral{"a", "wT:p1", "mantido", nil}) || r.Panes[1] != (PaneCentral{"b", "wT:p2", "relancado", nil}) ||
+		r.Panes[2].Acao != "ocupado" || r.Panes[2].Detalhe == nil || !strings.Contains(*r.Panes[2].Detalhe, "vim notas.md") {
+		t.Fatalf("r = %+v", r)
+	}
+	log := strings.Join(chamadas(t, dir), "\n")
+	if strings.Count(log, "pane|run|") != 1 || !strings.Contains(log, "pane|run|wT:p2|'"+exe+"' 'tui' '--coord' 'b'|") || strings.Contains(log, "split") {
+		t.Fatalf("run só no pane do shell, sem pane novo:\n%s", log)
+	}
+	// De novo: o b agora tem o TUI (o falso o subiu no run), e nada é relançado.
+	escrever(t, filepath.Join(dir, "log"), "")
+	r = ResultadoCentral{}
+	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste", "--sem-foco")), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Panes[1] != (PaneCentral{"b", "wT:p2", "mantido", nil}) || strings.Contains(strings.Join(chamadas(t, dir), "\n"), "pane|run|") {
+		t.Fatalf("segunda: %+v", r)
+	}
+	// O pane ocupado de um coordenador sem onda não é fechado.
+	ok(t, env, "onda", "encerrar", "3")
+	r = ResultadoCentral{}
+	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste", "--sem-foco")), &r); err != nil {
+		t.Fatal(err)
+	}
+	if last := r.Panes[len(r.Panes)-1]; last.Coordenador != "c" || last.Acao != "ocupado" || strings.Contains(strings.Join(chamadas(t, dir), "\n"), "pane|close|wT:p3") {
+		t.Fatalf("ocupado sem onda: %+v", r)
+	}
+}
+
+// Lançamento que falha (o TUI não sobe): a ação diz no detalhe, e a próxima chamada relança.
+func TestCentralAbrirTUINaoSobe(t *testing.T) {
+	dir, env := novoHerdrCentral(t)
+	antes := esperaTUI
+	esperaTUI = 300 * time.Millisecond
+	t.Cleanup(func() { esperaTUI = antes })
+	ok(t, env, "coord", "registrar", "a", "--projeto", "orq")
+	ok(t, env, "onda", "criar", "o", "--us", "1")
+	escrever(t, filepath.Join(dir, "panes.json"), `{"result":{"panes":[{"pane_id":"wT:p1"}]}}`)
+	escrever(t, filepath.Join(dir, "tui-nao-sobe"), "")
+	var r ResultadoCentral
+	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste", "--sem-foco")), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Panes[0].Acao != "criado" || r.Panes[0].Detalhe == nil || !strings.Contains(*r.Panes[0].Detalhe, "não apareceu") {
+		t.Fatalf("r = %+v", r)
+	}
+	escrever(t, filepath.Join(dir, "panes.json"), `{"result":{"panes":[{"pane_id":"wT:p1","label":"orq · a"}]}}`)
+	if err := os.Remove(filepath.Join(dir, "tui-nao-sobe")); err != nil {
+		t.Fatal(err)
+	}
+	r = ResultadoCentral{}
+	if err := json.Unmarshal([]byte(ok(t, env, "central", "abrir", "--nome", "Central teste", "--sem-foco")), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Panes[0] != (PaneCentral{"a", "wT:p1", "relancado", nil}) {
+		t.Fatalf("relançado: %+v", r.Panes[0])
+	}
+}
+
+func TestEhTUI(t *testing.T) {
+	cases := map[string]bool{
+		"/x/orq tui --coord a":      true,
+		"/x/orq tui --coord=a":      true,
+		"/x/orq tui --coord ab":     false,
+		"/x/orq tui --todos":        false,
+		"/x/orq --coord a snapshot": false,
+	}
+	for s, quer := range cases {
+		if ehTUI(strings.Fields(s), "a") != quer {
+			t.Errorf("%s", s)
+		}
 	}
 }
 

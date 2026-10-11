@@ -98,14 +98,95 @@ agents.rows = [
 spaces.rows = [["workspace"], ["$orq_mrs"]]
 `
 	novo, mud := configurar(t, texto, Opcoes{})
-	if len(mud) != 1 || !strings.Contains(novo, `agents.rows = [["state_icon", "agent"], [{ token = "$story", fg = "#89b4fa" }], [{ token = "$orq" }]]`+"\n") ||
-		!strings.Contains(novo, `spaces.rows = [["workspace"], ["$orq_mrs"]]`) {
+	quer := `[ui.sidebar]
+agents.rows = [
+  ["state_icon", "agent"],  # comentário dentro do array
+  [{ token = "$story", fg = "#89b4fa" }],
+  [{ token = "$orq" }],
+]
+spaces.rows = [["workspace"], ["$orq_mrs"]]
+`
+	// "$orq_mrs" em string pura já conta: spaces.rows não muda.
+	if len(mud) != 1 || novo != quer {
 		t.Fatalf("mud %v novo =\n%s", mud, novo)
 	}
-	// "$orq_mrs" em string pura já conta; desconfigurar tira as duas formas.
-	volta, _, err := Desconfigurar([]byte(novo))
-	if err != nil || !strings.Contains(string(volta), `spaces.rows = [["workspace"]]`) || strings.Contains(string(volta), "$orq\"") {
-		t.Fatalf("volta =\n%s (%v)", volta, err)
+	// desconfigurar tira só a linha do orq: volta byte a byte, e o "$orq_mrs" do usuário fica.
+	volta, mud, err := Desconfigurar([]byte(novo))
+	if err != nil || string(volta) != texto || len(mud) != 1 {
+		t.Fatalf("mud %v volta =\n%s (%v)", mud, volta, err)
+	}
+}
+
+// Os casos de rows do relatório de revisão r1 (M2) e as variantes de vírgula e de fechamento.
+func TestRowsPreservaTexto(t *testing.T) {
+	cases := []struct{ nome, antes, depois string }{
+		{"comentário e vírgula final (M2)",
+			"[ui.sidebar.agents]\nrows = [\n [\"agent\"], # meu comentário de layout\n [\"$story\", \"$fase\"],\n]\n",
+			"[ui.sidebar.agents]\nrows = [\n [\"agent\"], # meu comentário de layout\n [\"$story\", \"$fase\"],\n [{ token = \"$orq\" }],\n]\n"},
+		{"sem vírgula final",
+			"[ui.sidebar.agents]\nrows = [\n    [\"agent\"],\n    [\"$story\"]  # fim\n]\n",
+			"[ui.sidebar.agents]\nrows = [\n    [\"agent\"],\n    [\"$story\"],  # fim\n    [{ token = \"$orq\" }]\n]\n"},
+		{"fecha na linha do último",
+			"[ui.sidebar.agents]\nrows = [\n  [\"agent\"],\n  [\"$story\"]]\n",
+			"[ui.sidebar.agents]\nrows = [\n  [\"agent\"],\n  [\"$story\"], [{ token = \"$orq\" }]]\n"},
+		{"vazia",
+			"[ui.sidebar.agents]\nrows = []\n",
+			"[ui.sidebar.agents]\nrows = [[{ token = \"$orq\" }]]\n"},
+	}
+	for _, c := range cases {
+		novo, _ := configurar(t, c.antes, Opcoes{})
+		// spaces.rows ausente vira tabela nova no fim; só a parte de agents interessa aqui.
+		agents := novo[:strings.Index(novo, "\n\n[ui.sidebar.spaces]")+1]
+		if agents != c.depois {
+			t.Errorf("%s: configurar =\n%s\nquer\n%s", c.nome, agents, c.depois)
+			continue
+		}
+		volta, _, err := Desconfigurar([]byte(novo))
+		if err != nil || !strings.HasPrefix(string(volta), c.antes) {
+			t.Errorf("%s: desconfigurar =\n%s (%v)", c.nome, volta, err)
+		}
+	}
+}
+
+// Um token do orq que o usuário pôs numa linha dele (ou com estilo) não é do configurar.
+func TestDesconfigurarDeixaTokenDoUsuario(t *testing.T) {
+	texto := "[ui.sidebar.agents]\nrows = [[\"agent\", \"$orq\"], [{ token = \"$orq\", fg = \"#ff0000\" }]]\n" +
+		"[ui.sidebar.spaces]\nrows = [[\"workspace\"], [{ token = \"$orq_mrs\" }]]\n"
+	volta, mud, err := Desconfigurar([]byte(texto))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quer := "[ui.sidebar.agents]\nrows = [[\"agent\", \"$orq\"], [{ token = \"$orq\", fg = \"#ff0000\" }]]\n" +
+		"[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n"
+	if string(volta) != quer || len(mud) != 1 {
+		t.Fatalf("mud %v volta =\n%s", mud, volta)
+	}
+}
+
+// M1 da revisão r1: uma tecla manual para orq.popup-todos, sem a marca "# orq:", fica.
+func TestDesconfigurarDeixaTeclaManual(t *testing.T) {
+	manual := `[[keys.command]]
+key = "prefix+alt+u"
+type = "plugin_action"
+command = "orq.popup-todos"
+description = "Minha Central"
+`
+	texto := configReal + "\n" + manual
+	novo, mud := configurar(t, texto, padrao)
+	// A ação já tem tecla (a manual): só a de abrir-central entra.
+	if len(mud) != 3 || strings.Count(novo, "orq.popup-todos") != 1 {
+		t.Fatalf("mud %v novo =\n%s", mud, novo)
+	}
+	volta, mud, err := Desconfigurar([]byte(novo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(volta) != texto || len(mud) != 3 {
+		t.Fatalf("mud %v volta =\n%s", mud, volta)
+	}
+	s, _ := Ler(volta)
+	if s.Teclas[AcaoPopup] != "prefix+alt+u" || s.LinhaAgentes {
+		t.Fatalf("situação = %+v", s)
 	}
 }
 

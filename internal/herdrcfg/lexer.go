@@ -233,3 +233,153 @@ func fimValor(s string, i int) (int, error) {
 		return j, nil
 	}
 }
+
+// elemento é um item de um array TOML, com posições relativas ao texto do array.
+type elemento struct {
+	ini, fim int // o valor do item
+	virgula  int // posição da vírgula que vem depois dele; -1 sem vírgula
+}
+
+// elementos separa os itens do array em v (que começa em '[' e termina no ']' dele) e devolve
+// também a posição do ']' final.
+func elementos(v string) ([]elemento, int, error) {
+	var es []elemento
+	i := 1
+	for {
+		i = pularBranco(v, i)
+		if i >= len(v) {
+			return nil, 0, fmt.Errorf("array sem fechamento")
+		}
+		if v[i] == ']' {
+			return es, i, nil
+		}
+		ini := i
+		var fim int
+		switch v[i] {
+		case '[', '{', '"', '\'':
+			f, err := fimValor(v, i)
+			if err != nil {
+				return nil, 0, err
+			}
+			fim = f
+		default:
+			fim = i
+			for fim < len(v) && !strings.ContainsRune(",]\n\r#", rune(v[fim])) {
+				fim++
+			}
+			for fim > i && (v[fim-1] == ' ' || v[fim-1] == '\t') {
+				fim--
+			}
+		}
+		e := elemento{ini: ini, fim: fim, virgula: -1}
+		i = pularBranco(v, fim)
+		if i < len(v) && v[i] == ',' {
+			e.virgula = i
+			i++
+		}
+		es = append(es, e)
+	}
+}
+
+// pularBranco anda sobre espaços, quebras de linha e comentários.
+func pularBranco(v string, i int) int {
+	for i < len(v) {
+		switch v[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		case '#':
+			i = fimLinha(v, i)
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// inicioLinha e fimLinhaSem dão os limites da linha de i, sem o \n.
+func inicioLinha(s string, i int) int { return strings.LastIndexByte(s[:i], '\n') + 1 }
+
+func fimLinhaSem(s string, i int) int {
+	if j := strings.IndexByte(s[i:], '\n'); j >= 0 {
+		return i + j
+	}
+	return len(s)
+}
+
+// soBrancoAntes diz se, na linha de i, só há espaço antes de i.
+func soBrancoAntes(s string, i int) bool {
+	return strings.TrimLeft(s[inicioLinha(s, i):i], " \t") == ""
+}
+
+// inserirItem acrescenta item ao fim do array v sem tocar no resto do texto: na mesma linha
+// num array de uma linha; numa linha própria, com a indentação do último item e respeitando a
+// vírgula final, num array de várias linhas.
+func inserirItem(v, item string) (string, error) {
+	es, fecha, err := elementos(v)
+	if err != nil {
+		return "", err
+	}
+	if len(es) == 0 {
+		return v[:fecha] + item + v[fecha:], nil
+	}
+	u := es[len(es)-1]
+	ultimo := u.fim
+	if u.virgula >= 0 {
+		ultimo = u.virgula
+	}
+	if !strings.Contains(v[ultimo:fecha], "\n") {
+		// O ']' está na mesma linha do último item (inclusive o array de uma linha só).
+		if u.virgula >= 0 {
+			return v[:u.virgula+1] + " " + item + v[u.virgula+1:], nil
+		}
+		return v[:u.fim] + ", " + item + v[u.fim:], nil
+	}
+	ini := inicioLinha(v, u.ini)
+	recuo := v[ini:u.ini]
+	if strings.TrimLeft(recuo, " \t") != "" {
+		recuo = "  "
+	}
+	fl := fimLinhaSem(v, ultimo) + 1 // depois do \n da linha do último item
+	if u.virgula >= 0 {
+		return v[:fl] + recuo + item + ",\n" + v[fl:], nil
+	}
+	return v[:u.fim] + "," + v[u.fim:fl] + recuo + item + "\n" + v[fl:], nil
+}
+
+// removerItem tira o item e do array v: a linha inteira quando ele está sozinho nela, senão o
+// item com a vírgula que o separa do anterior (ou do seguinte, se for o primeiro).
+func removerItem(v string, es []elemento, n int) string {
+	e := es[n]
+	fimItem := e.fim
+	if e.virgula >= 0 {
+		fimItem = e.virgula + 1
+	}
+	if soBrancoAntes(v, e.ini) && strings.TrimSpace(stripComentario(v[fimItem:fimLinhaSem(v, fimItem)])) == "" {
+		ini, fim := inicioLinha(v, e.ini), fimLinhaSem(v, fimItem)+1
+		if fim > len(v) {
+			fim = len(v)
+		}
+		out := v[:ini] + v[fim:]
+		// Era o último item, sem vírgula: a vírgula do anterior foi a que o orq pôs.
+		if e.virgula < 0 && n > 0 && es[n-1].virgula >= 0 {
+			c := es[n-1].virgula
+			out = out[:c] + out[c+1:]
+		}
+		return out
+	}
+	if n > 0 && es[n-1].virgula >= 0 {
+		return v[:es[n-1].virgula] + v[e.fim:]
+	}
+	fim := fimItem
+	for fim < len(v) && (v[fim] == ' ' || v[fim] == '\t') {
+		fim++
+	}
+	return v[:e.ini] + v[fim:]
+}
+
+func stripComentario(s string) string {
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}

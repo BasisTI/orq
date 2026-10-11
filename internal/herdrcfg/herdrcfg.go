@@ -152,7 +152,13 @@ func Configurar(texto []byte, o Opcoes) ([]byte, []string, error) {
 			if !ok {
 				return nil, nil, naoSuportado(l.caminho + " está numa forma que o orq não edita (tabela inline?)")
 			}
-			eds = append(eds, edicao{a.valIni, a.valFi, serializar(append(append([]any(nil), rows...), linhaNova))})
+			// A linha entra no texto do valor, antes do ']' final: comentários, quebras e a
+			// forma do usuário ficam.
+			v, err := inserirItem(d.texto[a.valIni:a.valFi], serializar(linhaNova))
+			if err != nil {
+				return nil, nil, naoSuportado(l.caminho + ": " + err.Error())
+			}
+			eds = append(eds, edicao{a.valIni, a.valFi, v})
 		} else {
 			val := "rows = " + serializar(append(append([]any(nil), l.padrao...), linhaNova)) + "\n"
 			if c, ok := acharTabela(d, l.tabela); ok {
@@ -202,7 +208,7 @@ func Configurar(texto []byte, o Opcoes) ([]byte, []string, error) {
 			novo += b
 		}
 	}
-	if err := conferir([]byte(novo), true, o); err != nil {
+	if err := conferir([]byte(novo), o); err != nil {
 		return nil, nil, err
 	}
 	return []byte(novo), mud, nil
@@ -234,28 +240,32 @@ func Desconfigurar(texto []byte) ([]byte, []string, error) {
 		if !ok {
 			return nil, nil, naoSuportado(l.caminho + " está numa forma que o orq não edita (tabela inline?)")
 		}
-		var novas []any
-		for _, r := range rows {
-			rr, ok := r.([]any)
-			if !ok {
-				novas = append(novas, r)
-				continue
+		// Sai só a linha que o configurar acrescenta, [{ token = "..." }], tirada do texto; o
+		// token que o usuário pôs numa linha dele, ou noutra forma, fica.
+		v := d.texto[a.valIni:a.valFi]
+		tirou := false
+		for {
+			es, _, err := elementos(v)
+			if err != nil {
+				return nil, nil, naoSuportado(l.caminho + ": " + err.Error())
 			}
-			var fica []any
-			for _, el := range rr {
-				if !ehToken(el, l.token) {
-					fica = append(fica, el)
+			n := -1
+			for i, e := range es {
+				if linhaDoOrqTexto(v[e.ini:e.fim], l.token) {
+					n = i
+					break
 				}
 			}
-			if len(fica) > 0 {
-				novas = append(novas, fica)
+			if n < 0 {
+				break
 			}
+			v, tirou = removerItem(v, es, n), true
 		}
-		if novas == nil {
-			novas = []any{}
+		if !tirou {
+			continue
 		}
-		cortes = append(cortes, corte{a.valIni, a.valFi, serializar(novas)})
-		mud = append(mud, fmt.Sprintf("%s: - %s", l.caminho, l.token))
+		cortes = append(cortes, corte{a.valIni, a.valFi, v})
+		mud = append(mud, fmt.Sprintf("%s: - [{ token = %q }]", l.caminho, l.token))
 	}
 	// Os blocos [[keys.command]] do arquivo, na ordem, casam com o array decodificado.
 	cmds := comandos(m)
@@ -274,6 +284,7 @@ func Desconfigurar(texto []byte) ([]byte, []string, error) {
 	if temOrq && len(blocos) != len(cmds) {
 		return nil, nil, naoSuportado("keys.command está numa forma que o orq não edita (array inline?)")
 	}
+	manuais := 0
 	for n, ci := range blocos {
 		c, _ := cmds[n]["command"].(string)
 		if !strings.HasPrefix(c, "orq.") {
@@ -285,8 +296,14 @@ func Desconfigurar(texto []byte) ([]byte, []string, error) {
 				fim = a.fim
 			}
 		}
-		ini = recuarComentario(d.texto, ini)
-		cortes = append(cortes, corte{ini, fim, ""})
+		// Só o bloco com a marca "# orq:" logo acima é do configurar; sem ela, a tecla é do
+		// usuário, mesmo apontando uma ação do orq.
+		comMarca := recuarComentario(d.texto, ini)
+		if comMarca == ini {
+			manuais++
+			continue
+		}
+		cortes = append(cortes, corte{comMarca, fim, ""})
 		tecla, _ := cmds[n]["key"].(string)
 		mud = append(mud, fmt.Sprintf("keys.command: - %s → %s", tecla, c))
 	}
@@ -298,10 +315,60 @@ func Desconfigurar(texto []byte) ([]byte, []string, error) {
 	for _, c := range cortes {
 		novo = novo[:c.ini] + c.texto + novo[c.fim:]
 	}
-	if err := conferir([]byte(novo), false, Opcoes{}); err != nil {
+	if err := conferirSem([]byte(novo), manuais); err != nil {
 		return nil, nil, err
 	}
 	return []byte(novo), mud, nil
+}
+
+// linhaDoOrqTexto diz se o texto de um item de rows é a linha que o configurar acrescenta:
+// um array com um único { token = "<token>" }, sem estilo.
+func linhaDoOrqTexto(item, token string) bool {
+	var m map[string]any
+	if toml.Unmarshal([]byte("x = "+item), &m) != nil {
+		return false
+	}
+	return linhaDoOrq(m["x"], token)
+}
+
+func linhaDoOrq(r any, token string) bool {
+	rr, ok := r.([]any)
+	if !ok || len(rr) != 1 {
+		return false
+	}
+	t, ok := rr[0].(map[string]any)
+	if !ok || len(t) != 1 {
+		return false
+	}
+	v, _ := t["token"].(string)
+	return v == token
+}
+
+// conferirSem confere o resultado do desconfigurar: TOML válido, nenhuma linha do orq nas rows
+// e só as teclas orq.* do usuário (sem a marca) restantes.
+func conferirSem(texto []byte, manuais int) error {
+	m, err := decodificar(texto)
+	if err != nil {
+		return naoSuportado("a edição gerou um TOML inválido (" + err.Error() + ")")
+	}
+	for _, l := range linhas {
+		rows, _ := pegar(m, l.caminho).([]any)
+		for _, r := range rows {
+			if linhaDoOrq(r, l.token) {
+				return naoSuportado("a edição não tirou a linha do orq de " + l.caminho)
+			}
+		}
+	}
+	n := 0
+	for _, k := range comandos(m) {
+		if c, _ := k["command"].(string); strings.HasPrefix(c, "orq.") {
+			n++
+		}
+	}
+	if n != manuais {
+		return naoSuportado("a edição não deixou as teclas do orq como devia")
+	}
+	return nil
 }
 
 // recuarComentario inclui no corte as linhas "# orq:" logo acima do bloco e uma linha em branco
@@ -325,22 +392,22 @@ func recuarComentario(s string, ini int) int {
 
 // conferir decodifica o resultado e confere que a edição fez o que devia; o lexer pode errar
 // num arquivo exótico, e um config quebrado não pode ir para o disco.
-func conferir(texto []byte, configurado bool, o Opcoes) error {
+func conferir(texto []byte, o Opcoes) error {
 	m, err := decodificar(texto)
 	if err != nil {
 		return naoSuportado("a edição gerou um TOML inválido (" + err.Error() + ")")
 	}
 	for _, l := range linhas {
 		rows, _ := pegar(m, l.caminho).([]any)
-		if temToken(rows, l.token) != configurado {
+		if !temToken(rows, l.token) {
 			return naoSuportado("a edição não deixou " + l.caminho + " como devia")
 		}
 	}
 	cmds := comandos(m)
 	for _, a := range []string{AcaoPopup, AcaoCentral} {
 		_, tem := acharComando(cmds, a)
-		quer := configurado && ((a == AcaoPopup && o.Tecla != "") || (a == AcaoCentral && o.TeclaCentral != ""))
-		if quer && !tem || !configurado && tem {
+		quer := (a == AcaoPopup && o.Tecla != "") || (a == AcaoCentral && o.TeclaCentral != "")
+		if quer && !tem {
 			return naoSuportado("a edição não deixou a tecla de " + a + " como devia")
 		}
 	}
