@@ -96,6 +96,11 @@ func (f Ferramentas) Caminho(nome string) (string, error) {
 // Rodar chama a ferramenta e devolve o stdout. Saída diferente de zero, binário ausente e tempo
 // esgotado viram *Falha; quem chama refina o código (autenticação, não encontrado).
 func (f Ferramentas) Rodar(ctx context.Context, nome string, args ...string) ([]byte, error) {
+	return f.RodarComEnv(ctx, nil, nome, args...)
+}
+
+// RodarComEnv é Rodar com variáveis a mais (CHAVE=valor) sobre o ambiente do processo.
+func (f Ferramentas) RodarComEnv(ctx context.Context, env []string, nome string, args ...string) ([]byte, error) {
 	bin, err := f.Caminho(nome)
 	if err != nil {
 		return nil, err
@@ -108,6 +113,9 @@ func (f Ferramentas) Rodar(ctx context.Context, nome string, args ...string) ([]
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.WaitDelay = 2 * time.Second
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()

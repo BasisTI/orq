@@ -8,3 +8,6 @@ import "github.com/BasisTI/orq/internal/output"
 func TravarDaemon(string) (func(), error) {
 	return nil, &output.Error{Code: "plataforma", Cause: "orq daemon precisa de flock (Linux)", Exit: output.ExitUnexpected}
 }
+
+// DaemonAtivo é sempre falso sem flock.
+func DaemonAtivo(string) (bool, string, error) { return false, "", nil }

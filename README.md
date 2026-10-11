@@ -4,16 +4,25 @@ Central de US para o orquestrador multiagente: CLI `orq` e plugin do [Herdr](htt
 
 Desenho e entregas: projeto `orq` no Taiga (https://agile.basis.com.br/project/orq).
 
-Esta versão traz o estado da Central num SQLite, os comandos de registro e o daemon que consulta o Herdr, as forjas (GitLab e GitHub) e o Taiga e publica o resumo na sidebar do Herdr. O TUI e o plugin chegam nas próximas entregas.
+Esta versão traz o estado da Central num SQLite, os comandos de registro, o daemon que consulta o Herdr, as forjas (GitLab e GitHub) e o Taiga e publica o resumo na sidebar do Herdr, o TUI (`orq tui`), o workspace Central (`orq central abrir`) e o plugin do Herdr.
 
 ## Instalação
+
+Como plugin do Herdr (sobe o daemon, traz as ações, o popup e o link handler):
+
+```bash
+herdr plugin install BasisTI/orq     # clona, roda scripts/build-plugin.sh (go build) e registra
+orq plugin configurar                # linhas $orq/$orq_mrs da sidebar e as teclas, com backup e herdr config check
+```
+
+O `orq` do segundo comando pode ser o do plugin (`$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id=="orq") | .plugin_root')/bin/orq`) ou um instalado à parte:
 
 ```bash
 go install github.com/BasisTI/orq/cmd/orq@latest
 orq version
 ```
 
-Precisa de Go 1.27 ou mais novo. Não usa cgo.
+Precisa de Go 1.27 ou mais novo, também para o build do plugin. Não usa cgo. O build do plugin não recebe o PATH do plugin: `scripts/build-plugin.sh` procura o `go` no PATH e, depois, em `/usr/local/go/bin`, `~/go/bin`, `~/.local/go/bin`, `~/sdk/go/bin`, `/home/linuxbrew/.linuxbrew/bin`, `/opt/homebrew/bin`, `/usr/lib/go/bin` e `/usr/bin`; `ORQ_GO` aponta outro.
 
 ## Estado
 
@@ -57,12 +66,18 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq diario [--us <ref>] [--onda N] [--coord X] [--limite 50]` | Eventos gravados, do mais antigo ao mais novo (toda escrita gera um). |
 | `orq snapshot [--incluir-encerradas] [--json]` | Estado consolidado em JSON versionado (`--json` é aceito, mas a saída já é sempre JSON); contrato em [`docs/snapshot.md`](docs/snapshot.md). |
 | `orq atualizar [--fonte herdr\|mr\|taiga] [--forcar]` | Consulta as fontes uma vez (todas, sem `--fonte`; repetível ou `mr,taiga`), grava o cache e, com o Herdr entre elas, confere os tokens de sidebar. Cada chave respeita o TTL; `--forcar` ignora o TTL e a suspensão por autenticação. |
-| `orq daemon [--tick 5s] [--intervalo-remoto 15s]` | Mantém o cache e os tokens vivos, em primeiro plano, até SIGTERM/SIGINT. Um por máquina. |
+| `orq daemon [--tick 5s] [--intervalo-remoto 15s] [--detach]` | Mantém o cache e os tokens vivos, em primeiro plano, até SIGTERM/SIGINT. Um por máquina. `--detach` sobe o daemon noutro processo (sessão própria, log em `daemon.log` no diretório de estado) e sai; com um daemon já no ar, só diz o pid dele. |
+| `orq tui [--coord X \| --todos] [--intervalo 2s]` | A Central no terminal (veja "TUI"). |
+| `orq central abrir [--nome Central] [--sem-foco]` | Cria ou reaproveita o workspace Central com um pane `orq tui --coord X` por coordenador com onda aberta. |
+| `orq focar [<pane>\|<url>]` | `herdr agent focus` no pane, dado pelo id ou por `https://orq.local/pane/<id>`; sem argumento, lê `$HERDR_PLUGIN_CLICKED_URL` (a ação `focar-pane`). |
+| `orq plugin configurar [--tecla prefix+u] [--tecla-central prefix+shift+u] [--config <arquivo>]` | Acrescenta ao `config.toml` do Herdr as linhas da sidebar e as teclas do plugin. |
+| `orq plugin desconfigurar [--config <arquivo>]` | Tira do `config.toml` só o que `configurar` acrescentou. |
+| `orq plugin doctor [--config <arquivo>]` | Binários, daemon, plugin registrado, sidebar, teclas e banco. |
 | `orq version` | Versão. |
 
 ### Daemon e enriquecedores
 
-`orq daemon` roda em primeiro plano (o plugin do Herdr o inicia; o log vai para o stderr) e só existe um por diretório de estado: ele segura um `flock` em `daemon.lock`, e o segundo sai com `daemon_ativo` (exit 4) dizendo o pid do primeiro. A cada tick ele lê o Herdr (`herdr api snapshot`) e confere os tokens; MR e Taiga são olhados a cada `--intervalo-remoto`, cada chave com o seu TTL (MR 60 s, Taiga 5 min). Ele também assina `pane.agent_status_changed` dos panes das ondas abertas no socket do Herdr (`$HERDR_SOCKET_PATH`, a sessão de `$HERDR_SESSION` ou `~/.config/herdr/herdr.sock`) e republica na hora; em `events_lost`, reassina e reconcilia com uma leitura completa. Ao sair, limpa os tokens que publicou e que ainda têm o valor dele.
+`orq daemon` roda em primeiro plano (o log vai para o stderr; o plugin do Herdr o inicia com `--detach`, e o log vai para `daemon.log` no diretório de estado) e só existe um por diretório de estado: ele segura um `flock` em `daemon.lock`, e o segundo sai com `daemon_ativo` (exit 4) dizendo o pid do primeiro. A cada tick ele lê o Herdr (`herdr api snapshot`) e confere os tokens; MR e Taiga são olhados a cada `--intervalo-remoto`, cada chave com o seu TTL (MR 60 s, Taiga 5 min). Ele também assina `pane.agent_status_changed` dos panes das ondas abertas no socket do Herdr (`$HERDR_SOCKET_PATH`, a sessão de `$HERDR_SESSION` ou `~/.config/herdr/herdr.sock`) e republica na hora; em `events_lost`, reassina e reconcilia com uma leitura completa. Ao sair, limpa os tokens que publicou e que ainda têm o valor dele.
 
 Só leituras nas forjas e no Taiga. Falha de uma consulta (binário ausente, autenticação, rede) fica no cache com o código e o snapshot mostra o último valor bom com o `erro`; nenhuma derruba o processo. Erro de autenticação (na taiga-cli, o exit 3) suspende a ferramenta por 30 min: o orq não tenta login nem define token. `--forcar` passa por cima de uma suspensão anterior, mas uma recusa na própria execução interrompe as chamadas seguintes da ferramenta.
 
@@ -76,6 +91,68 @@ Tokens de sidebar (`herdr pane|workspace report-metadata --source orq`), conferi
 Os nomes `orq` e `orq_mrs` são do orq; `mrs_prontas`, `story` e `fase` são da publicação manual da skill do orquestrador (`--source orquestrador`), que convive com o daemon até ser aposentada. O plugin configura as linhas da sidebar com os nomes do orq.
 
 Só pane e workspace que existem recebem token. No Herdr o token é por nome, não por fonte, então a propriedade vem do próprio orq: ele registra um token só depois de publicá-lo com sucesso, e o token continua sendo dele enquanto o Herdr mostrar o último valor que ele publicou. Um token ausente é (re)publicado. Um valor de outro produtor no mesmo nome não é adotado, sobrescrito nem limpo; vira aviso (`avisos` em `orq atualizar`, uma linha no log do daemon). O que deixou de valer só é limpo (`--clear-token`) se ainda tem o valor do orq; na saída, o daemon relê o Herdr antes de limpar.
+
+### TUI
+
+`orq tui` desenha a Central a partir do mesmo snapshot de `orq snapshot`, relido a cada `--intervalo` (2 s); quem consulta as fontes é o daemon, o TUI só lê o cache. Com `--coord X`, as ondas abertas de um coordenador (é o que roda nos panes do workspace Central); com `--todos`, um bloco por coordenador com o total de pendências abertas (o popup do plugin); sem nenhum dos dois, o coordenador corrente ou, sem ele, todos.
+
+```
+convey · sgo-cli — Comandos api e jql  [até: MR pronta]  1/4 done · 1 pend
+⚠ #313 sgo api: chamada REST                     Exec r1 ↗
+       !33 draft
+       !412 [IaC] aberta
+● #312 sgo jql: consulta avulsa por JQL…         Rev r2 ↗   !32
+– #314 Menores da TG-312                         Wait
+✓ #225 Criação Suporte/OS                        Done ↗
+       !29 mesclada
+       !31 fechada
+Pendências
+ TG-313#P1 autorização  instalar binário e aplicar config pessoal  (há 12 min) ↗
+ herdr agora · mr há 1 min · taiga há 2 min ✗ autenticacao   ↑↓ Enter foca · r relê · q sai
+```
+
+- 1ª coluna: o status Herdr do pane da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu. A US com o pane `blocked` sobe para o topo e fica em negrito.
+- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura.
+- Status e rodada (`Exec r1 ↗`) são link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`). No popup, focar fecha o popup.
+- MRs: uma inline quando a US tem uma, uma por linha quando tem mais, com link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
+- Pendências abertas embaixo; o `↗` foca o pane que perguntou.
+- Erro de fonte não esconde o valor: a tela mostra o último valor bom, um `*` apagado marca o título ou a MR cuja consulta mais recente falhou, e o rodapé dá a idade de cada fonte e o código do erro.
+- Nada que a leitura do banco ou o foco façam derruba a tela: o erro vai para a linha de status (ex. `foco em wB:p3 falhou: binario_ausente: …`) e o TUI segue.
+
+### Workspace Central
+
+`orq central abrir` acha o workspace pelo rótulo (`--nome`, padrão `$ORQ_CENTRAL_NOME` ou `Central`), cria se não existe e deixa nele um pane rodando `orq tui --coord X` (pelo caminho absoluto do `orq` que rodou o comando, com `ORQ_STATE_DIR` e os binários dele) para cada coordenador com onda aberta. É idempotente: os panes são reconhecidos pelo rótulo `orq · <coordenador>` e conferidos com `herdr pane process-info`. Com o `orq tui --coord X` rodando, o pane fica (`mantido`); de volta ao shell, porque o TUI saiu com `q`, caiu ou nunca subiu, o TUI é lançado de novo no mesmo pane (`relancado`); com outro processo em primeiro plano, o orq não manda nada para ele (`ocupado`, com o processo no `detalhe`). O que falta é criado (dividindo o último pane do orq), e depois de cada lançamento o comando espera até 5 s o TUI aparecer; se não aparece, o `detalhe` da ação diz. O pane de um coordenador sem onda aberta é fechado, se estiver no TUI ou no shell, porque não teria o que mostrar (a próxima chamada o recria quando houver onda). Panes sem esse rótulo não são tocados. Sem coordenador com onda aberta, o workspace não é criado. Sem `--sem-foco`, foca o workspace no fim.
+
+### Plugin do Herdr
+
+O manifesto é o `herdr-plugin.toml` da raiz (id `orq`, Linux, Herdr 0.9.3+):
+
+| Entrada | O que faz |
+|---|---|
+| `[[build]]` | `scripts/build-plugin.sh`: `go build` para `bin/orq`, com a versão do `git describe`. |
+| `[[startup]]` | `orq daemon --detach` no início do servidor do Herdr (não no `plugin link` nem no `enable`). O `flock` de `daemon.lock` impede um segundo daemon. |
+| ação `abrir-central` | `orq central abrir`. |
+| ação `popup-todos` | abre o pane `todos` (popup de 85% × 80% com `orq tui --todos`). |
+| ação `focar-pane` | `orq focar`, que lê `$HERDR_PLUGIN_CLICKED_URL`. |
+| link handler `pane` | `^https://orq\.local/pane/` → `focar-pane`: o Ctrl+clique no status ou no `↗` foca o pane. |
+
+Não há `[[events]]`: o daemon já assina `pane.agent_status_changed` no socket e republica na hora; um hook de evento abriria um processo por mudança de status de qualquer pane da máquina sem acrescentar nada.
+
+As ações, o startup e os panes do plugin rodam com o ambiente do servidor do Herdr, não com o do seu shell. Para apontar outro estado ou outros binários para eles, ponha `ORQ_*` em `orq.env`, no diretório de `herdr plugin config-dir orq` (linhas `CHAVE=valor`; só chaves `ORQ_`; o ambiente do processo vale mais que o arquivo):
+
+```bash
+cat > "$(herdr plugin config-dir orq)/orq.env" <<'X'
+ORQ_STATE_DIR=/caminho/do/estado
+ORQ_CENTRAL_NOME=Central
+X
+```
+
+`orq plugin configurar` acrescenta ao `config.toml` (`--config`, padrão `$HERDR_CONFIG_PATH`, `$XDG_CONFIG_HOME/herdr/config.toml` ou `~/.config/herdr/config.toml`):
+
+- `[{ token = "$orq" }]` em `[ui.sidebar.agents] rows` e `[{ token = "$orq_mrs" }]` em `[ui.sidebar.spaces] rows` (sem `rows` no arquivo, as linhas padrão do Herdr mais a do orq);
+- `prefix+u` → `orq.popup-todos` e `prefix+shift+u` → `orq.abrir-central` (`--tecla`, `--tecla-central`; `""` não cria a tecla; tecla já usada é `tecla_ocupada`).
+
+Os tokens `mrs_prontas`, `story` e `fase` da skill manual não são tocados. Antes de escrever, o `herdr config check` tem de aprovar o arquivo atual (o orq não mexe num config que já reprova), e o arquivo é copiado para `config.toml.orq-AAAAMMDD-HHMMSS.bak`; depois, o check roda de novo e, se reprovar, o arquivo anterior volta (`config_check_falhou`). Sem mudança a fazer, nada é escrito. O editor mexe no texto: a linha do orq entra antes do `]` final de `rows` (numa linha própria, com a indentação e a vírgula final do arquivo, quando `rows` ocupa várias linhas), e comentários e formatação ficam como estão. `orq plugin desconfigurar` tira só o que o `configurar` põe: a linha `[{ token = "$orq" }]` (e a do `$orq_mrs`), do mesmo jeito, pelo texto, e os `[[keys.command]]` com o comentário `# orq:` logo acima. Um token do orq que você pôs numa linha sua, ou com estilo, e uma tecla sua para uma ação `orq.*` (sem a marca) ficam. As `rows` que o `configurar` criou do zero ficam, com os valores padrão. `[ui.sidebar.agents.rows_by_agent]` substitui `rows` para o agente: o `doctor` avisa quando ele esconde o `$orq`.
 
 ### Ondas e a próxima US
 

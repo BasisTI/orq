@@ -3,6 +3,8 @@ package central
 import (
 	"context"
 	"database/sql"
+	"strconv"
+	"strings"
 
 	"github.com/BasisTI/orq/internal/refs"
 )
@@ -18,6 +20,15 @@ type MR struct {
 	AdicionadaEm string  `json:"adicionada_em"`
 	AtualizadoEm *string `json:"atualizado_em"` // última consulta bem-sucedida à forja
 	Erro         *Erro   `json:"erro"`          // última consulta, se falhou
+}
+
+// RefCurta é a referência curta da MR: `!32` no GitLab e `repo#29` no GitHub.
+func (m MR) RefCurta() string {
+	if strings.Contains(m.URL, "/-/merge_requests/") {
+		return "!" + strconv.Itoa(m.IID)
+	}
+	repo := m.ProjetoPath[strings.LastIndex(m.ProjetoPath, "/")+1:]
+	return repo + "#" + strconv.Itoa(m.IID)
 }
 
 // colunasMR lê a MR com o cache dela; scanMR casa com a ordem.

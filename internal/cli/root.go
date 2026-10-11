@@ -64,13 +64,13 @@ func (a *App) root() *cobra.Command {
 			})
 		},
 	})
-	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd(), a.atualizarCmd(), a.daemonCmd())
+	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd(), a.atualizarCmd(), a.daemonCmd(), a.tuiCmd(), a.focarCmd(), a.centralCmd(), a.pluginCmd())
 	return root
 }
 
 // Main roda a CLI e devolve o código de saída.
 func Main(args []string, in io.Reader, out, errOut io.Writer, env func(string) string, outTTY bool) int {
-	a := &App{In: in, Out: out, Err: errOut, Env: env, OutTTY: outTTY}
+	a := &App{In: in, Out: out, Err: errOut, Env: comAmbientePlugin(env), OutTTY: outTTY}
 	return a.Run(args)
 }
 
