@@ -79,7 +79,7 @@ func TestOpenReabreSemRemigrar(t *testing.T) {
 		}
 		var v int
 		var modo string
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 2 {
 			t.Fatalf("user_version = %d, %v", v, err)
 		}
 		if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&modo); err != nil || modo != "wal" {
@@ -604,10 +604,14 @@ func TestSnapshot(t *testing.T) {
 		v    any
 		want string
 	}{
-		{"raiz", m, "coordenadores,gerado_em,pendencias_abertas,versao"},
-		{"coordenador", coordJ, "nome,ondas,pane_id,projeto_padrao,registrado_em,workspace_id"},
+		{"raiz", m, "coordenadores,fontes,gerado_em,pendencias_abertas,versao"},
+		{"fontes", m["fontes"], "herdr,mr,taiga"},
+		{"fonte", m["fontes"].(map[string]any)["mr"], "atualizado_em,consultado_em,erro"},
+		{"coordenador", coordJ, "herdr,nome,ondas,pane_id,projeto_padrao,registrado_em,workspace_id"},
+		{"herdr", coordJ["herdr"], "agente,atualizado_em,erro,nome,status,workspace_id"},
 		{"onda", ondaJ, "autorizacao_ate,coordenador,criada_em,encerrada_em,id,ordem,titulo,us"},
-		{"us", usJ, "atualizado_em,chave,depende_de,id,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status"},
+		{"us", usJ, "atualizado_em,chave,depende_de,herdr,id,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status,taiga"},
+		{"taiga", usJ["taiga"], "atualizado_em,erro,status,titulo,url"},
 		{"pendencia", pendJ, "aberta,aberta_em,coordenador,id,numero,onda_id,pane_origem,resolvida_em,resposta,texto,tipo,us"},
 	}
 	for _, c := range contrato {
@@ -620,7 +624,7 @@ func TestSnapshot(t *testing.T) {
 	mb, _ := json.Marshal(comMR.Coordenadores[0].Ondas[0].US[0].MRs[0])
 	var mm map[string]any
 	_ = json.Unmarshal(mb, &mm)
-	if got := strings.Join(chaves(mm), ","); got != "adicionada_em,estado,iac,iid,projeto_path,url" {
+	if got := strings.Join(chaves(mm), ","); got != "adicionada_em,atualizado_em,erro,estado,iac,iid,projeto_path,url" {
 		t.Errorf("chaves de mr = %s", got)
 	}
 	todas, _ := s.Snapshot(ctx, true)

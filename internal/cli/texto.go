@@ -48,7 +48,11 @@ func textoOnda(w io.Writer, o central.Onda) error {
 			return err
 		}
 		for _, m := range u.MRs {
-			if _, err := fmt.Fprintf(w, "       MR %s%s\n", m.URL, iacTexto(m.IaC)); err != nil {
+			estado := ""
+			if m.Estado != nil {
+				estado = " [" + q(*m.Estado) + "]"
+			}
+			if _, err := fmt.Fprintf(w, "       MR %s%s%s\n", m.URL, estado, iacTexto(m.IaC)); err != nil {
 				return err
 			}
 		}
@@ -71,6 +75,12 @@ func linhaStatus(u central.US) string {
 	}
 	if u.PaneID != nil {
 		s += " pane " + q(*u.PaneID)
+		if u.Herdr != nil && u.Herdr.Status != nil {
+			s += " (" + q(*u.Herdr.Status) + ")"
+		}
+	}
+	if u.Taiga.Status != nil {
+		s += "  taiga " + q(*u.Taiga.Status)
 	}
 	return s
 }

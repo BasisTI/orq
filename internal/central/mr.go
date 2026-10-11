@@ -7,8 +7,8 @@ import (
 	"github.com/BasisTI/orq/internal/refs"
 )
 
-// MR é uma merge request (ou pull request) ligada a uma US. Estado fica nulo até os
-// enriquecedores da US #4 consultarem a forja.
+// MR é uma merge request (ou pull request) ligada a uma US. Estado fica nulo até o enriquecedor
+// consultar a forja e, depois, guarda o último estado bom.
 type MR struct {
 	URL          string  `json:"url"`
 	ProjetoPath  string  `json:"projeto_path"`
@@ -16,6 +16,20 @@ type MR struct {
 	IaC          bool    `json:"iac"`
 	Estado       *string `json:"estado"`
 	AdicionadaEm string  `json:"adicionada_em"`
+	AtualizadoEm *string `json:"atualizado_em"` // última consulta bem-sucedida à forja
+	Erro         *Erro   `json:"erro"`          // última consulta, se falhou
+}
+
+// colunasMR lê a MR com o cache dela; scanMR casa com a ordem.
+const colunasMR = `SELECT mr.url, mr.projeto_path, mr.iid, mr.iac, mr.estado, mr.adicionada_em, c.valor_em, c.erro_codigo, c.erro_mensagem, c.erro_em
+	FROM mr LEFT JOIN cache c ON c.fonte = 'mr' AND c.chave = mr.url `
+
+func scanMR(r scanner) (MR, error) {
+	var m MR
+	var codigo, mensagem, em *string
+	err := r.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm, &m.AtualizadoEm, &codigo, &mensagem, &em)
+	m.Erro = erroDe(codigo, mensagem, em)
+	return m, err
 }
 
 // AdicionarMR liga a MR à US. A mesma URL de novo não muda nada (Criada = false, sem evento).
@@ -48,8 +62,9 @@ func (s *Store) AdicionarMR(ctx context.Context, coord *Coordenador, ref refs.US
 	}
 	var out MR
 	err = s.ler(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT url, projeto_path, iid, iac, estado, adicionada_em FROM mr WHERE projeto = ? AND ref = ? AND url = ?`, alvo.Projeto, alvo.Ref, m.URL).
-			Scan(&out.URL, &out.ProjetoPath, &out.IID, &out.IaC, &out.Estado, &out.AdicionadaEm)
+		var err error
+		out, err = scanMR(tx.QueryRowContext(ctx, colunasMR+`WHERE mr.projeto = ? AND mr.ref = ? AND mr.url = ?`, alvo.Projeto, alvo.Ref, m.URL))
+		return err
 	})
 	return out, criada, err
 }
@@ -66,8 +81,7 @@ func (s *Store) RemoverMR(ctx context.Context, coord *Coordenador, ref refs.US, 
 		if err != nil {
 			return err
 		}
-		err = tx.QueryRowContext(ctx, `SELECT url, projeto_path, iid, iac, estado, adicionada_em FROM mr WHERE projeto = ? AND ref = ? AND url = ?`, alvo.Projeto, alvo.Ref, m.URL).
-			Scan(&out.URL, &out.ProjetoPath, &out.IID, &out.IaC, &out.Estado, &out.AdicionadaEm)
+		out, err = scanMR(tx.QueryRowContext(ctx, colunasMR+`WHERE mr.projeto = ? AND mr.ref = ? AND mr.url = ?`, alvo.Projeto, alvo.Ref, m.URL))
 		if semLinha(err) {
 			return naoEncontrado(m.URL+" não está ligada a "+alvo.Chave(), "veja as MRs com orq onda ver")
 		}
@@ -83,15 +97,15 @@ func (s *Store) RemoverMR(ctx context.Context, coord *Coordenador, ref refs.US, 
 }
 
 func carregarMRs(ctx context.Context, q querier, projeto string, ref int) ([]MR, error) {
-	rows, err := q.QueryContext(ctx, `SELECT url, projeto_path, iid, iac, estado, adicionada_em FROM mr WHERE projeto = ? AND ref = ? ORDER BY id`, projeto, ref)
+	rows, err := q.QueryContext(ctx, colunasMR+`WHERE mr.projeto = ? AND mr.ref = ? ORDER BY mr.id`, projeto, ref)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	ms := []MR{}
 	for rows.Next() {
-		var m MR
-		if err := rows.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm); err != nil {
+		m, err := scanMR(rows)
+		if err != nil {
 			return nil, err
 		}
 		ms = append(ms, m)
