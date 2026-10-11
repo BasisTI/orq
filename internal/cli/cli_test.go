@@ -18,6 +18,10 @@ func TestMain(m *testing.M) {
 	if os.Getenv("ORQ_TEST_HELPER") == "1" {
 		os.Exit(processoAuxiliar())
 	}
+	// Com ORQ_TEST_MAIN, o binário de teste é o orq (o filho de orq daemon --detach).
+	if os.Getenv("ORQ_TEST_MAIN") == "1" {
+		os.Exit(Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, false))
+	}
 	os.Exit(m.Run())
 }
 

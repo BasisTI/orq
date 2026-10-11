@@ -86,19 +86,11 @@ func RefsProntas(c central.CoordSnapshot) []string {
 				if m.Estado == nil || *m.Estado != "pronta" {
 					continue
 				}
-				rs = append(rs, refCurta(m))
+				rs = append(rs, m.RefCurta())
 			}
 		}
 	}
 	return rs
-}
-
-func refCurta(m central.MR) string {
-	if strings.Contains(m.URL, "/-/merge_requests/") {
-		return "!" + strconv.Itoa(m.IID)
-	}
-	repo := m.ProjetoPath[strings.LastIndex(m.ProjetoPath, "/")+1:]
-	return repo + "#" + strconv.Itoa(m.IID)
 }
 
 // JuntarRefs junta as refs sem repetir, cabendo em 80 caracteres: o que não cabe vira `+N`.

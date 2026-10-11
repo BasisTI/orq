@@ -1,0 +1,49 @@
+# Plugin do Herdr da Central de US (orq). Instalação: herdr plugin install BasisTI/orq.
+# Precisa de Go 1.27+ para o build (scripts/build-plugin.sh procura o go fora do PATH também).
+# As ações, o startup e os panes leem ORQ_* de orq.env em `herdr plugin config-dir orq`.
+id = "orq"
+name = "orq — Central de US"
+version = "0.3.0"
+min_herdr_version = "0.9.3"
+description = "Central de US do orquestrador: ondas, US, MRs e pendências por coordenador, com o daemon que publica o resumo na sidebar"
+platforms = ["linux"]
+
+[[build]]
+command = ["/bin/sh", "scripts/build-plugin.sh"]
+
+# Sobe o orq daemon desacoplado; se ele já roda (daemon.lock), sai sem subir outro.
+[[startup]]
+command = ["/bin/sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/orq\" daemon --detach --output json"]
+
+[[actions]]
+id = "abrir-central"
+title = "orq: abrir o workspace Central"
+contexts = ["global", "workspace", "pane"]
+command = ["/bin/sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/orq\" central abrir --output json"]
+
+[[actions]]
+id = "popup-todos"
+title = "orq: Central de todos os coordenadores"
+contexts = ["global", "workspace", "pane"]
+command = ["/bin/sh", "-c", "exec \"$HERDR_BIN_PATH\" plugin pane open --plugin orq --entrypoint todos"]
+
+# O link handler chama esta ação com $HERDR_PLUGIN_CLICKED_URL (https://orq.local/pane/<id>).
+[[actions]]
+id = "focar-pane"
+title = "orq: focar o pane do link"
+contexts = ["global", "workspace", "pane"]
+command = ["/bin/sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/orq\" focar --output json"]
+
+[[panes]]
+id = "todos"
+title = "orq — Central"
+placement = "popup"
+width = "85%"
+height = "80%"
+command = ["/bin/sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/orq\" tui --todos"]
+
+[[link_handlers]]
+id = "pane"
+title = "Focar o pane (orq)"
+pattern = "^https://orq\\.local/pane/"
+action = "focar-pane"

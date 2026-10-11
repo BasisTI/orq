@@ -45,3 +45,26 @@ func TravarDaemon(dir string) (func(), error) {
 		_ = f.Close()
 	}, nil
 }
+
+// DaemonAtivo diz se algum processo segura a trava do daemon em dir e, se sim, o pid gravado
+// nela. Testa a trava sem esperar e a solta na hora.
+func DaemonAtivo(dir string) (ativo bool, pid string, err error) {
+	path := filepath.Join(dir, ArquivoTravaDaemon)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, "", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, "", err
+		}
+		b, _ := os.ReadFile(path)
+		return true, strings.TrimSpace(string(b)), nil
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false, "", nil
+}
