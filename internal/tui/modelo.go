@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/BasisTI/orq/internal/central"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -120,27 +120,28 @@ func (m *Modelo) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sair = true
 			return m, tea.Quit
 		}
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.tecla(msg)
-	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
 			i := m.topo + msg.Y
 			if msg.Y < m.visiveis() && i < len(m.tela.Linhas) && m.tela.Linhas[i].Pane != "" {
 				m.sel = i
 				return m, m.focar(m.tela.Linhas[i].Pane)
 			}
 		}
-		if msg.Button == tea.MouseButtonWheelUp {
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
 			m.rolar(-3)
-		}
-		if msg.Button == tea.MouseButtonWheelDown {
+		case tea.MouseWheelDown:
 			m.rolar(3)
 		}
 	}
 	return m, nil
 }
 
-func (m *Modelo) tecla(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Modelo) tecla(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "q", "ctrl+c", "esc":
 		m.sair = true
@@ -152,7 +153,7 @@ func (m *Modelo) tecla(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mover(1)
 	case "up", "k":
 		m.mover(-1)
-	case "pgdown", " ":
+	case "pgdown", "space":
 		m.rolar(m.visiveis())
 	case "pgup":
 		m.rolar(-m.visiveis())
@@ -220,8 +221,16 @@ func (m *Modelo) redesenhar() {
 	m.rolar(0)
 }
 
-// View desenha as linhas visíveis e a linha de status.
-func (m *Modelo) View() string {
+// View desenha as linhas visíveis e a linha de status, em tela alternativa e com o mouse.
+func (m *Modelo) View() tea.View {
+	v := tea.NewView(m.conteudo())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.WindowTitle = "orq — Central"
+	return v
+}
+
+func (m *Modelo) conteudo() string {
 	if m.sair {
 		return ""
 	}

@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/BasisTI/orq/internal/central"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 var agora = time.Date(2026, 10, 11, 14, 30, 0, 0, time.UTC)
@@ -88,7 +87,7 @@ func snapshot() central.Snapshot {
 	}
 }
 
-var cores = NovosEstilos(termenv.TrueColor)
+var cores = Estilos{}
 
 func desenhar(o Opcoes) Tela {
 	if o.Agora.IsZero() {
@@ -111,12 +110,12 @@ func TestTelaDoCoordenador(t *testing.T) {
 	quer := []string{
 		"convey · sgo-cli — Comandos api e jql  [até: MR pronta]  1/4 done · 1 pend",
 		// A US blocked sobe para o topo; o resto segue a ordem da onda.
-		"⚠ #313 sgo api: chamada REST                                                          Exec r1 ↗",
+		"⚠ #313 sgo api: chamada REST                                                Exec r1 ↗",
 		"       !33 draft",
 		"       !412 [IaC] aberta",
-		"● #312 sgo jql: consulta avulsa por JQL com paginação e campos escolhidos             Rev r2 ↗   !32",
-		"– #314 Menores da TG-312                                                              Wait",
-		"✓ #225 Criação Suporte/OS                                                             Done ↗",
+		"● #312 sgo jql: consulta avulsa por JQL com paginação e campos escolhidos   Rev r2 ↗   !32",
+		"– #314 Menores da TG-312                                                    Wait",
+		"✓ #225 Criação Suporte/OS                                                   Done ↗",
 		"       !29 mesclada",
 		"       !31 fechada",
 		"Pendências",
@@ -143,6 +142,14 @@ func TestTelaDoCoordenador(t *testing.T) {
 		if tela.Linhas[i].Pane != a {
 			t.Errorf("alvo da linha %d = %q, quer %q", i, tela.Linhas[i].Pane, a)
 		}
+	}
+}
+
+// Num pane largo, a coluna do título não passa do título mais longo: o status fica perto.
+func TestPaneLargo(t *testing.T) {
+	ls := planas(desenhar(Opcoes{Coord: "convey", Largura: 300}))
+	if strings.TrimRight(ls[4], " ") != "● #312 sgo jql: consulta avulsa por JQL com paginação e campos escolhidos   Rev r2 ↗   !32" {
+		t.Fatalf("%q", ls[4])
 	}
 }
 
@@ -174,7 +181,7 @@ func TestEstilosEOSC8(t *testing.T) {
 	for _, l := range tela.Linhas {
 		tudo += l.Texto + "\n"
 	}
-	vermelho, verde, cinza, laranja := "38;2;224;108;117", "38;2;152;195;121", "38;2;127;131;142", "38;2;255;140;0"
+	vermelho, verde, cinza, laranja := "38;2;224;108;117", "38;2;152;195;121", "38;2;127;132;142", "38;2;255;140;0"
 	casos := []struct{ nome, quer string }{
 		{"draft vermelho com link", "\x1b]8;;https://gitlab.basis.com.br/basis/sgo-cli/-/merge_requests/33\x1b\\\x1b[" + vermelho + "m!33"},
 		{"pronta verde", "\x1b[" + verde + "m!32"},
@@ -278,25 +285,25 @@ func TestModeloSobreviveAFalhas(t *testing.T) {
 	m := Novo(context.Background(), cfg)
 	m.Update(tea.WindowSizeMsg{Width: 101, Height: 30})
 	m.Update(m.carregar())
-	if !strings.Contains(ansi.Strip(m.View()), "leitura falhou: banco ocupado") {
-		t.Fatalf("sem erro de leitura:\n%s", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(m.View().Content), "leitura falhou: banco ocupado") {
+		t.Fatalf("sem erro de leitura:\n%s", ansi.Strip(m.View().Content))
 	}
 	falhar = false
 	m.Update(m.carregar())
-	if strings.Contains(m.View(), "leitura falhou") || !strings.Contains(ansi.Strip(m.View()), "#313") {
-		t.Fatalf("não recuperou:\n%s", ansi.Strip(m.View()))
+	if strings.Contains(m.View().Content, "leitura falhou") || !strings.Contains(ansi.Strip(m.View().Content), "#313") {
+		t.Fatalf("não recuperou:\n%s", ansi.Strip(m.View().Content))
 	}
 	// Uma leitura que falha depois mantém a última tela boa.
 	falhar = true
 	m.Update(m.carregar())
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.View().Content)
 	if !strings.Contains(v, "#313") || !strings.Contains(v, "leitura falhou") {
 		t.Fatalf("perdeu a tela boa:\n%s", v)
 	}
 	// ↓ seleciona a primeira linha com pane (o cabeçalho), ↓ de novo a US blocked; Enter foca.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("Enter sem foco")
 	}
@@ -304,23 +311,23 @@ func TestModeloSobreviveAFalhas(t *testing.T) {
 	if q != nil || len(focos) != 1 || focos[0] != "wB:p4" {
 		t.Fatalf("focos = %v", focos)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "foco em wB:p4 falhou: binario_ausente") {
-		t.Fatalf("erro do foco não aparece:\n%s", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(m.View().Content), "foco em wB:p4 falhou: binario_ausente") {
+		t.Fatalf("erro do foco não aparece:\n%s", ansi.Strip(m.View().Content))
 	}
-	if !strings.HasPrefix(ansi.Strip(strings.Split(m.View(), "\n")[1]), "›⚠ #313") {
-		t.Fatalf("seleção: %q", ansi.Strip(strings.Split(m.View(), "\n")[1]))
+	if !strings.HasPrefix(ansi.Strip(strings.Split(m.View().Content, "\n")[1]), "›⚠ #313") {
+		t.Fatalf("seleção: %q", ansi.Strip(strings.Split(m.View().Content, "\n")[1]))
 	}
 	// Clique na linha da #312 (a 5ª: cabeçalho, #313 e duas MRs antes): pânico vira erro.
-	_, cmd = m.Update(tea.MouseMsg{X: 3, Y: 4, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	_, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: 4, Button: tea.MouseLeft})
 	if cmd == nil {
 		t.Fatal("clique sem foco")
 	}
 	m.Update(cmd())
-	if !strings.Contains(ansi.Strip(m.View()), "foco em wB:p3 falhou: pânico: herdr sumiu") {
-		t.Fatalf("pânico não virou erro:\n%s", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(m.View().Content), "foco em wB:p3 falhou: pânico: herdr sumiu") {
+		t.Fatalf("pânico não virou erro:\n%s", ansi.Strip(m.View().Content))
 	}
 	// Clique em linha sem pane não faz nada.
-	if _, cmd = m.Update(tea.MouseMsg{X: 3, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}); cmd != nil {
+	if _, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: 5, Button: tea.MouseLeft}); cmd != nil {
 		t.Fatal("clique na #314 (sem pane) focou")
 	}
 }
@@ -353,8 +360,8 @@ func TestSelecaoSegueOPane(t *testing.T) {
 	})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.Update(m.carregar())
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyDown}) // #312
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // #312
 	if m.tela.Linhas[m.sel].Pane != "wB:p3" {
 		t.Fatalf("seleção em %q", m.tela.Linhas[m.sel].Pane)
 	}

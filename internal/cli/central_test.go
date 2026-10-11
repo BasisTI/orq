@@ -193,6 +193,12 @@ func TestFocarPelaURLDoLink(t *testing.T) {
 		t.Fatalf("URL alheia: %d %s", r.code, r.err)
 	}
 	delete(env, "HERDR_PLUGIN_CLICKED_URL")
+	env["HERDR_PLUGIN_CONTEXT_JSON"] = `{"invocation_source":"link_click","clicked_url":"https://orq.local/pane/wC:p2","link_handler_id":"pane"}`
+	ok(t, env, "focar")
+	if log := chamadas(t, dir); log[len(log)-1] != "agent|focus|wC:p2|" {
+		t.Fatalf("contexto: %q", log)
+	}
+	delete(env, "HERDR_PLUGIN_CONTEXT_JSON")
 	if r := rodar(t, env, "focar"); r.code != 2 {
 		t.Fatalf("sem alvo: %d %s", r.code, r.err)
 	}

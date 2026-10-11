@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -102,6 +103,10 @@ func herdrJSON(ctx context.Context, f enriquecer.Ferramentas, v any, args ...str
 	out, err := f.Rodar(ctx, "herdr", args...)
 	if err != nil {
 		return herdrErro(args, err)
+	}
+	// Alguns comandos (pane run) não imprimem nada quando dão certo.
+	if v == nil && len(bytes.TrimSpace(out)) == 0 {
+		return nil
 	}
 	var r struct {
 		Result json.RawMessage `json:"result"`

@@ -2,17 +2,18 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/tui"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -57,9 +58,8 @@ https://orq.local/pane/<id>, que o link handler do plugin transforma em foco.`,
 				Opcoes:      o,
 				Intervalo:   intervalo,
 				SairAoFocar: todos,
-				Estilos:     tui.EstilosDoTerminal(),
 			})
-			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.In), tea.WithOutput(a.Out), tea.WithContext(ctx))
+			p := tea.NewProgram(m, tea.WithInput(a.In), tea.WithOutput(a.Out), tea.WithContext(ctx))
 			_, err = p.Run()
 			if err != nil && ctx.Err() == nil {
 				return &output.Error{Code: "tui_falhou", Cause: err.Error(), Recovery: "rode num terminal (o TUI precisa de um tty); o estado continua em `orq snapshot`", Exit: output.ExitUnexpected}
@@ -104,16 +104,24 @@ func (a *App) focarCmd() *cobra.Command {
 		Use:   "focar [<pane>|<url>]",
 		Short: "Foca o pane de um agente (herdr agent focus); a ação focar-pane do plugin",
 		Long: `Foca o pane com herdr agent focus. Aceita o id do pane ou a URL https://orq.local/pane/<id>;
-sem argumento, lê $HERDR_PLUGIN_CLICKED_URL, que o Herdr preenche quando o link handler do
-plugin chama a ação focar-pane.`,
+sem argumento, lê $HERDR_PLUGIN_CLICKED_URL (ou o clicked_url de $HERDR_PLUGIN_CONTEXT_JSON),
+que o Herdr preenche quando o link handler do plugin chama a ação focar-pane.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alvo := a.Env("HERDR_PLUGIN_CLICKED_URL")
+			if alvo == "" {
+				var ctx struct {
+					ClickedURL string `json:"clicked_url"`
+				}
+				if json.Unmarshal([]byte(a.Env("HERDR_PLUGIN_CONTEXT_JSON")), &ctx) == nil {
+					alvo = ctx.ClickedURL
+				}
+			}
 			if len(args) == 1 {
 				alvo = args[0]
 			}
 			if alvo == "" {
-				return usoErr("diga o pane (ou a URL https://orq.local/pane/<id>); sem argumento, o orq lê $HERDR_PLUGIN_CLICKED_URL, que está vazio")
+				return usoErr("diga o pane (ou a URL https://orq.local/pane/<id>); sem argumento, o orq lê $HERDR_PLUGIN_CLICKED_URL ou o clicked_url de $HERDR_PLUGIN_CONTEXT_JSON, e os dois estão vazios")
 			}
 			pane := alvo
 			if strings.Contains(alvo, "://") {

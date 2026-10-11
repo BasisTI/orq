@@ -11,11 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/output"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 // URLPane é o prefixo dos links que focam um pane: o link handler do plugin casa
@@ -42,22 +41,9 @@ type Tela struct {
 	Rodape string
 }
 
-// Estilos guarda o renderer: os testes fixam o perfil de cor, o programa detecta o do terminal.
-type Estilos struct {
-	r *lipgloss.Renderer
-}
-
-// NovosEstilos usa o perfil de cor dado (termenv.TrueColor, ANSI256, Ascii…).
-func NovosEstilos(perfil termenv.Profile) Estilos {
-	r := lipgloss.NewRenderer(nil)
-	r.SetColorProfile(perfil)
-	return Estilos{r: r}
-}
-
-// EstilosDoTerminal detecta o perfil pelo ambiente (TERM, COLORTERM).
-func EstilosDoTerminal() Estilos {
-	return NovosEstilos(termenv.EnvColorProfile())
-}
+// Estilos desenha com o lipgloss: as cores saem em truecolor e o programa do bubbletea as
+// reduz ao perfil do terminal na saída.
+type Estilos struct{}
 
 var (
 	corVermelho = lipgloss.Color("#e06c75")
@@ -69,7 +55,7 @@ var (
 	corRoxo     = lipgloss.Color("#c678dd")
 )
 
-func (e Estilos) novo() lipgloss.Style { return e.r.NewStyle() }
+func (e Estilos) novo() lipgloss.Style { return lipgloss.NewStyle() }
 
 func (e Estilos) apagado(s string) string { return e.novo().Foreground(corApagado).Render(s) }
 func (e Estilos) negrito(s string) string { return e.novo().Bold(true).Render(s) }
@@ -240,7 +226,7 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 }
 
 // larg são as larguras das colunas, iguais em toda a tela para alinhar.
-type larg struct{ ref, status, mr int }
+type larg struct{ ref, titulo, status, mr int }
 
 func larguras(cs []central.CoordSnapshot) larg {
 	var l larg
@@ -248,6 +234,7 @@ func larguras(cs []central.CoordSnapshot) larg {
 		for _, o := range c.Ondas {
 			for _, u := range o.US {
 				l.ref = max(l.ref, ansi.StringWidth(refTexto(u)))
+				l.titulo = max(l.titulo, ansi.StringWidth(tituloTexto(u))+1) // +1: a marca de erro
 				l.status = max(l.status, ansi.StringWidth(statusTexto(u)))
 				if len(u.MRs) == 1 {
 					l.mr = max(l.mr, larguraMR(u.MRs[0]))
@@ -268,6 +255,13 @@ func larguraMR(m central.MR) int {
 		w++
 	}
 	return w
+}
+
+func tituloTexto(u central.US) string {
+	if u.Taiga.Titulo != nil && *u.Taiga.Titulo != "" {
+		return limpar(*u.Taiga.Titulo)
+	}
+	return u.Chave
 }
 
 func refTexto(u central.US) string { return "#" + strconv.Itoa(u.Ref) }
@@ -384,7 +378,8 @@ func (e Estilos) us(u central.US, l larg, o Opcoes) []Linha {
 	if l.mr > 0 {
 		fixo += 2 + l.mr
 	}
-	larguraTitulo := max(o.Largura-fixo, 1)
+	// O título ocupa o que sobra, até o mais longo da tela: num pane largo o status fica perto.
+	larguraTitulo := max(min(o.Largura-fixo, l.titulo), 1)
 	titulo := ""
 	if u.Taiga.Titulo != nil {
 		titulo = limpar(*u.Taiga.Titulo)

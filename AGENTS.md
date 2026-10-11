@@ -19,7 +19,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `internal/cli`: comandos cobra e saída em texto.
 - `internal/central`: store SQLite, migrations embutidas (`migrations/NNNN_*.sql`, aplicadas por `PRAGMA user_version`) e regras (status, onda, próxima US, pendências), mais o cache dos enriquecedores (`cache.go`).
 - `internal/enriquecer`: consultas ao Herdr, às forjas e ao Taiga, tokens de sidebar, cliente do socket do Herdr e o laço do `orq daemon`.
-- `internal/tui`: o `orq tui` (bubbletea + lipgloss). `tela.go` desenha a partir do snapshot, sem terminal, e é o que os testes conferem (texto, estilos, OSC 8); `modelo.go` é o laço, o teclado e o mouse.
+- `internal/tui`: o `orq tui` (bubbletea v2 + lipgloss v2, de `charm.land`). Não volte ao bubbletea v1: o `init` dele consulta o fundo do terminal (OSC 11) em todo processo, e qualquer comando `orq` num tty que não responde esperava 5 s. `tela.go` desenha a partir do snapshot, sem terminal, e é o que os testes conferem (texto, estilos, OSC 8); `modelo.go` é o laço, o teclado e o mouse.
 - `internal/herdrcfg`: edição do `config.toml` do Herdr para `orq plugin configurar|desconfigurar` (lexer que preserva o texto, backup, `herdr config check` e restauração).
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
 - `internal/refs`: parse de `projeto/312`, `TG-312`, `TG-312#P2` e URL de MR.
