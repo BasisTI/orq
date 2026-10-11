@@ -80,3 +80,7 @@ orq mr add TG-215 https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_re
 orq us status TG-215 done
 orq onda proxima          # TG-216
 ```
+
+## Licença
+
+Apache License 2.0. Veja [LICENSE](LICENSE). Copyright 2026 Basis Tecnologia da Informação S.A.
