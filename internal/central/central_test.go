@@ -3,6 +3,7 @@ package central
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -625,5 +626,77 @@ func TestSnapshot(t *testing.T) {
 	todas, _ := s.Snapshot(ctx, true)
 	if len(todas.Coordenadores[0].Ondas) != 2 {
 		t.Fatal("--incluir-encerradas devia trazer a onda encerrada")
+	}
+}
+
+// done quer dizer "chegou ao limite da onda": trocar de onda com outro limite não pode herdar
+// essa conclusão, senão a onda nova se dá por concluída sem implementar nada.
+func TestMoverUSEntreLimites(t *testing.T) {
+	cases := []struct {
+		de, para string
+		status   string
+		want     string
+	}{
+		{"plano", "mr-pronta", "done", "wait"},
+		{"mr-pronta", "merge", "done", "wait"},
+		{"plano", "mr-pronta", "exec", "wait"},
+		{"mr-pronta", "mr-pronta", "done", "done"},
+		{"merge", "merge", "rev", "rev"},
+		{"plano", "merge", "wait", "wait"},
+	}
+	for _, c := range cases {
+		t.Run(c.de+"→"+c.para+"/"+c.status, func(t *testing.T) {
+			s := novoStore(t)
+			ctx := context.Background()
+			co := coord(t, s, "qa", "", "orq")
+			o1 := onda(t, s, co, NovaOnda{Titulo: "antes", Ate: c.de, US: []refs.US{us(t, "3")}})
+			if c.status != "wait" {
+				if _, _, err := s.AtualizarStatus(ctx, &co, us(t, "3"), MudancaStatus{Status: c.status}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.EncerrarOnda(ctx, co.Nome, o1.ID); err != nil {
+				t.Fatal(err)
+			}
+			antes := len(eventos(t, s))
+			o2 := onda(t, s, co, NovaOnda{Titulo: "depois", Ate: c.para, US: []refs.US{us(t, "3")}})
+			if got := o2.US[0].Status; got != c.want {
+				t.Fatalf("status na onda nova = %s, queria %s", got, c.want)
+			}
+			es := eventos(t, s)[antes:]
+			reiniciou := c.want != c.status
+			if len(es) != 1+map[bool]int{true: 1}[reiniciou] || es[0].Tipo != "onda.criar" {
+				t.Fatalf("eventos = %+v", es)
+			}
+			p, err := s.ProximaUS(ctx, o2.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reiniciou {
+				var d map[string]any
+				_ = json.Unmarshal(es[1].Detalhe, &d)
+				if es[1].Tipo != "us.status" || d["de"] != c.status || d["para"] != "wait" || !strings.Contains(d["motivo"].(string), "até "+c.de) {
+					t.Fatalf("evento = %s %s", es[1].Tipo, es[1].Detalhe)
+				}
+				if p.US == nil || p.US.Chave != "orq/3" {
+					t.Fatalf("a onda nova devia despachar orq/3: %+v", p)
+				}
+			}
+		})
+	}
+}
+
+func TestOcupadoSeparaRecusaDeTimeout(t *testing.T) {
+	busy := errors.New("database is locked (5) (SQLITE_BUSY)")
+	imediato := output.AsError(ocupado(busy, time.Now()))
+	esgotado := output.AsError(ocupado(busy, time.Now().Add(-busyTimeout)))
+	if imediato.Code != "banco_ocupado" || !strings.Contains(imediato.Recovery, "na hora") || !strings.Contains(imediato.Cause, "depois de 0 ms") {
+		t.Fatalf("imediato = %+v", imediato)
+	}
+	if esgotado.Code != "banco_ocupado" || !strings.Contains(esgotado.Recovery, "mais de 15 s") {
+		t.Fatalf("esgotado = %+v", esgotado)
+	}
+	if outro := errors.New("x"); ocupado(outro, time.Now()) != outro {
+		t.Fatal("erro que não é SQLITE_BUSY passa direto")
 	}
 }

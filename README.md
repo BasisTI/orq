@@ -17,19 +17,20 @@ Precisa de Go 1.27 ou mais novo. Não usa cgo.
 
 ## Estado
 
-O banco fica em `$ORQ_STATE_DIR/central.db`; sem a variável, em `$XDG_STATE_HOME/orq/central.db` e, sem ela, em `~/.local/state/orq/central.db`. Ele roda em modo WAL: vários coordenadores, em processos diferentes, escrevem ao mesmo tempo, e cada escrita espera a vez por até 15 s.
+O banco fica em `$ORQ_STATE_DIR/central.db`; sem a variável, em `$XDG_STATE_HOME/orq/central.db` e, sem ela, em `~/.local/state/orq/central.db`. Ele roda em modo WAL: vários coordenadores, em processos diferentes, escrevem ao mesmo tempo, e cada escrita espera a vez por até 15 s. A abertura (criação, ativação do WAL e migrations) é serializada por um `flock` em `central.db.init.lock`, no mesmo diretório.
 
 ## Saída e erros
 
 - `--output json|text`. Sem a flag, texto num terminal e JSON fora dele. `orq snapshot` sai sempre em JSON.
 - Erro vai para o stderr como `{"error":{"code","cause","recovery"}}` (ou `erro [code]: cause` em texto).
+- `banco_ocupado` (exit 4) separa os dois casos no `recovery`: outro processo segurou o banco por mais de 15 s, ou o SQLite recusou a trava na hora (o que não devia acontecer; reporte).
 - Códigos de saída: `0` ok, `1` inesperado, `2` uso (inclui `ref_ambigua` e `coord_nao_resolvido`), `4` conflito (`transicao_invalida`, `us_em_outra_onda`, `onda_encerrada`, `pendencia_resolvida`, `banco_ocupado`), `5` não encontrado.
 
 ## Coordenador corrente
 
 `orq coord registrar` grava o pane do coordenador (`$HERDR_PANE_ID` por padrão). Os outros comandos acham o coordenador corrente, nesta ordem, por `--coord <nome>`, por `$ORQ_COORD` ou pelo `$HERDR_PANE_ID` registrado. Criar onda e `onda ver`/`proxima` sem id exigem coordenador; as escritas numa US funcionam sem ele e assinam o evento com o dono da onda.
 
-Em `onda list`, `pend list` e `diario`, `--coord` filtra pelo coordenador dono da onda.
+Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em `diario`, pelo coordenador que assinou o evento.
 
 ## Referências
 
@@ -47,14 +48,14 @@ Em `onda list`, `pend list` e `diario`, `--coord` filtra pelo coordenador dono d
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
 | `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. |
-| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova. |
+| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). |
 | `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. |
 | `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre a pendência e imprime o id (`TG-312#P2`). |
 | `orq pend resolver <ref>#P<n> [--resposta "…"]` | Resolve a pendência. |
 | `orq pend list [--abertas] [--coord X] [--onda N]` | Lista as pendências. |
 | `orq diario [--us <ref>] [--onda N] [--coord X] [--limite 50]` | Eventos gravados, do mais antigo ao mais novo (toda escrita gera um). |
-| `orq snapshot [--incluir-encerradas]` | Estado consolidado em JSON versionado; contrato em [`docs/snapshot.md`](docs/snapshot.md). |
+| `orq snapshot [--incluir-encerradas] [--json]` | Estado consolidado em JSON versionado (`--json` é aceito, mas a saída já é sempre JSON); contrato em [`docs/snapshot.md`](docs/snapshot.md). |
 | `orq version` | Versão. |
 
 ### Ondas e a próxima US
@@ -65,6 +66,7 @@ A onda declara até onde vai (`--ate`) e a ordem. `done` numa US quer dizer que 
 - `--ordem estrita`: uma US de cada vez, na ordem. Só a primeira US ainda não concluída é candidata, e só quando está em `wait` e liberada. Em ordem estrita, uma US só pode depender de outra que vem antes dela.
 - `--ordem livre`: qualquer US em `wait` liberada é elegível; `us` é a primeira na ordem e `elegiveis` lista todas. As que esperam dependência aparecem em `bloqueadas`, com o motivo.
 - Onda encerrada ou concluída não tem próxima.
+- Uma US de onda encerrada pode entrar numa onda nova. Se o limite (`--ate`) é o mesmo, ela guarda o status. Se é outro, volta a `wait`, porque o `done` valia para o limite anterior: o plano aprovado de uma onda `plano` não é a MR pronta de uma onda `mr-pronta`. O diário registra um `us.status` com `de`, `para` e `motivo`. É o fluxo planejamento → implementação → merge.
 
 Exemplo, a onda do colaboradados:
 

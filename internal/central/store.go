@@ -27,8 +27,11 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Arquivo é o nome do banco dentro do diretório de estado.
-const Arquivo = "central.db"
+// Arquivo é o nome do banco dentro do diretório de estado; ArquivoTrava serializa a abertura.
+const (
+	Arquivo      = "central.db"
+	ArquivoTrava = "central.db.init.lock"
+)
 
 // busyTimeout é quanto uma transação espera a trava de outro processo antes de desistir.
 const busyTimeout = 15 * time.Second
@@ -70,11 +73,22 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 	dsn := "file:" + (&url.URL{Path: path}).EscapedPath() +
 		"?_pragma=busy_timeout(" + strconv.FormatInt(busyTimeout.Milliseconds(), 10) + ")" +
 		"&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+	destravar, err := travarInicio(ctx, filepath.Join(dir, ArquivoTrava))
+	if err != nil {
+		return nil, err
+	}
+	defer destravar()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	s := &Store{db: db, Now: time.Now}
+	// O Ping abre a primeira conexão (e aplica o WAL) ainda dentro da trava.
+	inicio := time.Now()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, ocupado(err, inicio)
+	}
 	if err := s.migrar(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -106,8 +120,9 @@ func (s *Store) migrar(ctx context.Context) error {
 	sort.Slice(ms, func(i, j int) bool { return ms[i].versao < ms[j].versao })
 	// Banco em dia não toma a trava de escrita: a maioria das aberturas é só leitura.
 	var atual int
+	inicio := time.Now()
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&atual); err != nil {
-		return ocupado(err)
+		return ocupado(err, inicio)
 	}
 	if len(ms) > 0 && atual == ms[len(ms)-1].versao {
 		return nil
@@ -141,33 +156,43 @@ func (s *Store) migrar(ctx context.Context) error {
 
 // escrever roda fn numa transação de escrita; o driver abre com BEGIN IMMEDIATE (_txlock).
 func (s *Store) escrever(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	inicio := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return ocupado(err)
+		return ocupado(err, inicio)
 	}
 	if err := fn(tx); err != nil {
 		_ = tx.Rollback()
-		return ocupado(err)
+		return ocupado(err, inicio)
 	}
-	return ocupado(tx.Commit())
+	return ocupado(tx.Commit(), inicio)
 }
 
 // ler roda fn numa transação, para que leituras de várias tabelas vejam o mesmo instante.
 func (s *Store) ler(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	inicio := time.Now()
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return ocupado(err)
+		return ocupado(err, inicio)
 	}
 	defer func() { _ = tx.Rollback() }()
-	return ocupado(fn(tx))
+	return ocupado(fn(tx), inicio)
 }
 
-// ocupado traduz o SQLITE_BUSY que sobra depois do busy_timeout num erro tipado.
-func ocupado(err error) error {
-	if err != nil && strings.Contains(err.Error(), "SQLITE_BUSY") {
-		return &output.Error{Code: "banco_ocupado", Cause: err.Error(), Recovery: "outro processo segurou o banco além do tempo de espera; tente de novo", Exit: output.ExitConflict}
+// ocupado traduz SQLITE_BUSY num erro tipado. O recovery separa o tempo de espera esgotado da
+// recusa imediata, que o busy_timeout não cobre e indica disputa que o orq devia ter evitado.
+func ocupado(err error, inicio time.Time) error {
+	if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") {
+		return err
 	}
-	return err
+	espera := time.Since(inicio)
+	e := &output.Error{Code: "banco_ocupado", Cause: fmt.Sprintf("%s (depois de %d ms)", err, espera.Milliseconds()), Exit: output.ExitConflict}
+	if espera >= busyTimeout-time.Second {
+		e.Recovery = fmt.Sprintf("outro processo segurou o banco por mais de %d s; veja se algum orq travou e tente de novo", int(busyTimeout.Seconds()))
+	} else {
+		e.Recovery = "o SQLite recusou a trava na hora, sem esperar o busy_timeout; tente de novo e, se repetir, reporte o caso no BasisTI/orq com esta causa"
+	}
+	return e
 }
 
 func (s *Store) agora() string { return s.Now().UTC().Format(time.RFC3339) }

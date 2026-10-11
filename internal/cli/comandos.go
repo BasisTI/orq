@@ -465,6 +465,8 @@ func (a *App) snapshotCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&encerradas, "incluir-encerradas", false, "traz também as ondas encerradas")
+	// --json é a forma do desenho e da story; não muda nada, o snapshot já é sempre JSON.
+	cmd.Flags().Bool("json", false, "aceito por compatibilidade: a saída já é sempre JSON")
 	return cmd
 }
 

@@ -3,6 +3,7 @@
 `orq snapshot` imprime, sempre em JSON, o estado consolidado da Central: coordenadores → ondas → US (com MRs e pendências), mais a lista das pendências abertas. É o que o TUI e o daemon consomem; o resto da CLI pode mudar de forma, este documento não sem subir a versão.
 
 - Por padrão, só as ondas abertas. `--incluir-encerradas` traz todas.
+- `orq snapshot --json`, a forma do desenho, também vale: a flag é aceita e não muda nada. `--output text` é ignorado.
 - A leitura é uma transação só: o snapshot é um instante coerente do banco.
 
 ## Estabilidade

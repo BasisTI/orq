@@ -46,7 +46,8 @@ type NovaOnda struct {
 }
 
 // CriarOnda grava a onda e as US dela em wait, na ordem dada. Uma US numa onda aberta não
-// entra em outra; numa onda encerrada, muda de onda e guarda o status.
+// entra em outra. Uma US de onda encerrada muda de onda: guarda o status se a onda nova tem o
+// mesmo limite (--ate) e volta a wait se o limite é outro, com evento us.status explicando.
 func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (Onda, error) {
 	titulo := strings.TrimSpace(n.Titulo)
 	if titulo == "" || temControle(titulo) {
@@ -132,11 +133,14 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 		}
 		chaves := make([]string, len(lista))
 		movidas := []string{}
+		var reiniciadas []evento
 		for i, u := range lista {
 			chaves[i] = u.Chave()
 			var ondaAtual int64
 			var encerrada *string
-			err := tx.QueryRowContext(ctx, `SELECT us.onda_id, onda.encerrada_em FROM us JOIN onda ON onda.id = us.onda_id WHERE us.projeto = ? AND us.ref = ?`, u.Projeto, u.Ref).Scan(&ondaAtual, &encerrada)
+			var ateAntigo, status string
+			err := tx.QueryRowContext(ctx, `SELECT us.onda_id, onda.encerrada_em, onda.autorizacao_ate, us.status FROM us JOIN onda ON onda.id = us.onda_id WHERE us.projeto = ? AND us.ref = ?`, u.Projeto, u.Ref).
+				Scan(&ondaAtual, &encerrada, &ateAntigo, &status)
 			switch {
 			case semLinha(err):
 				_, err = tx.ExecContext(ctx, `INSERT INTO us (projeto, ref, onda_id, posicao, status, atualizado_em) VALUES (?, ?, ?, ?, 'wait', ?)`, u.Projeto, u.Ref, id, i+1, agora)
@@ -147,6 +151,14 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 				movidas = append(movidas, fmt.Sprintf("%s (da onda %d)", u.Chave(), ondaAtual))
 				if _, err = tx.ExecContext(ctx, `DELETE FROM dependencia WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref); err == nil {
 					_, err = tx.ExecContext(ctx, `UPDATE us SET onda_id = ?, posicao = ?, atualizado_em = ? WHERE projeto = ? AND ref = ?`, id, i+1, agora, u.Projeto, u.Ref)
+				}
+				// O status vale para o limite da onda de onde a US veio: com outro limite, ela
+				// recomeça em wait (o done de um plano aprovado não é a MR pronta da onda nova).
+				if err == nil && ateAntigo != ate && status != "wait" {
+					_, err = tx.ExecContext(ctx, `UPDATE us SET status = 'wait' WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref)
+					reiniciadas = append(reiniciadas, evento{coordenador: coord.Nome, ondaID: id, projeto: u.Projeto, ref: u.Ref, tipo: "us.status",
+						detalhe: map[string]any{"de": status, "para": "wait", "status": "wait",
+							"motivo": fmt.Sprintf("veio da onda %d (até %s) para a onda %d (até %s): o status valia para o limite anterior", ondaAtual, ateAntigo, id, ate)}})
 				}
 			}
 			if err != nil {
@@ -166,7 +178,15 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 		if len(movidas) > 0 {
 			detalhe["movidas"] = movidas
 		}
-		return s.registrar(ctx, tx, evento{coordenador: coord.Nome, ondaID: id, tipo: "onda.criar", detalhe: detalhe})
+		if err := s.registrar(ctx, tx, evento{coordenador: coord.Nome, ondaID: id, tipo: "onda.criar", detalhe: detalhe}); err != nil {
+			return err
+		}
+		for _, e := range reiniciadas {
+			if err := s.registrar(ctx, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return Onda{}, err

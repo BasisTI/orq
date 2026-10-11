@@ -164,6 +164,9 @@ func TestSnapshotSempreJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &s); err != nil || s["versao"] != float64(1) {
 		t.Fatalf("snapshot = %q", out)
 	}
+	if out := ok(t, env, "snapshot", "--json"); !strings.Contains(out, `"versao": 1`) {
+		t.Fatalf("snapshot --json = %q", out)
+	}
 	v := ok(t, env, "version")
 	if !strings.Contains(v, `"versao"`) {
 		t.Fatalf("version = %q", v)
@@ -234,5 +237,40 @@ func TestConcorrenciaDoisProcessos(t *testing.T) {
 	}
 	if conta["pend.add"] != 2*n || conta["us.status"] != n {
 		t.Fatalf("eventos = %v", conta)
+	}
+}
+
+// Vários processos abrem ao mesmo tempo um banco que ainda não existe: a criação, a ativação
+// do WAL e a migration não podem derrubar nenhum deles.
+func TestConcorrenciaBancoNovo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sobe processos")
+	}
+	const rodadas, procs = 8, 4
+	for r := 0; r < rodadas; r++ {
+		dir := t.TempDir()
+		var wg sync.WaitGroup
+		saidas := make([][]byte, procs)
+		erros := make([]error, procs)
+		for i := 0; i < procs; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				args, _ := json.Marshal([]string{"coord", "registrar", fmt.Sprintf("c%d", i), "--pane", ""})
+				cmd := exec.Command(os.Args[0], "-test.run=^$")
+				cmd.Env = append(os.Environ(), "ORQ_TEST_HELPER=1", "ORQ_TEST_REPETIR=1", "ORQ_TEST_ARGS="+string(args), "ORQ_STATE_DIR="+dir, "ORQ_COORD=", "HERDR_PANE_ID=")
+				saidas[i], erros[i] = cmd.CombinedOutput()
+			}()
+		}
+		wg.Wait()
+		for i, err := range erros {
+			if err != nil {
+				t.Fatalf("rodada %d, processo %d: %v\n%s", r, i, err, saidas[i])
+			}
+		}
+		var cs []struct{ Nome string }
+		if err := json.Unmarshal([]byte(ok(t, map[string]string{"ORQ_STATE_DIR": dir}, "coord", "list")), &cs); err != nil || len(cs) != procs {
+			t.Fatalf("rodada %d: %d coordenadores, %v", r, len(cs), err)
+		}
 	}
 }

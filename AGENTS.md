@@ -26,6 +26,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 
 - Mensagens, docs e códigos de erro em português; saída JSON fora de terminal, texto num terminal (`--output` força).
 - Toda escrita no banco é uma transação curta (`BEGIN IMMEDIATE` via `_txlock`) e grava o seu evento no diário na mesma transação.
+- A abertura do banco (criação, WAL, migrations) fica dentro do `flock` de `central.db.init.lock`: a troca para WAL num banco novo devolve `SQLITE_BUSY` na hora, sem passar pelo `busy_timeout`.
 - Migration nova é arquivo novo; nunca edite uma já publicada.
 - Mudança que remove ou muda o sentido de um campo do snapshot sobe `versao` e atualiza `docs/snapshot.md`.
 - Commit: verbo no infinitivo e `orq #N` no final (ex.: `Criar o esqueleto da CLI orq orq #3`). Um PR por US, base `main`.
