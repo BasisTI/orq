@@ -53,6 +53,7 @@ type Falha struct {
 	Mensagem string
 	Saida    []byte // stdout
 	Erro     []byte // stderr
+	Status   int    // código de saída do processo; 0 quando ele nem rodou ou foi morto
 }
 
 func (f *Falha) Error() string { return f.Codigo + ": " + f.Mensagem }
@@ -119,6 +120,7 @@ func (f Ferramentas) Rodar(ctx context.Context, nome string, args ...string) ([]
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		falha.Codigo, falha.Mensagem = ErrTempoEsgotado, fmt.Sprintf("%s não respondeu em %s", nome, timeout)
 	case errors.As(err, &ee):
+		falha.Status = ee.ExitCode()
 		falha.Mensagem = fmt.Sprintf("%s saiu com %d: %s", nome, ee.ExitCode(), resumir(stderr.Bytes(), stdout.Bytes()))
 	default:
 		falha.Mensagem = fmt.Sprintf("%s: %v", nome, err)

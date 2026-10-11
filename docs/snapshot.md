@@ -30,7 +30,9 @@ O snapshot não consulta nada: ele lê o cache que `orq daemon` (em laço) e `or
 
 Estado da MR: `mesclada`, `fechada`, `draft`, `pronta` (aberta, não draft e mesclável: `detailed_merge_status` `mergeable` no GitLab, `mergeable_state` `clean` ou `has_hooks` no GitHub) ou `aberta` (o resto: conflito, pipeline, revisão obrigatória, ainda não calculado). Mudança de estado gera `mr.estado` no diário.
 
-Erro de autenticação de `glab`, `gh` ou `taiga` suspende a ferramenta por 30 min (ou até `orq atualizar --forcar`): o orq não tenta login nem define token. A suspensão aparece em `fontes.<fonte>.erro`.
+Erro de autenticação de `glab`, `gh` ou `taiga` suspende a ferramenta por 30 min: o orq não tenta login nem define token. Na taiga-cli, é o exit 3 (`auth_*`, `session_*`, `secret_*`, `keyring_*`, `*_secret_*`, `password_file_*`). `orq atualizar --forcar` passa por cima de uma suspensão anterior, mas uma recusa na própria execução interrompe as chamadas seguintes da ferramenta. A suspensão aparece em `fontes.<fonte>.erro`.
+
+O snapshot não traz os tokens de sidebar. O daemon publica, com nomes próprios, `orq` no pane do coordenador e `orq_mrs` no workspace, e nunca toca token de outro produtor (README, "Daemon e enriquecedores").
 
 ## Esquema
 

@@ -2,6 +2,7 @@ package enriquecer
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,10 +14,10 @@ import (
 
 // Tokens de sidebar do orq no Herdr.
 const (
-	FonteTokens     = "orq"         // --source dos report-metadata
-	TokenResumo     = "orq"         // no pane do coordenador
-	TokenMRsProntas = "mrs_prontas" // no workspace do coordenador
-	LimiteToken     = 80            // o Herdr corta o valor em 80 caracteres
+	FonteTokens     = "orq"     // --source dos report-metadata
+	TokenResumo     = "orq"     // no pane do coordenador
+	TokenMRsProntas = "orq_mrs" // no workspace do coordenador
+	LimiteToken     = 80        // o Herdr corta o valor em 80 caracteres
 )
 
 // ResultadoTokens diz o que a publicação fez.
@@ -24,11 +25,12 @@ type ResultadoTokens struct {
 	Publicados []central.Token `json:"publicados"`
 	Limpos     []central.Token `json:"limpos"`
 	Erros      []string        `json:"erros"`
+	Avisos     []string        `json:"avisos"` // tokens com valor de outro produtor, que o orq não toca
 	Pulado     *string         `json:"pulado"` // motivo, quando nada foi conferido
 }
 
 func novoResultadoTokens() ResultadoTokens {
-	return ResultadoTokens{Publicados: []central.Token{}, Limpos: []central.Token{}, Erros: []string{}}
+	return ResultadoTokens{Publicados: []central.Token{}, Limpos: []central.Token{}, Erros: []string{}, Avisos: []string{}}
 }
 
 var rotulos = []struct{ status, rotulo string }{
@@ -143,9 +145,12 @@ func (k chaveToken) token(valor string) central.Token {
 	return central.Token{Alvo: k.alvo, AlvoID: k.id, Nome: k.nome, Valor: valor}
 }
 
-// PublicarTokens confere os tokens do orq contra a última sessão do Herdr: publica o que falta
-// ou mudou (inclusive o que sumiu porque o servidor do Herdr reiniciou) e limpa o que deixou
-// de valer. Só toca panes e workspaces que existem na sessão.
+// PublicarTokens confere os tokens do orq contra a última sessão do Herdr. No Herdr o token é
+// por nome, não por fonte, então a propriedade vem do registro do orq (token_publicado): um
+// token é do orq só enquanto o Herdr mostra o último valor que o orq publicou com sucesso.
+// Publica o que está ausente (inclusive o que sumiu porque o servidor do Herdr reiniciou) ou
+// ainda tem o valor antigo do orq; valor de outro produtor não é adotado, sobrescrito nem
+// limpo, e vira aviso. Só toca panes e workspaces que existem na sessão.
 func (e *Enriquecedor) PublicarTokens(ctx context.Context) (ResultadoTokens, error) {
 	res := novoResultadoTokens()
 	sessao, erro, err := e.St.LerSessaoHerdr(ctx)
@@ -188,14 +193,7 @@ func (e *Enriquecedor) PublicarTokens(ctx context.Context) (ResultadoTokens, err
 			desejados[chaveToken{"workspace", ws, TokenMRsProntas}] = v
 		}
 	}
-	atual := func(k chaveToken) (string, bool) {
-		if k.alvo == "pane" {
-			p, ok := sessao.Panes[k.id]
-			return p.Tokens[k.nome], ok
-		}
-		w, ok := sessao.Workspaces[k.id]
-		return w.Tokens[k.nome], ok
-	}
+	atual := sessaoTokens{sessao}.token
 	pubs, err := e.St.TokensPublicados(ctx)
 	if err != nil {
 		return res, err
@@ -206,16 +204,29 @@ func (e *Enriquecedor) PublicarTokens(ctx context.Context) (ResultadoTokens, err
 	}
 	for _, k := range ordenar(desejados) {
 		v := desejados[k]
-		if a, _ := atual(k); a != v {
+		a, _ := atual(k)
+		p, nosso := publicado[k]
+		switch {
+		case nosso && a == p && a == v:
+			// Em dia.
+		case a == "" || (nosso && a == p):
+			// Ausente (o Herdr reiniciou, ou nunca foi publicado) ou é o valor antigo do orq.
 			if err := e.reportar(ctx, k, &v); err != nil {
 				res.Erros = append(res.Erros, err.Error())
 				continue
 			}
 			res.Publicados = append(res.Publicados, k.token(v))
-		}
-		if p, ok := publicado[k]; !ok || p != v {
 			if err := e.St.MarcarToken(ctx, k.token(v)); err != nil {
 				return res, err
+			}
+		default:
+			// Outro produtor escreveu esse nome (com o mesmo valor ou não): o token não é do
+			// orq, que não o adota nem sobrescreve.
+			res.Avisos = append(res.Avisos, alheio(k, a))
+			if nosso {
+				if err := e.St.DesmarcarToken(ctx, k.token("")); err != nil {
+					return res, err
+				}
 			}
 		}
 	}
@@ -223,35 +234,56 @@ func (e *Enriquecedor) PublicarTokens(ctx context.Context) (ResultadoTokens, err
 		if _, ok := desejados[k]; ok {
 			continue
 		}
-		if a, existe := atual(k); existe && a != "" {
-			if err := e.reportar(ctx, k, nil); err != nil {
-				res.Erros = append(res.Erros, err.Error())
-				continue
-			}
-			res.Limpos = append(res.Limpos, k.token(""))
-		}
-		if err := e.St.DesmarcarToken(ctx, k.token("")); err != nil {
+		if err := e.limparSeNosso(ctx, k, publicado[k], atual, &res); err != nil {
 			return res, err
 		}
 	}
 	return res, nil
 }
 
-// LimparTokens limpa tudo o que o orq publicou (o daemon chama ao sair).
+// limparSeNosso limpa o token só se o Herdr ainda mostra o último valor que o orq publicou;
+// valor de outro produtor fica, e o registro é esquecido. Falha ao limpar mantém o registro
+// para a próxima tentativa.
+func (e *Enriquecedor) limparSeNosso(ctx context.Context, k chaveToken, publicado string, atual func(chaveToken) (string, bool), res *ResultadoTokens) error {
+	a, existe := atual(k)
+	if existe && a != "" {
+		if a != publicado {
+			res.Avisos = append(res.Avisos, alheio(k, a))
+		} else {
+			if err := e.reportar(ctx, k, nil); err != nil {
+				res.Erros = append(res.Erros, err.Error())
+				return nil
+			}
+			res.Limpos = append(res.Limpos, k.token(""))
+		}
+	}
+	return e.St.DesmarcarToken(ctx, k.token(""))
+}
+
+func alheio(k chaveToken, valor string) string {
+	return fmt.Sprintf("%s %s: o token %s tem %q, que o orq não publicou; fica como está", k.alvo, k.id, k.nome, valor)
+}
+
+// LimparTokens limpa o que o orq publicou e o Herdr ainda mostra com o valor do orq (o daemon
+// chama ao sair, depois de reler o Herdr). Sem sessão confiável não limpa nada: não dá para
+// saber se o token ainda é do orq.
 func (e *Enriquecedor) LimparTokens(ctx context.Context) (ResultadoTokens, error) {
 	res := novoResultadoTokens()
+	sessao, erro, err := e.St.LerSessaoHerdr(ctx)
+	if err != nil {
+		return res, err
+	}
+	if sessao == nil || erro != nil {
+		motivo := "sem sessão confiável do Herdr: tokens não conferidos nem limpos"
+		res.Pulado = &motivo
+		return res, nil
+	}
 	pubs, err := e.St.TokensPublicados(ctx)
 	if err != nil {
 		return res, err
 	}
 	for _, t := range pubs {
-		k := chaveToken{t.Alvo, t.AlvoID, t.Nome}
-		if err := e.reportar(ctx, k, nil); err != nil {
-			res.Erros = append(res.Erros, err.Error())
-		} else {
-			res.Limpos = append(res.Limpos, k.token(""))
-		}
-		if err := e.St.DesmarcarToken(ctx, t); err != nil {
+		if err := e.limparSeNosso(ctx, chaveToken{t.Alvo, t.AlvoID, t.Nome}, t.Valor, sessaoTokens{sessao}.token, &res); err != nil {
 			return res, err
 		}
 	}
@@ -268,6 +300,18 @@ func (e *Enriquecedor) reportar(ctx context.Context, k chaveToken, valor *string
 	}
 	_, err := e.F.Rodar(ctx, "herdr", args...)
 	return err
+}
+
+// sessaoTokens lê o valor atual de um token na sessão do Herdr e se o alvo existe.
+type sessaoTokens struct{ *central.SessaoHerdr }
+
+func (s sessaoTokens) token(k chaveToken) (string, bool) {
+	if k.alvo == "pane" {
+		p, ok := s.Panes[k.id]
+		return p.Tokens[k.nome], ok
+	}
+	w, ok := s.Workspaces[k.id]
+	return w.Tokens[k.nome], ok
 }
 
 func ordenar[V any](m map[chaveToken]V) []chaveToken {

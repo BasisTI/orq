@@ -201,6 +201,11 @@ func TestDaemonEventosEReconciliacao(t *testing.T) {
 	if len(ts) != 1 || ts[0].Valor != "1 Exec" {
 		t.Fatalf("tokens = %+v", ts)
 	}
+	// O Herdr passa a mostrar o token do orq: a saída relê o Herdr e limpa o que é do orq.
+	c.sessao([]map[string]any{
+		{"pane_id": "w1:p1", "workspace_id": "w1", "agent": "claude", "agent_status": "working", "tokens": map[string]string{"orq": "1 Exec"}},
+		{"pane_id": "w1:p2", "workspace_id": "w1", "agent": "claude", "agent_status": "working"},
+	}, []map[string]any{{"workspace_id": "w1"}})
 	cancel()
 	select {
 	case err := <-fim:

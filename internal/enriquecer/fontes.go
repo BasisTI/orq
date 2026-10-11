@@ -223,8 +223,10 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 	return central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, URL: r.URL}, nil
 }
 
-// classificarTaiga lê o envelope {"error":{"code"}} da CLI taiga: auth_* e session_* são
-// autenticação; not_found é não encontrado.
+// classificarTaiga separa autenticação e "não encontrado" das outras falhas da CLI taiga. A
+// taiga-cli sai com 3 em erro de autenticação ou credencial (auth_*, session_*, secret_*,
+// keyring_*, *_secret_*, password_file_*); os prefixos do código no envelope
+// {"error":{"code"}} reforçam quando o código de saída se perde. not_found é não encontrado.
 func classificarTaiga(err error) error {
 	f := comoFalha(err)
 	if f.Codigo != ErrFalhaComando {
@@ -246,14 +248,26 @@ func classificarTaiga(err error) error {
 			f.Mensagem += ": " + resumir([]byte(env.Error.Cause))
 		}
 		switch {
-		case strings.HasPrefix(c, "auth_") || strings.HasPrefix(c, "session_"):
+		case codigoCredencialTaiga(c):
 			f.Codigo = ErrAutenticacao
 		case c == "not_found":
 			f.Codigo = ErrNaoEncontrado
 		}
-		return f
+		break
+	}
+	if f.Status == 3 {
+		f.Codigo = ErrAutenticacao
 	}
 	return f
+}
+
+func codigoCredencialTaiga(c string) bool {
+	for _, p := range []string{"auth_", "session_", "secret_", "keyring_", "password_file_"} {
+		if strings.HasPrefix(c, p) {
+			return true
+		}
+	}
+	return strings.Contains(c, "_secret_")
 }
 
 func deref(s *string) string {

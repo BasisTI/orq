@@ -33,7 +33,8 @@ func (a *App) atualizarCmd() *cobra.Command {
 		Long: `Consulta as fontes uma vez (todas, sem --fonte) e grava o cache que o snapshot mostra.
 Cada chave respeita o TTL da fonte (Herdr 5 s, MR 60 s, Taiga 5 min); --forcar ignora o TTL e a
 suspensão por erro de autenticação. Com o Herdr entre as fontes, confere também os tokens de
-sidebar (orq no pane do coordenador, mrs_prontas no workspace).`,
+sidebar (orq no pane do coordenador, orq_mrs no workspace). Valor de outro produtor nesses
+nomes não é adotado, sobrescrito nem limpo; aparece em avisos.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -114,7 +115,7 @@ func (a *App) daemonCmd() *cobra.Command {
 		Long: `Roda em primeiro plano até SIGTERM ou SIGINT. A cada tick consulta o Herdr e confere os
 tokens de sidebar; MR e Taiga são olhados a cada --intervalo-remoto, respeitando o TTL de cada
 um. Assina pane.agent_status_changed no socket do Herdr ($HERDR_SOCKET_PATH ou
-~/.config/herdr/herdr.sock) e republica na hora. Ao sair, limpa os tokens que publicou.
+~/.config/herdr/herdr.sock) e republica na hora. Ao sair, relê o Herdr e limpa os tokens que publicou e ainda têm o valor dele.
 Só roda um por diretório de estado: o segundo sai com daemon_ativo. O log vai para o stderr.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

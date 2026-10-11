@@ -186,6 +186,7 @@ func (e *Enriquecedor) consultarChaves(ctx context.Context, fonte string, cs []c
 	if err != nil {
 		return r, err
 	}
+	novas := map[string]bool{}
 	for _, c := range cs {
 		if ctx.Err() != nil {
 			return r, ctx.Err()
@@ -194,7 +195,8 @@ func (e *Enriquecedor) consultarChaves(ctx context.Context, fonte string, cs []c
 			r.EmDia++
 			continue
 		}
-		if !forcar && e.suspensa(sus, c.ferramenta) {
+		// --forcar passa por cima da suspensão anterior, não da que nasceu nesta execução.
+		if (!forcar && e.suspensa(sus, c.ferramenta)) || novas[c.ferramenta] {
 			r.Suspensas++
 			continue
 		}
@@ -211,6 +213,7 @@ func (e *Enriquecedor) consultarChaves(ctx context.Context, fonte string, cs []c
 				if err := e.St.Suspender(ctx, c.ferramenta, *f.cache()); err != nil {
 					return r, err
 				}
+				novas[c.ferramenta] = true
 				sus[c.ferramenta] = central.Erro{Codigo: f.Codigo, Mensagem: f.Mensagem, Em: e.agora().UTC().Format(time.RFC3339)}
 			}
 			continue

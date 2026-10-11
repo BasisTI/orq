@@ -35,8 +35,8 @@ type Daemon struct {
 	ultimos map[string]string
 }
 
-// Rodar segue até ctx acabar (SIGTERM/SIGINT no orq daemon) e, ao sair, limpa os tokens que
-// publicou. Falha de fonte não derruba o laço; só o erro do banco volta.
+// Rodar segue até ctx acabar (SIGTERM/SIGINT no orq daemon) e, ao sair, relê o Herdr e limpa
+// os tokens que publicou e ainda têm o valor do orq. Falha de fonte não derruba o laço; só o erro do banco volta.
 func (d *Daemon) Rodar(ctx context.Context) error {
 	tick := valorDur(d.Tick, 5*time.Second)
 	gatilho := make(chan struct{}, 1)
@@ -104,6 +104,10 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 	// ctx já acabou: a limpeza ganha um prazo próprio.
 	fim, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// Relê o Herdr para limpar só o que ainda mostra o valor do orq.
+	if _, err := d.E.AtualizarHerdr(fim); err != nil {
+		d.logf("", "leitura do Herdr antes da limpeza: %v", err)
+	}
 	if r, err := d.E.LimparTokens(fim); err != nil {
 		d.logf("", "limpeza dos tokens: %v", err)
 	} else {
@@ -112,6 +116,12 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 		}
 		if len(r.Erros) > 0 {
 			d.logf("", "erros ao limpar os tokens: %s", strings.Join(r.Erros, "; "))
+		}
+		for _, a := range r.Avisos {
+			d.logf("", "%s", a)
+		}
+		if r.Pulado != nil {
+			d.logf("", "limpeza dos tokens: %s", *r.Pulado)
 		}
 	}
 	d.logf("fim", "orq daemon encerrado")
@@ -141,6 +151,7 @@ func (d *Daemon) ciclo(ctx context.Context) ([]string, error) {
 		d.logf("", "token %s limpo em %s %s", t.Nome, t.Alvo, t.AlvoID)
 	}
 	d.logf("tokens", "%s", strings.Join(tk.Erros, "; "))
+	d.logf("avisos", "%s", strings.Join(tk.Avisos, "; "))
 	return d.panesAssinaveis(ctx)
 }
 

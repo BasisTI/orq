@@ -175,6 +175,58 @@ func TestAutenticacaoSuspende(t *testing.T) {
 	}
 }
 
+// --forcar ignora a suspensão anterior, mas a recusa de autenticação desta execução para as
+// chamadas seguintes da mesma ferramenta.
+func TestForcarRespeitaSuspensaoNova(t *testing.T) {
+	c := novoCenario(t)
+	co := c.coord("a", "", "")
+	c.onda(co, "1", "2", "3")
+	for _, n := range []string{"1", "2", "3"} {
+		c.responderCodigo("taiga", `{"error":{"code":"session_expired","cause":"simulado"}}`, 3, "story", "get", n, "--project", "orq", "--output", "json")
+	}
+	_ = c.st.Suspender(context.Background(), "taiga", central.Erro{Codigo: ErrAutenticacao, Mensagem: "antiga"})
+	r := c.atualizar(Opcoes{Fontes: []string{"taiga"}, Forcar: true})
+	if f := r.Fontes["taiga"]; f.Consultadas != 1 || f.Suspensas != 2 || len(f.Erros) != 1 {
+		t.Fatalf("taiga = %+v", f)
+	}
+	if n := len(c.chamadas("taiga")); n != 1 {
+		t.Fatalf("taiga chamado %d vezes, queria 1", n)
+	}
+}
+
+// A taiga-cli sai com 3 em erro de credencial; keyring_unavailable também suspende.
+func TestTaigaExit3EAutenticacao(t *testing.T) {
+	casos := []struct {
+		codigo string
+		exit   int
+		want   string
+	}{
+		{"keyring_unavailable", 3, ErrAutenticacao},
+		{"keyring_unavailable", 1, ErrAutenticacao}, // o prefixo reforça
+		{"password_file_unreadable", 1, ErrAutenticacao},
+		{"auth_secret_missing", 1, ErrAutenticacao},
+		{"algo_novo", 3, ErrAutenticacao}, // o exit 3 basta
+		{"not_found", 5, ErrNaoEncontrado},
+		{"api_error", 1, ErrFalhaComando},
+	}
+	for _, k := range casos {
+		f := comoFalha(classificarTaiga(&Falha{Codigo: ErrFalhaComando, Status: k.exit, Erro: []byte(`{"error":{"code":"` + k.codigo + `"}}`)}))
+		if f.Codigo != k.want {
+			t.Errorf("%s/exit %d = %s, queria %s", k.codigo, k.exit, f.Codigo, k.want)
+		}
+	}
+	c := novoCenario(t)
+	co := c.coord("a", "", "")
+	c.onda(co, "1", "2", "3")
+	for _, n := range []string{"1", "2", "3"} {
+		c.responderCodigo("taiga", `{"error":{"code":"keyring_unavailable","cause":"simulado"}}`, 3, "story", "get", n, "--project", "orq", "--output", "json")
+	}
+	r := c.atualizar(Opcoes{Fontes: []string{"taiga"}})
+	if f := r.Fontes["taiga"]; f.Consultadas != 1 || f.Suspensas != 2 || f.Erros[0].Erro.Codigo != ErrAutenticacao {
+		t.Fatalf("taiga = %+v", f)
+	}
+}
+
 func TestTaigaEBinarioAusente(t *testing.T) {
 	c := novoCenario(t)
 	co := c.coord("a", "", "")
@@ -290,53 +342,73 @@ func TestTokensPublicaConfereELimpa(t *testing.T) {
 			{"pane_id": "w1:p1", "workspace_id": "w1", "agent": "claude", "agent_status": "working", "tokens": tokPane},
 			{"pane_id": "w1:p2", "workspace_id": "w1", "agent": "claude", "agent_status": "blocked"},
 		}, []map[string]any{{"workspace_id": "w1", "tokens": tokWS}})
+		c.atualizar(Opcoes{Fontes: []string{"herdr"}, Forcar: true})
+		_ = c.chamadas("herdr")
 	}
-	painel(nil, nil)
+	publicar := func() ResultadoTokens {
+		t.Helper()
+		r, err := c.e.PublicarTokens(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
 	c.atualizar(Opcoes{})
-	_ = c.chamadas("herdr")
-	r, err := c.e.PublicarTokens(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	painel(nil, map[string]string{"mrs_prontas": "!403"}) // o mrs_prontas da skill manual não é do orq
+	r := publicar()
 	got := c.chamadas("herdr")
 	want := []string{
 		"pane report-metadata w1:p1 --source orq --token orq=⚠ 1 Wait·1 Exec",
-		"workspace report-metadata w1 --source orq --token mrs_prontas=orq#1 !41",
+		"workspace report-metadata w1 --source orq --token orq_mrs=orq#1 !41",
 	}
 	if len(got) != 2 || strings.Join(got[0], " ") != want[0] || strings.Join(got[1], " ") != want[1] || len(r.Publicados) != 2 {
 		t.Fatalf("argv = %q, resultado %+v", got, r)
 	}
 	// O Herdr já mostra os tokens: nada a republicar.
-	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"mrs_prontas": "orq#1 !41"})
-	c.atualizar(Opcoes{Fontes: []string{"herdr"}, Forcar: true})
-	_ = c.chamadas("herdr")
-	if r, _ := c.e.PublicarTokens(ctx); len(r.Publicados)+len(r.Limpos) != 0 || len(c.chamadas("herdr")) != 0 {
+	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 !41", "mrs_prontas": "!403"})
+	if r := publicar(); len(r.Publicados)+len(r.Limpos)+len(r.Avisos) != 0 || len(c.chamadas("herdr")) != 0 {
 		t.Fatalf("republicou sem mudança: %+v", r)
 	}
 	// O servidor do Herdr reiniciou e os tokens sumiram: republica.
 	painel(nil, nil)
-	c.atualizar(Opcoes{Fontes: []string{"herdr"}, Forcar: true})
-	_ = c.chamadas("herdr")
-	if r, _ := c.e.PublicarTokens(ctx); len(r.Publicados) != 2 {
+	if r := publicar(); len(r.Publicados) != 2 {
 		t.Fatalf("não republicou: %+v", r)
 	}
 	_ = c.chamadas("herdr")
-	// As MRs saem de pronta: mrs_prontas é limpo.
-	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"mrs_prontas": "orq#1 !41"})
+	// As MRs saem de pronta: orq_mrs, que ainda tem o valor do orq, é limpo.
+	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 !41", "mrs_prontas": "!403"})
 	c.responder("gh", `{"state":"closed","merged":true}`, false, argsGH...)
 	c.responder("glab", `{"state":"opened","draft":true,"detailed_merge_status":"draft_status"}`, false, argsGL...)
-	c.atualizar(Opcoes{Forcar: true})
-	_ = c.chamadas("herdr")
-	r, _ = c.e.PublicarTokens(ctx)
+	c.atualizar(Opcoes{Fontes: []string{"mr"}, Forcar: true})
+	r = publicar()
 	got = c.chamadas("herdr")
-	if len(got) != 1 || strings.Join(got[0], " ") != "workspace report-metadata w1 --source orq --clear-token mrs_prontas" || len(r.Limpos) != 1 {
+	if len(got) != 1 || strings.Join(got[0], " ") != "workspace report-metadata w1 --source orq --clear-token orq_mrs" || len(r.Limpos) != 1 {
 		t.Fatalf("limpeza = %q, %+v", got, r)
 	}
+	// Outro produtor sobrescreve o token do orq: o orq não o sobrescreve de volta nem o limpa.
+	painel(map[string]string{"orq": "fase: revisão"}, nil)
+	r = publicar()
+	if len(c.chamadas("herdr")) != 0 || len(r.Avisos) != 1 || !strings.Contains(r.Avisos[0], `"fase: revisão"`) {
+		t.Fatalf("token alheio = %+v", r)
+	}
+	if ts, _ := c.st.TokensPublicados(ctx); len(ts) != 0 {
+		t.Fatalf("token alheio continua registrado: %+v", ts)
+	}
+	c.status(co, "1", "done", "")
+	c.status(co, "2", "done", "")
+	if r := publicar(); len(c.chamadas("herdr")) != 0 || len(r.Limpos) != 0 {
+		t.Fatalf("limpou token alheio: %+v", r)
+	}
 	// O pane do coordenador some: o registro é esquecido sem chamar o Herdr.
+	painel(nil, nil)
+	if r := publicar(); len(r.Publicados) != 1 {
+		t.Fatalf("devia republicar o resumo: %+v", r)
+	}
+	_ = c.chamadas("herdr")
 	c.sessao([]map[string]any{{"pane_id": "w1:p2", "workspace_id": "w1", "agent_status": "idle"}}, []map[string]any{{"workspace_id": "w1"}})
 	c.atualizar(Opcoes{Fontes: []string{"herdr"}, Forcar: true})
 	_ = c.chamadas("herdr")
-	if r, _ := c.e.PublicarTokens(ctx); len(r.Publicados)+len(r.Limpos) != 0 || len(c.chamadas("herdr")) != 0 {
+	if r := publicar(); len(r.Publicados)+len(r.Limpos) != 0 || len(c.chamadas("herdr")) != 0 {
 		t.Fatalf("pane sumido: %+v", r)
 	}
 	if ts, _ := c.st.TokensPublicados(ctx); len(ts) != 0 {
@@ -345,8 +417,55 @@ func TestTokensPublicaConfereELimpa(t *testing.T) {
 	// Herdr com erro: não confere nada.
 	c.responder("herdr", "server not running", true, "api", "snapshot")
 	c.atualizar(Opcoes{Fontes: []string{"herdr"}, Forcar: true})
-	if r, _ := c.e.PublicarTokens(ctx); r.Pulado == nil {
+	if r := publicar(); r.Pulado == nil {
 		t.Fatal("devia pular com o Herdr fora")
+	}
+}
+
+// O caso da revisão r1: outra fonte já publicou exatamente o valor que o orq quer. O orq não o
+// adota (não registra) e, quando deixa de querer, não o limpa — nem no fim do daemon.
+func TestTokenIgualDeOutraFonteNaoEAdotado(t *testing.T) {
+	c := novoCenario(t)
+	ctx := context.Background()
+	co := c.coord("a", "w1:p1", "")
+	c.onda(co, "4")
+	c.sessao([]map[string]any{{"pane_id": "w1:p1", "workspace_id": "w1", "tokens": map[string]string{"orq": "1 Wait"}}},
+		[]map[string]any{{"workspace_id": "w1"}})
+	c.atualizar(Opcoes{Fontes: []string{"herdr"}})
+	_ = c.chamadas("herdr")
+	r, err := c.e.PublicarTokens(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts, _ := c.st.TokensPublicados(ctx); len(ts) != 0 || len(r.Publicados) != 0 || len(r.Avisos) != 1 {
+		t.Fatalf("adotou: registro %+v, resultado %+v", ts, r)
+	}
+	if _, err := c.st.EncerrarOnda(ctx, "a", 1); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := c.e.PublicarTokens(ctx); len(r.Limpos) != 0 {
+		t.Fatalf("limpou: %+v", r)
+	}
+	if r, _ := c.e.LimparTokens(ctx); len(r.Limpos) != 0 {
+		t.Fatalf("limpou ao sair: %+v", r)
+	}
+	if got := c.chamadas("herdr"); len(got) != 0 {
+		t.Fatalf("chamou o Herdr: %q", got)
+	}
+}
+
+// Publicação que falhou não é registrada: o orq só é dono do que publicou com sucesso.
+func TestTokenSoERegistradoDepoisDePublicar(t *testing.T) {
+	c := novoCenario(t)
+	ctx := context.Background()
+	co := c.coord("a", "w1:p1", "")
+	c.onda(co, "4")
+	c.sessao([]map[string]any{{"pane_id": "w1:p1", "workspace_id": "w1"}}, []map[string]any{{"workspace_id": "w1"}})
+	c.atualizar(Opcoes{Fontes: []string{"herdr"}})
+	c.responder("herdr", "pane not found", true, "pane", "report-metadata", "w1:p1", "--source", "orq", "--token", "orq=1 Wait")
+	r, _ := c.e.PublicarTokens(ctx)
+	if ts, _ := c.st.TokensPublicados(ctx); len(ts) != 0 || len(r.Erros) != 1 || len(r.Publicados) != 0 {
+		t.Fatalf("registro %+v, resultado %+v", ts, r)
 	}
 }
 

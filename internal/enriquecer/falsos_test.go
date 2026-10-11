@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ const scriptFalso = `#!/bin/sh
 d='%DIR%'; t='%NOME%'
 printf '%s\037' "$@" >> "$d/log/$t"; echo >> "$d/log/$t"
 key=$(printf '%s_' "$@" | LC_ALL=C tr -c 'A-Za-z0-9_.-' '_')
-if [ -f "$d/resp/$t/$key.err" ]; then cat "$d/resp/$t/$key.err" >&2; exit 1; fi
+if [ -f "$d/resp/$t/$key.err" ]; then cat "$d/resp/$t/$key.err" >&2; exit $(cat "$d/resp/$t/$key.code" 2>/dev/null || echo 1); fi
 if [ -f "$d/resp/$t/$key.out" ]; then cat "$d/resp/$t/$key.out"; exit 0; fi
 exit 0
 `
@@ -68,11 +69,22 @@ func (f *falsos) responder(nome, saida string, erro bool, args ...string) {
 	base := filepath.Join(f.dir, "resp", nome, chaveArgs(args...))
 	_ = os.Remove(base + ".out")
 	_ = os.Remove(base + ".err")
+	_ = os.Remove(base + ".code")
 	ext := ".out"
 	if erro {
 		ext = ".err"
 	}
 	if err := os.WriteFile(base+ext, []byte(saida), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// responderCodigo é o responder de erro com código de saída próprio.
+func (f *falsos) responderCodigo(nome, saida string, codigo int, args ...string) {
+	f.t.Helper()
+	f.responder(nome, saida, true, args...)
+	base := filepath.Join(f.dir, "resp", nome, chaveArgs(args...))
+	if err := os.WriteFile(base+".code", []byte(strconv.Itoa(codigo)), 0o644); err != nil {
 		f.t.Fatal(err)
 	}
 }
