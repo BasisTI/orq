@@ -15,15 +15,17 @@ const VersaoSnapshot = 1
 
 // Snapshot é o estado consolidado que o TUI e o daemon consomem.
 type Snapshot struct {
-	Versao            int             `json:"versao"`
-	GeradoEm          string          `json:"gerado_em"`
-	Coordenadores     []CoordSnapshot `json:"coordenadores"`
-	PendenciasAbertas []Pendencia     `json:"pendencias_abertas"`
+	Versao            int              `json:"versao"`
+	GeradoEm          string           `json:"gerado_em"`
+	Coordenadores     []CoordSnapshot  `json:"coordenadores"`
+	PendenciasAbertas []Pendencia      `json:"pendencias_abertas"`
+	Fontes            map[string]Fonte `json:"fontes"`
 }
 
-// CoordSnapshot é um coordenador com as ondas dele.
+// CoordSnapshot é um coordenador com o estado vivo do pane dele e as ondas.
 type CoordSnapshot struct {
 	Coordenador
+	Herdr *Herdr `json:"herdr"`
 	Ondas []Onda `json:"ondas"`
 }
 
@@ -32,6 +34,10 @@ func (s *Store) Snapshot(ctx context.Context, incluirEncerradas bool) (Snapshot,
 	snap := Snapshot{Versao: VersaoSnapshot, GeradoEm: s.agora(), Coordenadores: []CoordSnapshot{}}
 	err := s.ler(ctx, func(tx *sql.Tx) error {
 		cs, err := listarCoords(ctx, tx)
+		if err != nil {
+			return err
+		}
+		h, err := lerHerdr(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -44,9 +50,12 @@ func (s *Store) Snapshot(ctx context.Context, incluirEncerradas bool) (Snapshot,
 			if err != nil {
 				return err
 			}
-			snap.Coordenadores = append(snap.Coordenadores, CoordSnapshot{Coordenador: c, Ondas: os})
+			snap.Coordenadores = append(snap.Coordenadores, CoordSnapshot{Coordenador: c, Herdr: h.pane(c.PaneID), Ondas: os})
 		}
-		snap.PendenciasAbertas, err = carregarPendencias(ctx, tx, `WHERE p.aberta = 1`)
+		if snap.PendenciasAbertas, err = carregarPendencias(ctx, tx, `WHERE p.aberta = 1`); err != nil {
+			return err
+		}
+		snap.Fontes, err = carregarFontes(ctx, tx)
 		return err
 	})
 	return snap, err

@@ -32,6 +32,8 @@ type US struct {
 	AtualizadoEm string      `json:"atualizado_em"`
 	MRs          []MR        `json:"mrs"`
 	Pendencias   []Pendencia `json:"pendencias"`
+	Herdr        *Herdr      `json:"herdr"` // nulo sem pane
+	Taiga        Taiga       `json:"taiga"`
 }
 
 func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]US, error) {
@@ -55,8 +57,16 @@ func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]U
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	h, err := lerHerdr(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	for i := range us {
 		u := &us[i]
+		u.Herdr = h.pane(u.PaneID)
+		if u.Taiga, err = carregarTaiga(ctx, q, u.Chave); err != nil {
+			return nil, err
+		}
 		if u.DependeDe, err = carregarDeps(ctx, q, u.Projeto, u.Ref); err != nil {
 			return nil, err
 		}

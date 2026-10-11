@@ -64,7 +64,7 @@ func (a *App) root() *cobra.Command {
 			})
 		},
 	})
-	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd())
+	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd(), a.atualizarCmd(), a.daemonCmd())
 	return root
 }
 

@@ -1,6 +1,6 @@
 # Contrato do `orq snapshot` (versão 1)
 
-`orq snapshot` imprime, sempre em JSON, o estado consolidado da Central: coordenadores → ondas → US (com MRs e pendências), mais a lista das pendências abertas. É o que o TUI e o daemon consomem; o resto da CLI pode mudar de forma, este documento não sem subir a versão.
+`orq snapshot` imprime, sempre em JSON, o estado consolidado da Central: coordenadores → ondas → US (com MRs e pendências), mais a lista das pendências abertas e o estado vivo que os enriquecedores trazem do Herdr, das forjas e do Taiga. É o que o TUI e o daemon consomem; o resto da CLI pode mudar de forma, este documento não sem subir a versão.
 
 - Por padrão, só as ondas abertas. `--incluir-encerradas` traz todas.
 - `orq snapshot --json`, a forma do desenho, também vale: a flag é aceita e não muda nada. `--output text` é ignorado.
@@ -13,6 +13,25 @@
 - Datas em RFC 3339, UTC, com segundos (`2026-10-11T14:03:40Z`).
 - Ordem: coordenadores por nome; ondas por id; US pela posição na onda; MRs pela ordem em que foram ligadas; pendências pela abertura.
 
+### Histórico
+
+- Versão 1, US #3: o esqueleto.
+- Ainda versão 1, US #4: os campos `herdr` (coordenador e US), `taiga` (US), `atualizado_em` e `erro` (MR) e `fontes` (raiz) entraram, e `MR.estado` passou a ser preenchido. Tudo aditivo: `estado` já estava declarado como `draft|aberta|pronta|mesclada|fechada`, e quem lia a versão 1 continua lendo.
+
+## Estado vivo (US #4)
+
+O snapshot não consulta nada: ele lê o cache que `orq daemon` (em laço) e `orq atualizar` (uma vez) gravam. Cada fonte guarda o último valor bom e o erro da última consulta, então um valor pode estar velho e com `erro` ao lado; quem desenha decide pelo `atualizado_em`.
+
+| Fonte | O que lê | Cadência no daemon |
+|---|---|---|
+| `herdr` | `herdr api snapshot`: status do agente, nome e workspace de cada pane, tokens | a cada tick (5 s) e a cada `pane.agent_status_changed` |
+| `mr` | `glab api` (GitLab) ou `gh api` (GitHub), só leitura | TTL de 60 s por MR |
+| `taiga` | `taiga story get --output json`, só leitura | TTL de 5 min por US |
+
+Estado da MR: `mesclada`, `fechada`, `draft`, `pronta` (aberta, não draft e mesclável: `detailed_merge_status` `mergeable` no GitLab, `mergeable_state` `clean` ou `has_hooks` no GitHub) ou `aberta` (o resto: conflito, pipeline, revisão obrigatória, ainda não calculado). Mudança de estado gera `mr.estado` no diário.
+
+Erro de autenticação de `glab`, `gh` ou `taiga` suspende a ferramenta por 30 min (ou até `orq atualizar --forcar`): o orq não tenta login nem define token. A suspensão aparece em `fontes.<fonte>.erro`.
+
 ## Esquema
 
 ```text
@@ -20,7 +39,31 @@
   "versao": 1,
   "gerado_em": data,
   "coordenadores": [Coordenador],
-  "pendencias_abertas": [Pendencia]        # todas as abertas, de todos os coordenadores
+  "pendencias_abertas": [Pendencia],       # todas as abertas, de todos os coordenadores
+  "fontes": {"herdr": Fonte, "mr": Fonte, "taiga": Fonte}
+}
+
+Fonte {
+  "consultado_em": data|null,              # última consulta, boa ou não
+  "atualizado_em": data|null,              # último valor bom
+  "erro": Erro|null                        # o que vale para a fonte inteira: falha do Herdr ou ferramenta suspensa
+}
+
+Erro {
+  "codigo": "binario_ausente"|"autenticacao"|"nao_encontrado"|"tempo_esgotado"|"falha_comando"|"resposta_invalida",
+  "mensagem": string,                      # da ferramenta, cortada
+  "em": data                               # na fonte, o início da suspensão
+}
+
+Herdr {                                    # estado vivo de um pane
+  "status": "idle"|"working"|"blocked"|"done"|"unknown"|"ausente"|null,
+                                           # unknown: pane sem agente; ausente: o Herdr respondeu e o pane não existe;
+                                           # null: o Herdr nunca respondeu
+  "agente": string|null,                   # "claude", "codex"
+  "nome": string|null,                     # nome do agente no Herdr
+  "workspace_id": string|null,
+  "atualizado_em": data|null,
+  "erro": Erro|null                        # a última consulta ao Herdr falhou: o resto é o último valor bom
 }
 
 Coordenador {
@@ -29,6 +72,7 @@ Coordenador {
   "workspace_id": string|null,
   "projeto_padrao": string|null,           # slug do Taiga usado em TG-<n> sem projeto
   "registrado_em": data,                   # último registro
+  "herdr": Herdr|null,                     # nulo sem pane_id
   "ondas": [Onda]
 }
 
@@ -57,7 +101,15 @@ US {
   "rodada": int|null,
   "atualizado_em": data,
   "mrs": [MR],
-  "pendencias": [Pendencia]                # abertas e resolvidas
+  "pendencias": [Pendencia],               # abertas e resolvidas
+  "herdr": Herdr|null,                     # nulo sem pane_id
+  "taiga": {
+    "titulo": string|null,
+    "status": string|null,                 # nome do status no Taiga, "In progress"
+    "url": string|null,
+    "atualizado_em": data|null,
+    "erro": Erro|null
+  }
 }
 
 MR {
@@ -65,8 +117,10 @@ MR {
   "projeto_path": string,                  # "basis/iac/plataforma" ou "BasisTI/orq"
   "iid": int,
   "iac": bool,                             # projeto sob basis/iac/
-  "estado": string|null,                   # nulo até os enriquecedores (US #4); depois draft|aberta|pronta|mesclada|fechada
-  "adicionada_em": data
+  "estado": "draft"|"aberta"|"pronta"|"mesclada"|"fechada"|null,   # nulo até a primeira consulta boa
+  "adicionada_em": data,
+  "atualizado_em": data|null,              # última consulta boa à forja
+  "erro": Erro|null                        # última consulta, se falhou
 }
 
 Pendencia {
@@ -100,6 +154,14 @@ Pendencia {
       "workspace_id": null,
       "projeto_padrao": "colaboradados",
       "registrado_em": "2026-10-11T14:00:00Z",
+      "herdr": {
+        "status": "working",
+        "agente": "claude",
+        "nome": null,
+        "workspace_id": "wB",
+        "atualizado_em": "2026-10-11T14:09:58Z",
+        "erro": null
+      },
       "ondas": [
         {
           "id": 1,
@@ -129,8 +191,10 @@ Pendencia {
                   "projeto_path": "basis/colaboradados/api",
                   "iid": 41,
                   "iac": false,
-                  "estado": null,
-                  "adicionada_em": "2026-10-11T14:05:00Z"
+                  "estado": "pronta",
+                  "adicionada_em": "2026-10-11T14:05:00Z",
+                  "atualizado_em": "2026-10-11T14:09:30Z",
+                  "erro": null
                 }
               ],
               "pendencias": [
@@ -148,7 +212,22 @@ Pendencia {
                   "onda_id": 1,
                   "coordenador": "colaboradados"
                 }
-              ]
+              ],
+              "herdr": {
+                "status": "blocked",
+                "agente": "claude",
+                "nome": "tg215-exec",
+                "workspace_id": "wB",
+                "atualizado_em": "2026-10-11T14:09:58Z",
+                "erro": null
+              },
+              "taiga": {
+                "titulo": "Exportar a folha em CSV",
+                "status": "In progress",
+                "url": "https://agile.basis.com.br/project/colaboradados/us/215",
+                "atualizado_em": "2026-10-11T14:06:00Z",
+                "erro": null
+              }
             }
           ]
         }
@@ -170,6 +249,15 @@ Pendencia {
       "onda_id": 1,
       "coordenador": "colaboradados"
     }
-  ]
+  ],
+  "fontes": {
+    "herdr": {"consultado_em": "2026-10-11T14:09:58Z", "atualizado_em": "2026-10-11T14:09:58Z", "erro": null},
+    "mr": {"consultado_em": "2026-10-11T14:09:30Z", "atualizado_em": "2026-10-11T14:09:30Z", "erro": null},
+    "taiga": {
+      "consultado_em": "2026-10-11T14:06:00Z",
+      "atualizado_em": "2026-10-11T14:06:00Z",
+      "erro": {"codigo": "autenticacao", "mensagem": "taiga suspenso: taiga: session_expired", "em": "2026-10-11T14:08:00Z"}
+    }
+  }
 }
 ```
