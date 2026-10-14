@@ -188,13 +188,13 @@ orq onda proxima          # TG-216
 
 ### Encerrar a onda
 
-Com todas as US em `done`, `orq onda proxima` traz `encerramento`; antes disso, ele vem nulo. A onda está pronta para encerrar (`pronta: true`) quando, além disso, toda MR da onda está `mesclada` ou `fechada` e nenhuma pendência está aberta. Aí `comando` traz `orq onda encerrar <id>`. Senão, `comando` é nulo e `faltam` lista o que impede, um item por MR ou pendência. O estado da MR vem do cache do daemon: MR sem estado (o daemon não rodou ou ainda não consultou a forja) entra em `faltam` como "falta conferir", nunca como mesclada. Numa onda `plano` as MRs não contam: o plano aprovado encerra a onda, e `passo` lembra de criar a onda de implementação com as mesmas US.
+Com todas as US em `done`, `orq onda proxima` traz `encerramento`; antes disso, ele vem nulo. A onda está pronta para encerrar (`pronta: true`) quando, além disso, toda MR da onda está `mesclada` ou `fechada` e nenhuma pendência está aberta. Aí `comando` traz `orq onda encerrar <id>`. Senão, `comando` é nulo e `faltam` lista o que impede, um item por MR ou pendência, com a chave completa (`colaboradados/215`, `colaboradados/215#P1`), que funciona colada em `orq pend resolver` mesmo numa onda de vários projetos. O estado da MR vem do cache do daemon: MR sem estado (o daemon não rodou ou ainda não consultou a forja) entra em `faltam` como "falta conferir", nunca como mesclada. Numa onda `plano` as MRs não contam: o plano aprovado encerra a onda, e `passo` lembra de criar a onda de implementação com as mesmas US.
 
 ```json
 "encerramento": {
   "pronta": false,
   "comando": null,
-  "faltam": ["TG-215: MR https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_requests/41 pronta (falta merge ou fechamento)"],
+  "faltam": ["colaboradados/215: MR https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_requests/41 pronta (falta merge ou fechamento)"],
   "passo": "falta concluir antes de encerrar a onda"
 }
 ```

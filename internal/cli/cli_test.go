@@ -173,7 +173,7 @@ func TestProximaEncerramentoCLI(t *testing.T) {
 		t.Fatalf("MR sem estado e pendência: %+v", s.Encerramento)
 	}
 	txt := ok(t, env, "--output", "text", "onda", "proxima", "1")
-	for _, quer := range []string{"próximo passo: falta concluir", "falta: TG-1: MR " + url + " sem estado conhecido (falta conferir)", "falta: TG-1#P1: pendência aberta"} {
+	for _, quer := range []string{"próximo passo: falta concluir", "falta: p/1: MR " + url + " sem estado conhecido (falta conferir)", "falta: p/1#P1: pendência aberta"} {
 		if !strings.Contains(txt, quer) {
 			t.Errorf("texto sem %q:\n%s", quer, txt)
 		}
@@ -196,6 +196,33 @@ func TestProximaEncerramentoCLI(t *testing.T) {
 	}
 	if out := ok(t, env, "onda", "list", "--abertas"); !strings.Contains(out, `"id": 1`) {
 		t.Fatalf("a onda foi encerrada sozinha: %s", out)
+	}
+}
+
+// Numa onda com dois projetos e o mesmo número, o id que sai em faltam, colado no
+// pend resolver, resolve a pendência certa (o id curto TG-1#P1 iria ao projeto padrão).
+func TestFaltamComDoisProjetosCLI(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a", "--projeto", "demo-a")
+	ok(t, env, "onda", "criar", "o", "--us", "demo-a/1,demo-b/1")
+	ok(t, env, "us", "status", "demo-a/1", "done")
+	ok(t, env, "us", "status", "demo-b/1", "done")
+	ok(t, env, "pend", "add", "demo-b/1", "--tipo", "duvida", "fictícia")
+	var s struct{ Encerramento struct{ Faltam []string } }
+	if out := ok(t, env, "onda", "proxima", "1"); json.Unmarshal([]byte(out), &s) != nil || len(s.Encerramento.Faltam) != 1 {
+		t.Fatalf("proxima = %s", out)
+	}
+	id, _, _ := strings.Cut(s.Encerramento.Faltam[0], ":")
+	if id != "demo-b/1#P1" {
+		t.Fatalf("id em faltam = %q", id)
+	}
+	if txt := ok(t, env, "--output", "text", "onda", "proxima", "1"); !strings.Contains(txt, "falta: demo-b/1#P1: pendência aberta") {
+		t.Fatalf("texto:\n%s", txt)
+	}
+	ok(t, env, "pend", "resolver", id, "--resposta", "levada para o Taiga")
+	var p struct{ Encerramento struct{ Pronta bool } }
+	if out := ok(t, env, "onda", "proxima", "1"); json.Unmarshal([]byte(out), &p) != nil || !p.Encerramento.Pronta {
+		t.Fatalf("depois de resolver: %s", out)
 	}
 }
 

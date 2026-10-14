@@ -360,7 +360,9 @@ type Proxima struct {
 
 // Encerramento diz se a onda pode ser encerrada. Pronta quer dizer toda US no limite (done),
 // toda MR mesclada ou fechada e nenhuma pendência aberta; aí Comando traz o `orq onda
-// encerrar`. Senão, Faltam lista o que impede. A onda `plano` não olha as MRs: o plano
+// encerrar`. Senão, Faltam lista o que impede, com a chave completa da US (`projeto/312`) e
+// da pendência (`projeto/312#P2`): o id curto (`TG-312#P2`) resolve pelo projeto padrão do
+// coordenador e erra a US numa onda de outro projeto ou com dois projetos de mesmo número. A onda `plano` não olha as MRs: o plano
 // aprovado encerra a onda, e as US seguem para a onda de implementação. O orq só sugere: quem
 // encerra é o coordenador.
 type Encerramento struct {
@@ -386,15 +388,15 @@ func EncerramentoDe(o Onda) *Encerramento {
 			for _, m := range u.MRs {
 				switch {
 				case m.Estado == nil:
-					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s sem estado conhecido (falta conferir)", u.ID, m.URL))
+					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s sem estado conhecido (falta conferir)", u.Chave, m.URL))
 				case *m.Estado != "mesclada" && *m.Estado != "fechada":
-					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s %s (falta merge ou fechamento)", u.ID, m.URL, *m.Estado))
+					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s %s (falta merge ou fechamento)", u.Chave, m.URL, *m.Estado))
 				}
 			}
 		}
 		for _, p := range u.Pendencias {
 			if p.Aberta {
-				e.Faltam = append(e.Faltam, fmt.Sprintf("%s: pendência aberta (resolva ou leve para outra onda ou para o Taiga, registrando no diário)", p.ID))
+				e.Faltam = append(e.Faltam, fmt.Sprintf("%s#P%d: pendência aberta (resolva ou leve para outra onda ou para o Taiga, registrando no diário)", u.Chave, p.Numero))
 			}
 		}
 	}

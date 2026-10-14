@@ -279,7 +279,7 @@ func TestEncerramento(t *testing.T) {
 		}
 		return m
 	}
-	pend := func(aberta bool) []Pendencia { return []Pendencia{{ID: "TG-215#P1", Aberta: aberta}} }
+	pend := func(aberta bool) []Pendencia { return []Pendencia{{ID: "TG-215#P1", Numero: 1, Aberta: aberta}} }
 	cases := []struct {
 		nome      string
 		ate       string
@@ -296,17 +296,17 @@ func TestEncerramento(t *testing.T) {
 		{nome: "com US em wait", ate: "mr-pronta", status: []string{"done", "wait"}, nula: true},
 		{nome: "encerrada", ate: "mr-pronta", status: []string{"done"}, encerrada: true, nula: true},
 		{nome: "no limite com MR aberta", ate: "mr-pronta", status: []string{"done", "done"}, mrs: []MR{mr("u/32", "pronta"), mr("u/31", "mesclada")},
-			faltam: []string{"TG-215: MR u/32 pronta (falta merge ou fechamento)"}, passo: "falta concluir"},
+			faltam: []string{"p/215: MR u/32 pronta (falta merge ou fechamento)"}, passo: "falta concluir"},
 		{nome: "MR sem estado não conta como mesclada", ate: "merge", status: []string{"done"}, mrs: []MR{mr("u/33", "")},
-			faltam: []string{"TG-215: MR u/33 sem estado conhecido (falta conferir)"}, passo: "falta concluir"},
+			faltam: []string{"p/215: MR u/33 sem estado conhecido (falta conferir)"}, passo: "falta concluir"},
 		{nome: "com pendência aberta", ate: "mr-pronta", status: []string{"done"}, mrs: []MR{mr("u/29", "mesclada")}, pends: pend(true),
-			faltam: []string{"TG-215#P1: pendência aberta"}, passo: "falta concluir"},
+			faltam: []string{"p/215#P1: pendência aberta"}, passo: "falta concluir"},
 		{nome: "pronta para encerrar", ate: "mr-pronta", status: []string{"done", "done"}, mrs: []MR{mr("u/29", "mesclada"), mr("u/31", "fechada")}, pends: pend(false),
 			pronta: true, passo: "encerre a onda: orq onda encerrar 7"},
 		{nome: "pronta sem MR", ate: "merge", status: []string{"done"}, pronta: true, passo: "orq onda encerrar 7"},
 		{nome: "plano não olha as MRs", ate: "plano", status: []string{"done"}, mrs: []MR{mr("u/34", "draft"), mr("u/35", "")},
 			pronta: true, passo: "e crie a onda de implementação com as mesmas US"},
-		{nome: "plano com pendência aberta", ate: "plano", status: []string{"done"}, pends: pend(true), faltam: []string{"TG-215#P1: pendência aberta"}},
+		{nome: "plano com pendência aberta", ate: "plano", status: []string{"done"}, pends: pend(true), faltam: []string{"p/215#P1: pendência aberta"}},
 	}
 	for _, c := range cases {
 		t.Run(c.nome, func(t *testing.T) {
