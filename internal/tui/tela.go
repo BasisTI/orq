@@ -481,7 +481,7 @@ func (e Estilos) coordenador(c central.CoordSnapshot, abertas []central.Pendenci
 
 // faixa é o cabeçalho da onda, com fundo leve na largura do bloco (a das tabelas, ou a que os
 // selos pedem, até a do terminal): na 1ª linha o coordenador e os
-// projetos à esquerda e os selos (`até MR pronta`, `1/4 ▰▱▱▱`, `1 pend`) à direita; na 2ª o
+// projetos à esquerda e os selos (`até MR pronta`, `1/4 ▰▱▱▱`, `1 pend`, `concluída`) à direita; na 2ª o
 // título. O nome leva ao pane do coordenador pelo link; a faixa em si não é alvo de foco.
 func (e Estilos) faixa(c central.CoordSnapshot, onda central.Onda, nome string, bloco int, o Opcoes) []Linha {
 	p := e.p()
@@ -513,6 +513,10 @@ func (e Estilos) faixa(c central.CoordSnapshot, onda central.Onda, nome string, 
 	}
 	if pend > 0 {
 		dir += "  " + e.novo().Foreground(p.amarelo).Bold(true).Render(fmt.Sprintf("%d pend", pend))
+	}
+	// A regra é a do `orq onda proxima`: a onda está pronta para o coordenador encerrar.
+	if enc := central.EncerramentoDe(onda); enc != nil && enc.Pronta {
+		dir += "  " + e.cor(p.verde, "concluída")
 	}
 	dir += " "
 	titulo := limpar(onda.Titulo)

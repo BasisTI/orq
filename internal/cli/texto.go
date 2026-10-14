@@ -105,8 +105,20 @@ func textoProxima(w io.Writer, p central.Proxima) error {
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(w, "limite (%s): %s\n", p.AutorizacaoAte, p.Limite)
-	return err
+	if _, err := fmt.Fprintf(w, "limite (%s): %s\n", p.AutorizacaoAte, p.Limite); err != nil {
+		return err
+	}
+	if e := p.Encerramento; e != nil {
+		if _, err := fmt.Fprintf(w, "próximo passo: %s\n", e.Passo); err != nil {
+			return err
+		}
+		for _, f := range e.Faltam {
+			if _, err := fmt.Fprintf(w, "falta: %s\n", q(f)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func textoPendencia(w io.Writer, p central.Pendencia, recuo string) error {

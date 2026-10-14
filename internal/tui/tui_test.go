@@ -690,3 +690,50 @@ func TestSelecaoSegueOItemQuandoOPaneMuda(t *testing.T) {
 		t.Fatalf("seleção perdida: sel=%d", m.sel)
 	}
 }
+
+// O selo `concluída` aparece na faixa da onda pronta para encerrar (a regra do `orq onda
+// proxima`), em verde sem negrito; não aparece com a onda em curso, com MR à espera ou sem
+// estado, nem com pendência aberta.
+func TestSeloConcluida(t *testing.T) {
+	gl := "https://gitlab.basis.com.br/basis/sgo-cli/-/merge_requests/"
+	pronta := func() central.Snapshot {
+		s := snapshot()
+		o := &s.Coordenadores[0].Ondas[0]
+		o.US = []central.US{
+			us(225, "done", "wB:p6", "done", "Criação Suporte/OS", 0, mr(gl+"29", "basis/sgo-cli", 29, "mesclada", false), mr(gl+"31", "basis/sgo-cli", 31, "fechada", false)),
+			us(226, "done", "", "", "Sem MR", 0),
+		}
+		s.PendenciasAbertas = nil
+		return s
+	}
+	faixa := func(s central.Snapshot) (string, string) {
+		l := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas[0].Texto
+		return ansi.Strip(l), l
+	}
+	plana, crua := faixa(pronta())
+	if !strings.HasSuffix(plana, "até MR pronta  2/2 ▰▰  concluída ") {
+		t.Fatalf("faixa da onda pronta: %q", plana)
+	}
+	if !strings.Contains(crua, "\x1b[38;2;152;195;121mconcluída") {
+		t.Errorf("selo sem o verde discreto: %q", crua)
+	}
+	casos := map[string]func(*central.Snapshot){
+		"em curso":      func(s *central.Snapshot) { s.Coordenadores[0].Ondas[0].US[1].Status = "rev" },
+		"MR à espera":   func(s *central.Snapshot) { s.Coordenadores[0].Ondas[0].US[0].MRs[0].Estado = ptr("pronta") },
+		"MR sem estado": func(s *central.Snapshot) { s.Coordenadores[0].Ondas[0].US[0].MRs[1].Estado = nil },
+		"pendência aberta": func(s *central.Snapshot) {
+			s.Coordenadores[0].Ondas[0].US[1].Pendencias = []central.Pendencia{{ID: "TG-226#P1", Aberta: true}}
+		},
+	}
+	for nome, mudar := range casos {
+		s := pronta()
+		mudar(&s)
+		if plana, _ := faixa(s); strings.Contains(plana, "concluída") {
+			t.Errorf("%s: selo na faixa %q", nome, plana)
+		}
+	}
+	// A tela do desenho (onda em curso) não tem o selo.
+	if strings.Contains(planas(desenhar(Opcoes{Coord: "convey", Largura: 100}))[0], "concluída") {
+		t.Error("selo na onda em curso")
+	}
+}

@@ -56,7 +56,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq onda criar <titulo> --us 215,216,217,218 [--projeto <slug>] [--ate plano\|mr-pronta\|merge] [--ordem estrita\|livre] [--depende 216:215]` | Cria a onda com as US em `wait`, na ordem dada. `--ate` padrão `mr-pronta`, `--ordem` padrão `livre`. `--depende` é repetível e aceita `218:216+217`. US sem projeto usam `--projeto` ou o projeto padrão do coordenador. |
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
-| `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. |
+| `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. Com todas as US no limite, `encerramento` diz o próximo passo (veja [Encerrar a onda](#encerrar-a-onda)). |
 | `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). |
 | `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. |
@@ -118,7 +118,7 @@ Só pane e workspace que existem recebem token. No Herdr o token é por nome, n�
  herdr agora · mr há 1 min · taiga há 2 min ✗ autenticacao  ● trabalhando ⚠ bloqueado …  ↑↓ Enter foca · r relê · q sai
 ```
 
-- Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas; na 2ª linha, o título da onda. Coordenador sem onda aberta é uma linha discreta.
+- Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas, e o selo `concluída`, em verde, quando a onda está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)); na 2ª linha, o título da onda. Coordenador sem onda aberta é uma linha discreta.
 - Tabela das US: agente | US | título | status | MRs, com fundo alternado. A 1ª coluna é o status Herdr do pane da US, não o da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu (a legenda vai no rodapé). A US com o pane `blocked` sobe para o topo, com fundo de destaque e título em negrito; a US Done sai esmaecida.
 - `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`!412…`); num largo as colunas não passam do conteúdo.
 - Status com cor (Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde) e link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples em qualquer linha da US, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`); a seleção é o fundo da linha. No popup, focar fecha o popup.
@@ -185,6 +185,21 @@ orq mr add TG-215 https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_re
 orq us status TG-215 done
 orq onda proxima          # TG-216
 ```
+
+### Encerrar a onda
+
+Com todas as US em `done`, `orq onda proxima` traz `encerramento`; antes disso, ele vem nulo. A onda está pronta para encerrar (`pronta: true`) quando, além disso, toda MR da onda está `mesclada` ou `fechada` e nenhuma pendência está aberta. Aí `comando` traz `orq onda encerrar <id>`. Senão, `comando` é nulo e `faltam` lista o que impede, um item por MR ou pendência, com a chave completa (`colaboradados/215`, `colaboradados/215#P1`), que funciona colada em `orq pend resolver` mesmo numa onda de vários projetos. O estado da MR vem do cache do daemon: MR sem estado (o daemon não rodou ou ainda não consultou a forja) entra em `faltam` como "falta conferir", nunca como mesclada. Numa onda `plano` as MRs não contam: o plano aprovado encerra a onda, e `passo` lembra de criar a onda de implementação com as mesmas US.
+
+```json
+"encerramento": {
+  "pronta": false,
+  "comando": null,
+  "faltam": ["colaboradados/215: MR https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_requests/41 pronta (falta merge ou fechamento)"],
+  "passo": "falta concluir antes de encerrar a onda"
+}
+```
+
+Em texto, as linhas `próximo passo:` e `falta:`. O `orq` só sugere: quem encerra é o coordenador, com `orq onda encerrar <id>`. O TUI marca a faixa da onda pronta com o selo `concluída`, pela mesma regra.
 
 ## Licença
 

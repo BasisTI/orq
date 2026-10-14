@@ -354,6 +354,63 @@ type Proxima struct {
 	Elegiveis      []string   `json:"elegiveis"`
 	Bloqueadas     []Bloqueio `json:"bloqueadas"`
 	Motivo         string     `json:"motivo"`
+	// Encerramento é o próximo passo da onda aberta com todas as US no limite; nulo antes disso.
+	Encerramento *Encerramento `json:"encerramento"`
+}
+
+// Encerramento diz se a onda pode ser encerrada. Pronta quer dizer toda US no limite (done),
+// toda MR mesclada ou fechada e nenhuma pendência aberta; aí Comando traz o `orq onda
+// encerrar`. Senão, Faltam lista o que impede, com a chave completa da US (`projeto/312`) e
+// da pendência (`projeto/312#P2`): o id curto (`TG-312#P2`) resolve pelo projeto padrão do
+// coordenador e erra a US numa onda de outro projeto ou com dois projetos de mesmo número. A onda `plano` não olha as MRs: o plano
+// aprovado encerra a onda, e as US seguem para a onda de implementação. O orq só sugere: quem
+// encerra é o coordenador.
+type Encerramento struct {
+	Pronta  bool     `json:"pronta"`
+	Comando *string  `json:"comando"`
+	Faltam  []string `json:"faltam"`
+	Passo   string   `json:"passo"`
+}
+
+// EncerramentoDe aplica a regra de encerramento à onda. Nulo se a onda está encerrada, vazia
+// ou com alguma US antes do limite. MR sem estado (o daemon ainda não consultou a forja, ou
+// não roda) entra em Faltam como "falta conferir": não conta como mesclada.
+func EncerramentoDe(o Onda) *Encerramento {
+	if o.EncerradaEm != nil || len(o.US) == 0 {
+		return nil
+	}
+	e := &Encerramento{Faltam: []string{}}
+	for _, u := range o.US {
+		if u.Status != "done" {
+			return nil
+		}
+		if o.AutorizacaoAte != "plano" {
+			for _, m := range u.MRs {
+				switch {
+				case m.Estado == nil:
+					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s sem estado conhecido (falta conferir)", u.Chave, m.URL))
+				case *m.Estado != "mesclada" && *m.Estado != "fechada":
+					e.Faltam = append(e.Faltam, fmt.Sprintf("%s: MR %s %s (falta merge ou fechamento)", u.Chave, m.URL, *m.Estado))
+				}
+			}
+		}
+		for _, p := range u.Pendencias {
+			if p.Aberta {
+				e.Faltam = append(e.Faltam, fmt.Sprintf("%s#P%d: pendência aberta (resolva ou leve para outra onda ou para o Taiga, registrando no diário)", u.Chave, p.Numero))
+			}
+		}
+	}
+	if len(e.Faltam) > 0 {
+		e.Passo = "falta concluir antes de encerrar a onda"
+		return e
+	}
+	cmd := fmt.Sprintf("orq onda encerrar %d", o.ID)
+	e.Pronta, e.Comando = true, &cmd
+	e.Passo = "encerre a onda: " + cmd
+	if o.AutorizacaoAte == "plano" {
+		e.Passo += ", e crie a onda de implementação com as mesmas US"
+	}
+	return e
 }
 
 // ProximaUS escolhe a próxima US em wait que pode ser despachada. Uma US está liberada quando
@@ -428,6 +485,7 @@ func proxima(o Onda) Proxima {
 	switch {
 	case len(andamento) == 0 && len(p.Bloqueadas) == 0:
 		p.Motivo = "onda concluída até " + o.AutorizacaoAte
+		p.Encerramento = EncerramentoDe(o)
 	case len(p.Bloqueadas) == 0:
 		p.Motivo = "nenhuma US em wait; em andamento: " + strings.Join(andamento, ", ")
 	default:
