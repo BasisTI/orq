@@ -5,13 +5,16 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/charmbracelet/x/ansi"
@@ -27,55 +30,95 @@ type Opcoes struct {
 	Todos   bool      // um bloco por coordenador, com o total de pendências abertas
 	Largura int       // colunas disponíveis
 	Agora   time.Time // relógio de "há 12 min"
+	// Selecao é o Item da linha selecionada: as linhas físicas dele saem com o fundo de seleção.
+	Selecao string
 }
 
-// Linha é uma linha da tela. Pane, quando não vazio, é o pane que Enter ou o clique focam.
+// Linha é uma linha física da tela. Pane, quando não vazio, é o pane que Enter ou o clique
+// focam; Item identifica a US ou a pendência a que a linha pertence (as várias linhas de uma
+// US com MRs têm o mesmo Item). Bordas, regras e faixas não têm nem um nem outro.
 type Linha struct {
 	Texto string
 	Pane  string
+	Item  string
 }
 
-// Tela é o que Desenhar produz: as linhas e o rodapé com o estado das fontes.
+// Tela é o que Desenhar produz: as linhas, o rodapé com o estado das fontes e a legenda dos
+// ícones do agente, um trecho por ícone (o modelo a encurta quando não cabe).
 type Tela struct {
-	Linhas []Linha
-	Rodape string
+	Linhas  []Linha
+	Rodape  string
+	Legenda []string
 }
 
 // Estilos desenha com o lipgloss: as cores saem em truecolor e o programa do bubbletea as
-// reduz ao perfil do terminal na saída.
-type Estilos struct{}
+// reduz ao perfil do terminal na saída. Claro escolhe os tons para terminal de fundo claro; o
+// padrão, enquanto o terminal não informa a cor de fundo, é o escuro.
+type Estilos struct {
+	Claro bool
+}
+
+// paleta são as cores de um tema: as do texto e os fundos leves (faixa do coordenador, linha
+// alternada, seleção e US blocked).
+type paleta struct {
+	vermelho, verde, amarelo, azul, cinza, apagado, laranja, roxo color.Color
+	faixa, zebra, selecao, bloqueada, borda                       color.Color
+}
 
 var (
-	corVermelho = lipgloss.Color("#e06c75")
-	corVerde    = lipgloss.Color("#98c379")
-	corAmarelo  = lipgloss.Color("#e5c07b")
-	corCinza    = lipgloss.Color("#7f848e")
-	corApagado  = lipgloss.Color("#5c6370")
-	corLaranja  = lipgloss.Color("#ff8c00")
-	corRoxo     = lipgloss.Color("#c678dd")
+	escura = paleta{
+		vermelho: lipgloss.Color("#e06c75"), verde: lipgloss.Color("#98c379"), amarelo: lipgloss.Color("#e5c07b"),
+		azul: lipgloss.Color("#61afef"), cinza: lipgloss.Color("#7f848e"), apagado: lipgloss.Color("#5c6370"),
+		laranja: lipgloss.Color("#ff8c00"), roxo: lipgloss.Color("#c678dd"),
+		faixa: lipgloss.Color("#323844"), zebra: lipgloss.Color("#272b33"), selecao: lipgloss.Color("#3e4a5e"),
+		bloqueada: lipgloss.Color("#4a2a30"), borda: lipgloss.Color("#4b5263"),
+	}
+	clara = paleta{
+		vermelho: lipgloss.Color("#e45649"), verde: lipgloss.Color("#50a14f"), amarelo: lipgloss.Color("#b07d00"),
+		azul: lipgloss.Color("#4078f2"), cinza: lipgloss.Color("#696c77"), apagado: lipgloss.Color("#a0a1a7"),
+		laranja: lipgloss.Color("#d75f00"), roxo: lipgloss.Color("#a626a4"),
+		faixa: lipgloss.Color("#e3e7ee"), zebra: lipgloss.Color("#f2f3f5"), selecao: lipgloss.Color("#cfd8e6"),
+		bloqueada: lipgloss.Color("#fbe1e3"), borda: lipgloss.Color("#c5c8cf"),
+	}
 )
+
+func (e Estilos) p() paleta {
+	if e.Claro {
+		return clara
+	}
+	return escura
+}
 
 func (e Estilos) novo() lipgloss.Style { return lipgloss.NewStyle() }
 
-func (e Estilos) apagado(s string) string { return e.novo().Foreground(corApagado).Render(s) }
-func (e Estilos) negrito(s string) string { return e.novo().Bold(true).Render(s) }
+func (e Estilos) cor(c color.Color, s string) string { return e.novo().Foreground(c).Render(s) }
+func (e Estilos) apagado(s string) string            { return e.cor(e.p().apagado, s) }
+func (e Estilos) negrito(s string) string            { return e.novo().Bold(true).Render(s) }
 
-// Ícone do status Herdr do pane da US. Pane sem agente (unknown), pane que sumiu (ausente) e
-// US sem pane ou Herdr que nunca respondeu (–) têm marcas próprias.
-func (e Estilos) icone(u central.US) string {
-	st := ""
-	if u.Herdr != nil && u.Herdr.Status != nil {
-		st = *u.Herdr.Status
-	}
+// Ícones do status Herdr do pane da US, na ordem da legenda do rodapé. Pane sem agente
+// (unknown), pane que sumiu (ausente) e US sem pane ou Herdr que nunca respondeu (–) têm marcas
+// próprias.
+var icones = []struct{ status, icone, legenda string }{
+	{"working", "●", "trabalhando"},
+	{"blocked", "⚠", "bloqueado"},
+	{"idle", "·", "ocioso"},
+	{"done", "✓", "concluiu"},
+	{"unknown", "○", "desconhecido"},
+	{"ausente", "✗", "pane fechado"},
+	{"", "–", "sem pane"},
+}
+
+func (e Estilos) iconeDe(st string) string {
+	p := e.p()
 	switch st {
 	case "working":
-		return e.novo().Foreground(corAmarelo).Render("●")
+		return e.cor(p.amarelo, "●")
 	case "blocked":
-		return e.novo().Foreground(corVermelho).Bold(true).Render("⚠")
+		return e.novo().Foreground(p.vermelho).Bold(true).Render("⚠")
 	case "idle":
-		return e.novo().Foreground(corCinza).Render("·")
+		return e.cor(p.cinza, "·")
 	case "done":
-		return e.novo().Foreground(corVerde).Render("✓")
+		return e.cor(p.verde, "✓")
 	case "unknown":
 		return e.apagado("○")
 	case "ausente":
@@ -85,9 +128,18 @@ func (e Estilos) icone(u central.US) string {
 	}
 }
 
+func (e Estilos) icone(u central.US) string {
+	st := ""
+	if u.Herdr != nil && u.Herdr.Status != nil {
+		st = *u.Herdr.Status
+	}
+	return e.iconeDe(st)
+}
+
 // mr desenha a referência da MR com o link para ela, na cor do estado: draft vermelho, pronta
 // verde, aberta neutra, mesclada cinza tachado, fechada roxo itálico, sem estado apagada.
-func (e Estilos) mr(m central.MR, comEstado bool) string {
+func (e Estilos) mr(m central.MR) string {
+	p := e.p()
 	st := e.novo()
 	estado := "?"
 	if m.Estado != nil {
@@ -95,28 +147,37 @@ func (e Estilos) mr(m central.MR, comEstado bool) string {
 	}
 	switch estado {
 	case "draft":
-		st = st.Foreground(corVermelho)
+		st = st.Foreground(p.vermelho)
 	case "pronta":
-		st = st.Foreground(corVerde)
+		st = st.Foreground(p.verde)
 	case "mesclada":
-		st = st.Foreground(corCinza).Strikethrough(true)
+		st = st.Foreground(p.cinza).Strikethrough(true)
 	case "fechada":
-		st = st.Foreground(corRoxo).Italic(true)
+		st = st.Foreground(p.roxo).Italic(true)
 	case "aberta":
 	default:
-		st = st.Foreground(corApagado)
+		st = st.Foreground(p.apagado)
 	}
 	s := link(m.URL, st.Render(limpar(m.RefCurta())))
 	if m.IaC {
-		s += " " + e.novo().Foreground(corLaranja).Render("[IaC]")
-	}
-	if comEstado {
-		s += " " + e.apagado(estado)
+		s += " " + e.cor(p.laranja, "[IaC]")
 	}
 	if m.Erro != nil {
 		s += e.apagado("*")
 	}
 	return s
+}
+
+// larguraMR é a largura de Estilos.mr sem os escapes.
+func larguraMR(m central.MR) int {
+	w := ansi.StringWidth(limpar(m.RefCurta()))
+	if m.IaC {
+		w += len(" [IaC]")
+	}
+	if m.Erro != nil {
+		w++
+	}
+	return w
 }
 
 // link envolve texto num hyperlink OSC 8. URL vazia devolve o texto puro.
@@ -165,6 +226,33 @@ func preencher(s string, w int) string {
 	return s
 }
 
+// pintar põe o fundo (e o esmaecido) de uma linha sob um texto já estilizado: cada trecho do
+// lipgloss termina num reset, que apagaria o fundo no resto da célula, então ele é reaplicado
+// depois de cada reset.
+func pintar(s, sgr string) string {
+	if sgr == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+sgr)
+	s = strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+sgr)
+	return sgr + s
+}
+
+// fundo é o SGR do fundo c, esmaecido ou não; vazio sem nenhum dos dois.
+func fundo(c color.Color, esmaecer bool) string {
+	var st ansi.Style
+	if esmaecer {
+		st = st.Faint()
+	}
+	if c != nil {
+		st = st.BackgroundColor(c)
+	}
+	if len(st) == 0 {
+		return ""
+	}
+	return st.String()
+}
+
 var rotuloStatus = map[string]string{"wait": "Wait", "plan": "Plan", "exec": "Exec", "rev": "Rev", "done": "Done"}
 
 var rotuloAte = map[string]string{"plano": "plano", "mr-pronta": "MR pronta", "merge": "merge"}
@@ -176,6 +264,38 @@ func rotulo(m map[string]string, k string) string {
 		return v
 	}
 	return limpar(k)
+}
+
+// corStatus: Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde.
+func (e Estilos) corStatus(st string) color.Color {
+	p := e.p()
+	switch st {
+	case "plan":
+		return p.roxo
+	case "exec":
+		return p.amarelo
+	case "rev":
+		return p.azul
+	case "done":
+		return p.verde
+	default:
+		return p.cinza
+	}
+}
+
+// corTipo: dúvida azul, autorização amarelo, decisão roxo.
+func (e Estilos) corTipo(tipo string) color.Color {
+	p := e.p()
+	switch tipo {
+	case "duvida":
+		return p.azul
+	case "autorizacao":
+		return p.amarelo
+	case "decisao":
+		return p.roxo
+	default:
+		return p.cinza
+	}
 }
 
 func bloqueada(u central.US) bool {
@@ -210,51 +330,102 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 			pend = fmt.Sprintf("%d pendências abertas", n)
 		}
 		if n > 0 {
-			pend = e.novo().Foreground(corAmarelo).Bold(true).Render(pend)
+			pend = e.novo().Foreground(e.p().amarelo).Bold(true).Render(pend)
 		}
-		t.Linhas = append(t.Linhas, Linha{Texto: e.negrito(cab) + " · " + pend})
+		t.Linhas = append(t.Linhas, Linha{Texto: cortar(e.negrito(cab)+" · "+pend, o.Largura)})
 	}
-	larg := larguras(coords)
+	nomes := map[string]bool{}
+	for _, c := range coords {
+		nomes[c.Nome] = true
+	}
+	var abertas []central.Pendencia
+	for _, p := range s.PendenciasAbertas {
+		if nomes[p.Coordenador] {
+			abertas = append(abertas, p)
+		}
+	}
+	cu := colunasUS(coords, o.Largura)
+	cp := colunasPend(abertas, o.Largura, o.Agora)
+	// A faixa vai de ponta a ponta do bloco: a largura da tabela mais larga, não a do terminal,
+	// para os selos não ficarem longe do nome num pane muito largo.
+	bloco := molduraTabela + cu.ag + cu.ref + cu.titulo + cu.status + cu.mr
+	if len(abertas) > 0 {
+		bloco = max(bloco, molduraTabela+cp.id+cp.tipo+cp.texto+cp.idade+cp.ir)
+	}
 	for i, c := range coords {
 		if o.Todos || o.Coord == "" || i > 0 {
 			t.Linhas = append(t.Linhas, Linha{})
 		}
-		t.Linhas = append(t.Linhas, e.coordenador(c, s.PendenciasAbertas, larg, o)...)
+		t.Linhas = append(t.Linhas, e.coordenador(c, abertas, cu, cp, bloco, o)...)
 	}
 	t.Rodape = e.rodape(s, o.Agora)
+	for _, ic := range icones {
+		t.Legenda = append(t.Legenda, e.iconeDe(ic.status)+" "+e.apagado(ic.legenda))
+	}
 	return t
 }
 
-// larg são as larguras das colunas, iguais em toda a tela para alinhar.
-type larg struct{ ref, titulo, status, mr int }
+// Larguras do conteúdo das colunas (sem o respiro de um espaço de cada lado), iguais em toda
+// a tela para que as tabelas dos coordenadores se alinhem.
+type colsUS struct{ ag, ref, titulo, status, mr int }
 
-func larguras(cs []central.CoordSnapshot) larg {
-	var l larg
+type colsPend struct{ id, tipo, texto, idade, ir int }
+
+// Cabeçalhos das tabelas.
+var (
+	cabUS   = []string{"", "US", "título", "status", "MRs"}
+	cabPend = []string{"id", "tipo", "texto", "idade", ""}
+)
+
+// Cada tabela de 5 colunas gasta 16 colunas com bordas (6) e respiros (2 por coluna).
+const molduraTabela = 6 + 2*5
+
+// Abaixo disto o título deixa de encolher sozinho e as MRs passam a ceder (`!390…`).
+const (
+	tituloConfortavel = 16
+	mrMinima          = 5
+	textoMaximo       = 96
+)
+
+func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
+	l := colsUS{ag: 1, ref: len(cabUS[1]), titulo: len(cabUS[2]), status: len(cabUS[3]), mr: len(cabUS[4])}
 	for _, c := range cs {
 		for _, o := range c.Ondas {
 			for _, u := range o.US {
 				l.ref = max(l.ref, ansi.StringWidth(refTexto(u)))
-				l.titulo = max(l.titulo, ansi.StringWidth(tituloTexto(u))+1) // +1: a marca de erro
+				w := ansi.StringWidth(tituloTexto(u))
+				if u.Taiga.Erro != nil {
+					w++ // a marca de erro
+				}
+				l.titulo = max(l.titulo, w)
 				l.status = max(l.status, ansi.StringWidth(statusTexto(u)))
-				if len(u.MRs) == 1 {
-					l.mr = max(l.mr, larguraMR(u.MRs[0]))
+				for _, m := range u.MRs {
+					l.mr = max(l.mr, larguraMR(m))
 				}
 			}
 		}
 	}
+	// O título ocupa o que sobra, até o mais longo da tela: num pane largo as colunas não
+	// esticam além do conteúdo. Num estreito ele encolhe primeiro; depois as MRs.
+	resto := largura - molduraTabela - l.ag - l.ref - l.status
+	if resto-l.mr < tituloConfortavel {
+		l.mr = max(min(l.mr, resto-tituloConfortavel), min(l.mr, mrMinima))
+	}
+	l.titulo = max(min(l.titulo, resto-l.mr), 1)
 	return l
 }
 
-// larguraMR é a largura de Estilos.mr(m, false) sem os escapes.
-func larguraMR(m central.MR) int {
-	w := ansi.StringWidth(limpar(m.RefCurta()))
-	if m.IaC {
-		w += len(" [IaC]")
+func colunasPend(ps []central.Pendencia, largura int, agora time.Time) colsPend {
+	l := colsPend{id: len(cabPend[0]), tipo: len(cabPend[1]), texto: len(cabPend[2]), idade: len(cabPend[3]), ir: 1}
+	for _, p := range ps {
+		l.id = max(l.id, ansi.StringWidth(limpar(p.ID)))
+		l.tipo = max(l.tipo, ansi.StringWidth(rotulo(rotuloTipo, p.Tipo)))
+		l.texto = max(l.texto, ansi.StringWidth(limpar(p.Texto)))
+		l.idade = max(l.idade, ansi.StringWidth(desde(p.AbertaEm, agora)))
 	}
-	if m.Erro != nil {
-		w++
-	}
-	return w
+	// O texto tem teto: mais longo, quebra em 2 linhas em vez de esticar a tabela.
+	l.texto = max(min(l.texto, textoMaximo, largura-molduraTabela-l.id-l.tipo-l.idade-l.ir), 1)
+	return l
 }
 
 func tituloTexto(u central.US) string {
@@ -277,22 +448,23 @@ func statusTexto(u central.US) string {
 	return s
 }
 
-func (e Estilos) coordenador(c central.CoordSnapshot, abertas []central.Pendencia, l larg, o Opcoes) []Linha {
+func (e Estilos) coordenador(c central.CoordSnapshot, abertas []central.Pendencia, cu colsUS, cp colsPend, bloco int, o Opcoes) []Linha {
 	var ls []Linha
 	pane := ""
 	if c.PaneID != nil {
 		pane = *c.PaneID
 	}
+	nome := linkPane(pane, e.negrito(limpar(c.Nome)))
 	if len(c.Ondas) == 0 {
-		ls = append(ls, Linha{Texto: e.negrito(cortar(limpar(c.Nome), o.Largura)) + e.apagado(cortar(" — sem onda aberta", o.Largura-ansi.StringWidth(c.Nome))), Pane: pane})
+		ls = append(ls, Linha{Texto: cortar(nome+e.apagado(" — sem onda aberta"), o.Largura)})
 	}
 	for _, onda := range c.Ondas {
-		ls = append(ls, e.cabecalho(c, onda, o, pane))
+		ls = append(ls, e.faixa(c, onda, nome, bloco, o)...)
 		us := append([]central.US(nil), onda.US...)
 		// A US com o pane blocked sobe; o resto fica na ordem da onda.
 		sort.SliceStable(us, func(i, j int) bool { return bloqueada(us[i]) && !bloqueada(us[j]) })
-		for _, u := range us {
-			ls = append(ls, e.us(u, l, o)...)
+		if len(us) > 0 {
+			ls = append(ls, e.tabelaUS(us, cu, o)...)
 		}
 	}
 	var minhas []central.Pendencia
@@ -302,16 +474,17 @@ func (e Estilos) coordenador(c central.CoordSnapshot, abertas []central.Pendenci
 		}
 	}
 	if len(minhas) > 0 {
-		ls = append(ls, Linha{Texto: e.negrito("Pendências")})
-		for _, p := range minhas {
-			ls = append(ls, e.pendencia(p, o))
-		}
+		ls = append(ls, e.tabelaPend(minhas, cp, o)...)
 	}
 	return ls
 }
 
-// cabecalho: `coordenador · projeto — título  [até: MR pronta]  n/m done · k pend`.
-func (e Estilos) cabecalho(c central.CoordSnapshot, onda central.Onda, o Opcoes, pane string) Linha {
+// faixa é o cabeçalho da onda, com fundo leve na largura do bloco (a das tabelas, ou a que os
+// selos pedem, até a do terminal): na 1ª linha o coordenador e os
+// projetos à esquerda e os selos (`até MR pronta`, `1/4 ▰▱▱▱`, `1 pend`) à direita; na 2ª o
+// título. O nome leva ao pane do coordenador pelo link; a faixa em si não é alvo de foco.
+func (e Estilos) faixa(c central.CoordSnapshot, onda central.Onda, nome string, bloco int, o Opcoes) []Linha {
+	p := e.p()
 	var projetos []string
 	visto := map[string]bool{}
 	feitas, pend := 0, 0
@@ -323,112 +496,269 @@ func (e Estilos) cabecalho(c central.CoordSnapshot, onda central.Onda, o Opcoes,
 		if u.Status == "done" {
 			feitas++
 		}
-		for _, p := range u.Pendencias {
-			if p.Aberta {
+		for _, pe := range u.Pendencias {
+			if pe.Aberta {
 				pend++
 			}
 		}
 	}
-	esq := e.negrito(limpar(c.Nome))
+	esq := " " + nome
 	if len(projetos) > 0 {
-		esq += " · " + strings.Join(projetos, ", ")
+		esq += e.cor(p.cinza, " · "+strings.Join(projetos, ", "))
 	}
-	esq += " — "
-	ate := "  " + e.apagado("[até: "+rotulo(rotuloAte, onda.AutorizacaoAte)+"]")
-	dir := "  " + fmt.Sprintf("%d/%d done", feitas, len(onda.US))
+	ate := e.apagado("até " + rotulo(rotuloAte, onda.AutorizacaoAte))
+	dir := fmt.Sprintf("%d/%d", feitas, len(onda.US))
+	if b := e.barra(feitas, len(onda.US)); b != "" {
+		dir += " " + b
+	}
 	if pend > 0 {
-		dir += " · " + e.novo().Foreground(corAmarelo).Render(fmt.Sprintf("%d pend", pend))
+		dir += "  " + e.novo().Foreground(p.amarelo).Bold(true).Render(fmt.Sprintf("%d pend", pend))
 	}
-	resto := o.Largura - ansi.StringWidth(esq) - ansi.StringWidth(dir)
-	// Sem lugar para o título, a autorização sai antes dele.
-	if resto-ansi.StringWidth(ate) >= 10 {
-		dir = ate + dir
-		resto -= ansi.StringWidth(ate)
+	dir += " "
+	titulo := limpar(onda.Titulo)
+	natural := max(ansi.StringWidth(esq)+2+ansi.StringWidth(ate)+2+ansi.StringWidth(dir), ansi.StringWidth(titulo)+2)
+	w := min(o.Largura, max(bloco, natural))
+	// Sem lugar, a autorização sai antes; depois os projetos e o nome encolhem.
+	if ansi.StringWidth(esq)+2+ansi.StringWidth(ate)+2+ansi.StringWidth(dir) <= w {
+		dir = ate + "  " + dir
 	}
-	titulo := cortar(limpar(onda.Titulo), max(resto, 1))
-	return Linha{Texto: cortar(esq+titulo+dir, o.Largura), Pane: pane}
-}
-
-// us: ícone, #ref (link do Taiga), título truncado, status e rodada (link que foca o pane) e as
-// MRs: inline quando há uma, uma por linha extra quando há mais.
-func (e Estilos) us(u central.US, l larg, o Opcoes) []Linha {
-	pane := ""
-	if u.PaneID != nil {
-		pane = *u.PaneID
-	}
-	urlTaiga := ""
-	if u.Taiga.URL != nil {
-		urlTaiga = *u.Taiga.URL
-	}
-	blk := bloqueada(u)
-	ref := link(urlTaiga, preencher(refTexto(u), l.ref))
-	stTexto := statusTexto(u)
-	stEstilo := e.novo()
-	if blk {
-		stEstilo = stEstilo.Foreground(corVermelho).Bold(true)
-	} else if u.Status == "done" {
-		stEstilo = stEstilo.Foreground(corCinza)
-	}
-	status := linkPane(pane, stEstilo.Render(stTexto)) + strings.Repeat(" ", max(l.status-ansi.StringWidth(stTexto), 0))
-	mrInline := ""
-	if len(u.MRs) == 1 {
-		mrInline = e.mr(u.MRs[0], false)
-	}
-	fixo := 2 + l.ref + 1 + 2 + l.status
-	if l.mr > 0 {
-		fixo += 2 + l.mr
-	}
-	// O título ocupa o que sobra, até o mais longo da tela: num pane largo o status fica perto.
-	larguraTitulo := max(min(o.Largura-fixo, l.titulo), 1)
-	titulo := ""
-	if u.Taiga.Titulo != nil {
-		titulo = limpar(*u.Taiga.Titulo)
-	}
-	// Com erro na última consulta ao Taiga, o título é o último bom e uma marca apagada no fim
-	// da coluna diz que a consulta mais recente falhou.
-	tw := larguraTitulo
-	if u.Taiga.Erro != nil {
-		tw = max(tw-1, 0)
-	}
-	var tituloR string
-	if titulo == "" {
-		tituloR = e.apagado(preencher(cortar(u.Chave, tw), tw))
-	} else {
-		tituloR = preencher(cortar(titulo, tw), tw)
-		if blk {
-			tituloR = e.negrito(tituloR)
-		}
-	}
-	if u.Taiga.Erro != nil {
-		tituloR += e.apagado("*")
-	}
-	texto := e.icone(u) + " " + ref + " " + tituloR + "  " + status
-	if mrInline != "" {
-		texto += "  " + mrInline
-	}
-	ls := []Linha{{Texto: cortar(texto, o.Largura), Pane: pane}}
-	if len(u.MRs) > 1 {
-		recuo := strings.Repeat(" ", 2+l.ref+1)
-		for _, m := range u.MRs {
-			ls = append(ls, Linha{Texto: cortar(recuo+e.mr(m, true), o.Largura), Pane: pane})
-		}
+	esq = cortar(esq, max(w-ansi.StringWidth(dir)-2, 1))
+	l1 := esq + strings.Repeat(" ", max(w-ansi.StringWidth(esq)-ansi.StringWidth(dir), 1)) + dir
+	ls := []Linha{{Texto: e.linhaFaixa(l1, w)}}
+	if titulo != "" {
+		ls = append(ls, Linha{Texto: e.linhaFaixa(" "+cortar(titulo, w-2), w)})
 	}
 	return ls
 }
 
-// pendencia: `TG-313#P1 autorização  texto  (há 12 min) ↗`; o ↗ foca o pane que perguntou.
-func (e Estilos) pendencia(p central.Pendencia, o Opcoes) Linha {
-	pane := ""
-	if p.PaneOrigem != nil {
-		pane = *p.PaneOrigem
+func (e Estilos) linhaFaixa(s string, largura int) string {
+	return pintar(preencher(cortar(s, largura), largura), fundo(e.p().faixa, false)) + "\x1b[m"
+}
+
+// barra é o progresso da onda, uma marca por US até 10 e proporcional acima disso.
+func (e Estilos) barra(feitas, total int) string {
+	if total <= 0 {
+		return ""
 	}
-	esq := " " + e.novo().Foreground(corAmarelo).Render(limpar(p.ID)) + " " + rotulo(rotuloTipo, p.Tipo) + "  "
-	dir := "  " + e.apagado("("+desde(p.AbertaEm, o.Agora)+")")
-	if pane != "" {
-		dir += " " + linkPane(pane, "↗")
+	n := min(total, 10)
+	cheias := (feitas*n + total/2) / total
+	if feitas > 0 && cheias == 0 {
+		cheias = 1
 	}
-	texto := cortar(limpar(p.Texto), max(o.Largura-ansi.StringWidth(esq)-ansi.StringWidth(dir), 1))
-	return Linha{Texto: cortar(esq+texto+dir, o.Largura), Pane: pane}
+	if feitas < total && cheias == n {
+		cheias = n - 1
+	}
+	return e.cor(e.p().verde, strings.Repeat("▰", cheias)) + e.apagado(strings.Repeat("▱", n-cheias))
+}
+
+// celula é o conteúdo de uma linha da tabela: as células, já estilizadas e cortadas na
+// largura da coluna, uma linha física por linha da célula.
+type celula struct {
+	cels     []string
+	altura   int
+	pane     string
+	item     string
+	fundo    color.Color
+	esmaecer bool
+}
+
+// grade desenha a tabela: borda arredondada, separadores de coluna, regra só sob o cabeçalho
+// e o fundo de cada linha. As larguras são fixas (calculadas antes), então o lipgloss não
+// redimensiona nem quebra nada; o mapeamento linha física → pane sai da altura de cada linha.
+func (e Estilos) grade(cab []string, larg []int, rows []celula, largura int) []Linha {
+	p := e.p()
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(e.novo().Foreground(p.borda)).
+		BorderRow(false).
+		Wrap(true).
+		Headers(cab...)
+	for _, r := range rows {
+		cels := make([]string, len(r.cels))
+		for j, c := range r.cels {
+			cels[j] = pintar(c, fundo(r.fundo, r.esmaecer))
+		}
+		t.Row(cels...)
+	}
+	t.StyleFunc(func(row, col int) lipgloss.Style {
+		st := e.novo().Padding(0, 1).Width(larg[col] + 2)
+		if row == table.HeaderRow {
+			return st.Foreground(p.cinza).Bold(true)
+		}
+		r := rows[row]
+		st = st.Height(r.altura)
+		if r.fundo != nil {
+			st = st.Background(r.fundo)
+		}
+		if r.esmaecer {
+			st = st.Faint(true)
+		}
+		return st
+	})
+	fis := strings.Split(t.String(), "\n")
+	ls := make([]Linha, 0, len(fis))
+	add := func(texto, pane, item string) {
+		ls = append(ls, Linha{Texto: cortar(texto, largura), Pane: pane, Item: item})
+	}
+	// borda de cima, cabeçalho e regra; depois as linhas, cada uma com a sua altura.
+	i := 0
+	for ; i < 3 && i < len(fis); i++ {
+		add(fis[i], "", "")
+	}
+	for _, r := range rows {
+		for k := 0; k < r.altura && i < len(fis); k, i = k+1, i+1 {
+			add(fis[i], r.pane, r.item)
+		}
+	}
+	for ; i < len(fis); i++ {
+		add(fis[i], "", "")
+	}
+	return ls
+}
+
+// fundoLinha: a selecionada tem o fundo de seleção, a blocked o de destaque e as outras se
+// alternam entre o fundo do terminal e o leve.
+func (e Estilos) fundoLinha(i int, item string, blk bool, o Opcoes) color.Color {
+	p := e.p()
+	switch {
+	case item != "" && item == o.Selecao:
+		return p.selecao
+	case blk:
+		return p.bloqueada
+	case i%2 == 1:
+		return p.zebra
+	}
+	return nil
+}
+
+// tabelaUS: agente | US (link do Taiga) | título | status (cor por valor, link que foca o
+// pane) | MRs, uma por linha física da célula.
+func (e Estilos) tabelaUS(us []central.US, l colsUS, o Opcoes) []Linha {
+	p := e.p()
+	rows := make([]celula, 0, len(us))
+	for i, u := range us {
+		pane := ""
+		if u.PaneID != nil {
+			pane = *u.PaneID
+		}
+		urlTaiga := ""
+		if u.Taiga.URL != nil {
+			urlTaiga = *u.Taiga.URL
+		}
+		blk := bloqueada(u)
+		stEstilo := e.novo().Foreground(e.corStatus(u.Status))
+		if blk {
+			stEstilo = e.novo().Foreground(p.vermelho).Bold(true)
+		}
+		status := linkPane(pane, stEstilo.Render(cortar(statusTexto(u), l.status)))
+		// Com erro na última consulta ao Taiga, o título é o último bom e uma marca apagada no
+		// fim diz que a consulta mais recente falhou.
+		tw := l.titulo
+		if u.Taiga.Erro != nil {
+			tw = max(tw-1, 0)
+		}
+		var titulo string
+		if u.Taiga.Titulo == nil || *u.Taiga.Titulo == "" {
+			titulo = e.apagado(cortar(u.Chave, tw))
+		} else {
+			titulo = cortar(limpar(*u.Taiga.Titulo), tw)
+			if blk {
+				titulo = e.negrito(titulo)
+			}
+		}
+		if u.Taiga.Erro != nil {
+			titulo += e.apagado("*")
+		}
+		var mrs []string
+		for _, m := range u.MRs {
+			mrs = append(mrs, cortar(e.mr(m), l.mr))
+		}
+		item := "us:" + u.Chave
+		rows = append(rows, celula{
+			cels:     []string{e.icone(u), link(urlTaiga, refTexto(u)), titulo, status, strings.Join(mrs, "\n")},
+			altura:   max(len(mrs), 1),
+			pane:     pane,
+			item:     item,
+			fundo:    e.fundoLinha(i, item, blk, o),
+			esmaecer: u.Status == "done" && !blk,
+		})
+	}
+	return e.grade(cabUS, []int{l.ag, l.ref, l.titulo, l.status, l.mr}, rows, o.Largura)
+}
+
+// tabelaPend: id | tipo | texto em até 2 linhas (corta com … depois) | idade | ↗, que foca o
+// pane que perguntou.
+func (e Estilos) tabelaPend(ps []central.Pendencia, l colsPend, o Opcoes) []Linha {
+	rows := make([]celula, 0, len(ps))
+	for i, p := range ps {
+		pane := ""
+		if p.PaneOrigem != nil {
+			pane = *p.PaneOrigem
+		}
+		texto := duasLinhas(limpar(p.Texto), l.texto)
+		item := "pend:" + p.Coordenador + "/" + p.ID
+		ir := ""
+		if pane != "" {
+			ir = linkPane(pane, "↗")
+		}
+		rows = append(rows, celula{
+			cels: []string{
+				e.cor(e.p().amarelo, cortar(limpar(p.ID), l.id)),
+				e.cor(e.corTipo(p.Tipo), cortar(rotulo(rotuloTipo, p.Tipo), l.tipo)),
+				strings.Join(texto, "\n"),
+				e.apagado(cortar(desde(p.AbertaEm, o.Agora), l.idade)),
+				ir,
+			},
+			altura: len(texto),
+			pane:   pane,
+			item:   item,
+			fundo:  e.fundoLinha(i, item, false, o),
+		})
+	}
+	return e.grade(cabPend, []int{l.id, l.tipo, l.texto, l.idade, l.ir}, rows, o.Largura)
+}
+
+// duasLinhas quebra o texto nos espaços, na largura w, e guarda até duas linhas; o que sobra
+// vira … no fim da segunda. Só o espaço quebra (o ansi.Wrap quebra também no hífen e partiria
+// um `--cascade`); palavra maior que a linha é cortada no meio.
+func duasLinhas(s string, w int) []string {
+	w = max(w, 1)
+	var ls []string
+	atual := ""
+	for _, p := range strings.Fields(s) {
+		switch {
+		case atual == "":
+			atual = p
+		case ansi.StringWidth(atual)+1+ansi.StringWidth(p) <= w:
+			atual += " " + p
+		default:
+			ls = append(ls, atual)
+			atual = p
+		}
+		for ansi.StringWidth(atual) > w {
+			cab := ansi.Truncate(atual, w, "")
+			if cab == "" {
+				// Caractere largo numa coluna de 1: vira … e o texto anda, senão o laço não
+				// termina.
+				_, n := utf8.DecodeRuneInString(atual)
+				ls = append(ls, "…")
+				atual = atual[n:]
+				continue
+			}
+			ls = append(ls, cab)
+			atual = atual[len(cab):]
+		}
+	}
+	if atual != "" || len(ls) == 0 {
+		ls = append(ls, atual)
+	}
+	if len(ls) > 2 {
+		ls = []string{ls[0], cortar(strings.Join(ls[1:], " "), w)}
+		if !strings.HasSuffix(ls[1], "…") {
+			ls[1] = cortar(ls[1]+" …", w)
+		}
+	}
+	return ls
 }
 
 // desde escreve há quanto tempo foi ts (RFC 3339): agora, há 12 min, há 3 h, há 2 d.
