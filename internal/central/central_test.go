@@ -269,6 +269,124 @@ func TestProxima(t *testing.T) {
 	}
 }
 
+// A regra de encerramento sobre a onda em memória: toda US no limite, toda MR mesclada ou
+// fechada (menos na onda plano) e nenhuma pendência aberta.
+func TestEncerramento(t *testing.T) {
+	mr := func(url, estado string) MR {
+		m := MR{URL: url}
+		if estado != "" {
+			m.Estado = &estado
+		}
+		return m
+	}
+	pend := func(aberta bool) []Pendencia { return []Pendencia{{ID: "TG-215#P1", Aberta: aberta}} }
+	cases := []struct {
+		nome      string
+		ate       string
+		status    []string
+		mrs       []MR
+		pends     []Pendencia
+		encerrada bool
+		nula      bool
+		pronta    bool
+		faltam    []string // trechos, um por item de Faltam
+		passo     string
+	}{
+		{nome: "em curso", ate: "mr-pronta", status: []string{"done", "rev"}, nula: true},
+		{nome: "com US em wait", ate: "mr-pronta", status: []string{"done", "wait"}, nula: true},
+		{nome: "encerrada", ate: "mr-pronta", status: []string{"done"}, encerrada: true, nula: true},
+		{nome: "no limite com MR aberta", ate: "mr-pronta", status: []string{"done", "done"}, mrs: []MR{mr("u/32", "pronta"), mr("u/31", "mesclada")},
+			faltam: []string{"TG-215: MR u/32 pronta (falta merge ou fechamento)"}, passo: "falta concluir"},
+		{nome: "MR sem estado não conta como mesclada", ate: "merge", status: []string{"done"}, mrs: []MR{mr("u/33", "")},
+			faltam: []string{"TG-215: MR u/33 sem estado conhecido (falta conferir)"}, passo: "falta concluir"},
+		{nome: "com pendência aberta", ate: "mr-pronta", status: []string{"done"}, mrs: []MR{mr("u/29", "mesclada")}, pends: pend(true),
+			faltam: []string{"TG-215#P1: pendência aberta"}, passo: "falta concluir"},
+		{nome: "pronta para encerrar", ate: "mr-pronta", status: []string{"done", "done"}, mrs: []MR{mr("u/29", "mesclada"), mr("u/31", "fechada")}, pends: pend(false),
+			pronta: true, passo: "encerre a onda: orq onda encerrar 7"},
+		{nome: "pronta sem MR", ate: "merge", status: []string{"done"}, pronta: true, passo: "orq onda encerrar 7"},
+		{nome: "plano não olha as MRs", ate: "plano", status: []string{"done"}, mrs: []MR{mr("u/34", "draft"), mr("u/35", "")},
+			pronta: true, passo: "e crie a onda de implementação com as mesmas US"},
+		{nome: "plano com pendência aberta", ate: "plano", status: []string{"done"}, pends: pend(true), faltam: []string{"TG-215#P1: pendência aberta"}},
+	}
+	for _, c := range cases {
+		t.Run(c.nome, func(t *testing.T) {
+			o := ondaFixa("livre", c.ate, c.status, nil)
+			o.US[0].MRs, o.US[0].Pendencias = c.mrs, c.pends
+			if c.encerrada {
+				e := "2026-10-11T00:00:00Z"
+				o.EncerradaEm = &e
+			}
+			e := EncerramentoDe(o)
+			if c.nula {
+				if e != nil {
+					t.Fatalf("encerramento = %+v, queria nulo", e)
+				}
+				return
+			}
+			if e == nil || e.Pronta != c.pronta || len(e.Faltam) != len(c.faltam) || !strings.Contains(e.Passo, c.passo) {
+				t.Fatalf("encerramento = %+v", e)
+			}
+			for i, f := range c.faltam {
+				if !strings.Contains(e.Faltam[i], f) {
+					t.Errorf("faltam[%d] = %q, queria %q", i, e.Faltam[i], f)
+				}
+			}
+			if c.pronta != (e.Comando != nil) || (e.Comando != nil && *e.Comando != "orq onda encerrar 7") {
+				t.Errorf("comando = %v", e.Comando)
+			}
+			// orq onda proxima traz a mesma decisão quando a onda chega ao limite.
+			if p := proxima(o); p.Encerramento == nil || p.Encerramento.Pronta != e.Pronta || len(p.Encerramento.Faltam) != len(e.Faltam) {
+				t.Errorf("proxima.encerramento = %+v", p.Encerramento)
+			}
+		})
+	}
+	if p := proxima(ondaFixa("livre", "mr-pronta", []string{"done", "exec"}, nil)); p.Encerramento != nil {
+		t.Errorf("onda em curso com encerramento: %+v", p.Encerramento)
+	}
+}
+
+// O estado da MR vem do cache do daemon: sem consulta, a onda no limite ainda não está pronta.
+func TestEncerramentoNoBanco(t *testing.T) {
+	s := novoStore(t)
+	ctx := context.Background()
+	co := coord(t, s, "colab", "wB:p1", "colaboradados")
+	o := onda(t, s, co, NovaOnda{Titulo: "noite", US: []refs.US{us(t, "215")}})
+	url := "https://gitlab.basis.com.br/basis/x/-/merge_requests/32"
+	if _, _, err := s.AdicionarMR(ctx, &co, us(t, "215"), url); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AtualizarStatus(ctx, &co, us(t, "215"), MudancaStatus{Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	passo := func() *Encerramento {
+		t.Helper()
+		p, err := s.ProximaUS(ctx, o.ID)
+		if err != nil || p.Encerramento == nil {
+			t.Fatalf("proxima = %+v, %v", p, err)
+		}
+		return p.Encerramento
+	}
+	if e := passo(); e.Pronta || len(e.Faltam) != 1 || !strings.Contains(e.Faltam[0], "falta conferir") {
+		t.Fatalf("sem estado: %+v", e)
+	}
+	if err := s.GravarMR(ctx, url, ValorMR{Estado: "pronta"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := passo(); e.Pronta || !strings.Contains(e.Faltam[0], "falta merge") {
+		t.Fatalf("pronta: %+v", e)
+	}
+	if err := s.GravarMR(ctx, url, ValorMR{Estado: "mesclada"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := passo(); !e.Pronta || *e.Comando != "orq onda encerrar 1" {
+		t.Fatalf("mesclada: %+v", e)
+	}
+	// Só sugere: a onda continua aberta.
+	if v, _ := s.VerOnda(ctx, o.ID); v.EncerradaEm != nil {
+		t.Fatal("proxima encerrou a onda")
+	}
+}
+
 // A onda do colaboradados ponta a ponta no banco: TG-215→218, ordem estrita, 216 depende de 215.
 func TestProximaNoBanco(t *testing.T) {
 	s := novoStore(t)

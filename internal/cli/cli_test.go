@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/BasisTI/orq/internal/central"
 )
 
 // TestMain também serve de processo auxiliar do teste de concorrência: com ORQ_TEST_HELPER,
@@ -134,6 +137,65 @@ func TestCoordenadorPeloPane(t *testing.T) {
 	prox := ok(t, env, "--output", "text", "onda", "proxima", fmt.Sprint(o.ID))
 	if !strings.HasPrefix(prox, "nada elegível: ordem estrita: TG-1 ainda em exec") {
 		t.Fatalf("proxima = %q", prox)
+	}
+}
+
+// orq onda proxima diz o próximo passo da onda no limite, em JSON e em texto; não encerra.
+func TestProximaEncerramentoCLI(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
+	ok(t, env, "onda", "criar", "o", "--us", "1")
+	url := "https://gitlab.basis.com.br/basis/x/-/merge_requests/7"
+	ok(t, env, "mr", "add", "1", url)
+	type saida struct {
+		Motivo       string
+		Encerramento *struct {
+			Pronta  bool
+			Comando *string
+			Faltam  []string
+			Passo   string
+		}
+	}
+	ler := func() saida {
+		t.Helper()
+		var s saida
+		if out := ok(t, env, "onda", "proxima", "1"); json.Unmarshal([]byte(out), &s) != nil {
+			t.Fatalf("proxima = %s", out)
+		}
+		return s
+	}
+	if s := ler(); s.Encerramento != nil {
+		t.Fatalf("em curso: %+v", s.Encerramento)
+	}
+	ok(t, env, "us", "status", "1", "done")
+	ok(t, env, "pend", "add", "1", "--tipo", "duvida", "e agora?")
+	if s := ler(); s.Encerramento == nil || s.Encerramento.Pronta || len(s.Encerramento.Faltam) != 2 || s.Encerramento.Comando != nil {
+		t.Fatalf("MR sem estado e pendência: %+v", s.Encerramento)
+	}
+	txt := ok(t, env, "--output", "text", "onda", "proxima", "1")
+	for _, quer := range []string{"próximo passo: falta concluir", "falta: TG-1: MR " + url + " sem estado conhecido (falta conferir)", "falta: TG-1#P1: pendência aberta"} {
+		if !strings.Contains(txt, quer) {
+			t.Errorf("texto sem %q:\n%s", quer, txt)
+		}
+	}
+	ok(t, env, "pend", "resolver", "TG-1#P1", "--resposta", "levada para o Taiga")
+	st, err := central.Open(context.Background(), env["ORQ_STATE_DIR"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.GravarMR(context.Background(), url, central.ValorMR{Estado: "mesclada"}, nil)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := ler(); s.Encerramento == nil || !s.Encerramento.Pronta || *s.Encerramento.Comando != "orq onda encerrar 1" {
+		t.Fatalf("pronta: %+v", s.Encerramento)
+	}
+	if txt := ok(t, env, "--output", "text", "onda", "proxima", "1"); !strings.Contains(txt, "próximo passo: encerre a onda: orq onda encerrar 1\n") || strings.Contains(txt, "falta:") {
+		t.Fatalf("texto pronta:\n%s", txt)
+	}
+	if out := ok(t, env, "onda", "list", "--abertas"); !strings.Contains(out, `"id": 1`) {
+		t.Fatalf("a onda foi encerrada sozinha: %s", out)
 	}
 }
 
