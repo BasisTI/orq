@@ -28,7 +28,7 @@ func (a *App) tuiCmd() *cobra.Command {
 coordenador; com --todos, um bloco por coordenador e o total de pendências abertas. Sem nenhum
 dos dois, o coordenador corrente ($ORQ_COORD ou o pane registrado) ou, sem ele, todos.
 
-↑/↓ (ou j/k) escolhem a linha, Enter ou o clique focam o pane da US (herdr agent focus), r relê,
+↑/↓ (ou j/k) escolhem a US ou a pendência, Enter ou o clique focam o pane dela (herdr agent focus), r relê,
 q sai. O #ref é link (OSC 8) para a story no Taiga, a MR para a forja, e o status e o ↗ para
 https://orq.local/pane/<id>, que o link handler do plugin transforma em foco.`,
 		Args: cobra.NoArgs,

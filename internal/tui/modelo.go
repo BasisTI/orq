@@ -35,7 +35,7 @@ type Modelo struct {
 	largura int
 	altura  int
 	tela    Tela
-	sel     int // índice em tela.Linhas da linha selecionada; -1 sem seleção
+	sel     int // índice em tela.Linhas da linha selecionada (a 1ª do item); -1 sem seleção
 	topo    int // primeira linha visível
 	ctx     context.Context
 	sair    bool
@@ -90,14 +90,21 @@ func protegido[T any](f func() (T, error)) (v T, err error) {
 	return f()
 }
 
-// Init lê o snapshot e agenda a próxima leitura.
-func (m *Modelo) Init() tea.Cmd { return tea.Batch(m.carregar, m.agendar()) }
+// Init lê o snapshot, agenda a próxima leitura e pergunta a cor de fundo do terminal. A
+// pergunta não espera: a resposta, se vier, chega como tea.BackgroundColorMsg e troca os tons;
+// até lá (e num terminal que não responde) vale o escuro.
+func (m *Modelo) Init() tea.Cmd {
+	return tea.Batch(m.carregar, m.agendar(), tea.RequestBackgroundColor)
+}
 
 // Update trata teclado, mouse, tamanho, leituras e focos.
 func (m *Modelo) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.largura, m.altura = msg.Width, msg.Height
+		m.redesenhar()
+	case tea.BackgroundColorMsg:
+		m.cfg.Estilos.Claro = !msg.IsDark()
 		m.redesenhar()
 	case msgTick:
 		return m, tea.Batch(m.carregar, m.agendar())
@@ -126,7 +133,7 @@ func (m *Modelo) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft {
 			i := m.topo + msg.Y
 			if msg.Y < m.visiveis() && i < len(m.tela.Linhas) && m.tela.Linhas[i].Pane != "" {
-				m.sel = i
+				m.selecionar(i)
 				return m, m.focar(m.tela.Linhas[i].Pane)
 			}
 		}
@@ -165,20 +172,32 @@ func (m *Modelo) tecla(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// mover leva a seleção para a próxima linha com pane, na direção dada.
+// mover leva a seleção para o próximo item com pane, na direção dada: pula bordas, regras e
+// faixas (sem pane) e as outras linhas físicas do item selecionado.
 func (m *Modelo) mover(d int) {
+	atual := ""
+	if m.sel >= 0 && m.sel < len(m.tela.Linhas) {
+		atual = m.tela.Linhas[m.sel].Item
+	}
 	i := m.sel
 	for {
 		i += d
 		if i < 0 || i >= len(m.tela.Linhas) {
 			return
 		}
-		if m.tela.Linhas[i].Pane != "" {
-			m.sel = i
-			m.mostrar(i)
+		l := m.tela.Linhas[i]
+		if l.Pane != "" && (l.Item == "" || l.Item != atual) {
+			m.selecionar(i)
+			m.mostrar(m.sel)
 			return
 		}
 	}
+}
+
+// selecionar marca o item da linha i e redesenha para o fundo de seleção acompanhar.
+func (m *Modelo) selecionar(i int) {
+	m.sel = i
+	m.redesenhar()
 }
 
 func (m *Modelo) rolar(d int) {
@@ -203,17 +222,19 @@ func (m *Modelo) redesenhar() {
 		return
 	}
 	o := m.cfg.Opcoes
-	o.Largura = max(m.largura-1, 10) // a primeira coluna é a da seleção
+	o.Largura = max(m.largura, 10)
 	o.Agora = m.cfg.Agora()
-	// A seleção segue o pane, não o índice: a ordem muda quando um pane fica blocked.
-	pane := ""
+	// A seleção segue o item (a US ou a pendência), não o índice: a ordem muda quando um pane
+	// fica blocked. Sem item, segue o pane.
+	var antes Linha
 	if m.sel >= 0 && m.sel < len(m.tela.Linhas) {
-		pane = m.tela.Linhas[m.sel].Pane
+		antes = m.tela.Linhas[m.sel]
 	}
+	o.Selecao = antes.Item
 	m.tela = m.cfg.Estilos.Desenhar(*m.snap, o)
 	m.sel = -1
 	for i, l := range m.tela.Linhas {
-		if pane != "" && l.Pane == pane {
+		if antes.Pane != "" && l.Pane == antes.Pane && l.Item == antes.Item {
 			m.sel = i
 			break
 		}
@@ -242,11 +263,7 @@ func (m *Modelo) conteudo() string {
 		n++
 	}
 	for i := m.topo; i < len(m.tela.Linhas) && n < v; i, n = i+1, n+1 {
-		marca := " "
-		if i == m.sel {
-			marca = m.cfg.Estilos.negrito("›")
-		}
-		b.WriteString(marca + m.tela.Linhas[i].Texto + "\n")
+		b.WriteString(m.tela.Linhas[i].Texto + "\n")
 	}
 	for ; n < v; n++ {
 		b.WriteString("\n")
@@ -255,18 +272,32 @@ func (m *Modelo) conteudo() string {
 	return b.String()
 }
 
-// status é a última linha: erro de leitura, resultado da ação e o rodapé das fontes.
+// status é a última linha: erro de leitura, resultado da ação, o rodapé das fontes, a legenda
+// dos ícones e as teclas. Sem lugar, a legenda cede primeiro, um ícone por vez a partir do fim;
+// o resto é cortado.
 func (m *Modelo) status() string {
-	var partes []string
+	e := m.cfg.Estilos
+	var antes []string
 	if m.erro != "" {
-		partes = append(partes, m.cfg.Estilos.novo().Foreground(corVermelho).Render("leitura falhou: "+limpar(m.erro)))
+		antes = append(antes, e.cor(e.p().vermelho, "leitura falhou: "+limpar(m.erro)))
 	}
 	if m.msg != "" {
-		partes = append(partes, limpar(m.msg))
+		antes = append(antes, limpar(m.msg))
 	}
 	if m.tela.Rodape != "" {
-		partes = append(partes, m.tela.Rodape)
+		antes = append(antes, m.tela.Rodape)
 	}
-	partes = append(partes, m.cfg.Estilos.apagado("↑↓ Enter foca · r relê · q sai"))
-	return " " + ansi.Truncate(strings.Join(partes, "  "), max(m.largura-1, 1), "…")
+	teclas := e.apagado("↑↓ Enter foca · r relê · q sai")
+	w := max(m.largura-1, 1)
+	for n := len(m.tela.Legenda); n >= 0; n-- {
+		partes := append([]string(nil), antes...)
+		if n > 0 {
+			partes = append(partes, strings.Join(m.tela.Legenda[:n], " "))
+		}
+		s := strings.Join(append(partes, teclas), "  ")
+		if n == 0 || ansi.StringWidth(s) <= w {
+			return " " + ansi.Truncate(s, w, "…")
+		}
+	}
+	return ""
 }

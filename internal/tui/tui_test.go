@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -104,30 +106,46 @@ func planas(t Tela) []string {
 	return ls
 }
 
+// Contrato da tela de um coordenador a 100 colunas: faixa de 2 linhas, tabela das US com
+// bordas, MRs empilhadas na célula, tabela de pendências; e o alvo de cada linha física.
 func TestTelaDoCoordenador(t *testing.T) {
 	tela := desenhar(Opcoes{Coord: "convey", Largura: 100})
-	ls := planas(tela)
-	quer := []string{
-		"convey · sgo-cli — Comandos api e jql  [até: MR pronta]  1/4 done · 1 pend",
-		// A US blocked sobe para o topo; o resto segue a ordem da onda.
-		"⚠ #313 sgo api: chamada REST                                                Exec r1 ↗",
-		"       !33 draft",
-		"       !412 [IaC] aberta",
-		"● #312 sgo jql: consulta avulsa por JQL com paginação e campos escolhidos   Rev r2 ↗   !32",
-		"– #314 Menores da TG-312                                                    Wait",
-		"✓ #225 Criação Suporte/OS                                                   Done ↗",
-		"       !29 mesclada",
-		"       !31 fechada",
-		"Pendências",
-		" TG-313#P1 autorização  instalar binário e aplicar config pessoal  (há 12 min) ↗",
+	quer := []struct{ texto, pane string }{
+		{" convey · sgo-cli                                                   até MR pronta  1/4 ▰▱▱▱  1 pend ", ""},
+		{" Comandos api e jql                                                                                 ", ""},
+		{"╭───┬──────┬──────────────────────────────────────────────────────────────┬───────────┬────────────╮", ""},
+		{"│   │ US   │ título                                                       │ status    │ MRs        │", ""},
+		{"├───┼──────┼──────────────────────────────────────────────────────────────┼───────────┼────────────┤", ""},
+		// A US blocked sobe para o topo; o resto segue a ordem da onda. As MRs ficam na mesma
+		// célula, uma por linha física, e toda linha da US aponta para o pane dela.
+		{"│ ⚠ │ #313 │ sgo api: chamada REST                                        │ Exec r1 ↗ │ !33        │", "wB:p4"},
+		{"│   │      │                                                              │           │ !412 [IaC] │", "wB:p4"},
+		{"│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e campos esc… │ Rev r2 ↗  │ !32        │", "wB:p3"},
+		{"│ – │ #314 │ Menores da TG-312                                            │ Wait      │            │", ""},
+		{"│ ✓ │ #225 │ Criação Suporte/OS                                           │ Done ↗    │ !29        │", "wB:p6"},
+		{"│   │      │                                                              │           │ !31        │", "wB:p6"},
+		{"╰───┴──────┴──────────────────────────────────────────────────────────────┴───────────┴────────────╯", ""},
+		{"╭───────────┬─────────────┬───────────────────────────────────────────┬───────────┬───╮", ""},
+		{"│ id        │ tipo        │ texto                                     │ idade     │   │", ""},
+		{"├───────────┼─────────────┼───────────────────────────────────────────┼───────────┼───┤", ""},
+		{"│ TG-313#P1 │ autorização │ instalar binário e aplicar config pessoal │ há 12 min │ ↗ │", "wB:p4"},
+		{"╰───────────┴─────────────┴───────────────────────────────────────────┴───────────┴───╯", ""},
 	}
+	ls := planas(tela)
 	if len(ls) != len(quer) {
 		t.Fatalf("linhas:\n%s", strings.Join(ls, "\n"))
 	}
-	for i := range quer {
-		if strings.TrimRight(ls[i], " ") != quer[i] {
-			t.Errorf("linha %d:\n tem %q\nquer %q", i, strings.TrimRight(ls[i], " "), quer[i])
+	for i, q := range quer {
+		if ls[i] != q.texto {
+			t.Errorf("linha %d:\n tem %q\nquer %q", i, ls[i], q.texto)
 		}
+		if tela.Linhas[i].Pane != q.pane {
+			t.Errorf("alvo da linha %d = %q, quer %q", i, tela.Linhas[i].Pane, q.pane)
+		}
+	}
+	// As linhas de uma US têm o mesmo item; bordas e faixas, nenhum.
+	if tela.Linhas[5].Item != "us:sgo-cli/313" || tela.Linhas[6].Item != tela.Linhas[5].Item || tela.Linhas[2].Item != "" || tela.Linhas[0].Item != "" {
+		t.Errorf("itens: %q %q %q %q", tela.Linhas[5].Item, tela.Linhas[6].Item, tela.Linhas[2].Item, tela.Linhas[0].Item)
 	}
 	// Nenhuma linha passa da largura.
 	for i, l := range tela.Linhas {
@@ -135,44 +153,83 @@ func TestTelaDoCoordenador(t *testing.T) {
 			t.Errorf("linha %d com %d colunas", i, w)
 		}
 	}
-	// Alvos de foco: cabeçalho → pane do coordenador; US e as linhas de MR → pane da US;
-	// US sem pane, sem alvo; pendência → pane de origem.
-	alvos := []string{"wB:p1", "wB:p4", "wB:p4", "wB:p4", "wB:p3", "", "wB:p6", "wB:p6", "wB:p6", "", "wB:p4"}
-	for i, a := range alvos {
-		if tela.Linhas[i].Pane != a {
-			t.Errorf("alvo da linha %d = %q, quer %q", i, tela.Linhas[i].Pane, a)
-		}
-	}
 }
 
-// Num pane largo, a coluna do título não passa do título mais longo: o status fica perto.
+// Num pane largo as colunas não esticam além do conteúdo: o título mais longo cabe inteiro e a
+// tabela fica mais estreita que a tela. A faixa vai de ponta a ponta do bloco, não da tela:
+// os selos ficam perto do nome.
 func TestPaneLargo(t *testing.T) {
-	ls := planas(desenhar(Opcoes{Coord: "convey", Largura: 300}))
-	if strings.TrimRight(ls[4], " ") != "● #312 sgo jql: consulta avulsa por JQL com paginação e campos escolhidos   Rev r2 ↗   !32" {
-		t.Fatalf("%q", ls[4])
+	tela := desenhar(Opcoes{Coord: "convey", Largura: 300})
+	ls := planas(tela)
+	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e campos escolhidos │ Rev r2 ↗  │ !32        │" {
+		t.Fatalf("%q", ls[7])
+	}
+	if w, tw := ansi.StringWidth(tela.Linhas[0].Texto), ansi.StringWidth(tela.Linhas[2].Texto); w != tw || ansi.StringWidth(tela.Linhas[1].Texto) != tw {
+		t.Errorf("faixa com %d colunas, tabela com %d", w, tw)
 	}
 }
 
+// Em 80 colunas o título encolhe; mais estreito, as MRs cedem (`!412…`). Nenhuma linha passa
+// da largura, nem em largura mínima.
 func TestTruncamento(t *testing.T) {
-	tela := desenhar(Opcoes{Coord: "convey", Largura: 50})
-	for i, l := range tela.Linhas {
-		if w := ansi.StringWidth(l.Texto); w > 50 {
-			t.Errorf("linha %d com %d colunas: %q", i, w, ansi.Strip(l.Texto))
+	for _, w := range []int{80, 60, 50, 30, 5} {
+		for _, o := range []Opcoes{{Coord: "convey", Largura: w}, {Todos: true, Largura: w}} {
+			for i, l := range desenhar(o).Linhas {
+				if lw := ansi.StringWidth(l.Texto); lw > w {
+					t.Errorf("largura %d, linha %d com %d colunas: %q", w, i, lw, ansi.Strip(l.Texto))
+				}
+			}
 		}
 	}
+	ls := planas(desenhar(Opcoes{Coord: "convey", Largura: 80}))
+	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por JQL com pa… │ Rev r2 ↗  │ !32        │" {
+		t.Errorf("título em 80: %q", ls[7])
+	}
+	if ls[0] != " convey · sgo-cli                               até MR pronta  1/4 ▰▱▱▱  1 pend " {
+		t.Errorf("faixa em 80: %q", ls[0])
+	}
+	ls = planas(desenhar(Opcoes{Coord: "convey", Largura: 50}))
+	if ls[5] != "│ ⚠ │ #313 │ sgo api: chama… │ Exec r1 ↗ │ !33   │" || ls[6] != "│   │      │                 │           │ !412… │" {
+		t.Errorf("MRs não cederam em 50:\n%s\n%s", ls[5], ls[6])
+	}
+	// O corte da MR mantém o link fechado: nada de hyperlink vazando para a borda.
+	if l := desenhar(Opcoes{Coord: "convey", Largura: 50}).Linhas[6].Texto; !strings.Contains(l, "!412\x1b]8;;\x1b\\…") {
+		t.Errorf("link aberto depois do corte: %q", l)
+	}
+	// Sem lugar, a autorização sai da faixa antes do resto.
+	if ls[0] != " convey · sgo-cli                1/4 ▰▱▱▱  1 pend " {
+		t.Errorf("faixa em 50: %q", ls[0])
+	}
+}
+
+// A pendência longa quebra em palavras e para na 2ª linha com …; as duas linhas apontam para o
+// pane de origem.
+func TestPendenciaEmDuasLinhas(t *testing.T) {
+	s := snapshot()
+	s.PendenciasAbertas[0].Texto = "escolher entre alternativa A que reescreve o importador, alternativa B que mantém o formato antigo e alternativa C que adia tudo (recomendado C)"
+	tela := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 80, Agora: agora})
 	ls := planas(tela)
-	if ls[4] != "● #312 sgo jql: consulta avulsa p…  Rev r2 ↗   !32" {
-		t.Errorf("título não truncado: %q", ls[4])
+	n := len(ls)
+	l1, l2 := ls[n-3], ls[n-2]
+	if l1 != "│ TG-313#P1 │ autorização │ escolher entre alternativa A que   │ há 12 min │ ↗ │" {
+		t.Errorf("1ª linha: %q", l1)
 	}
-	if ls[10] != " TG-313#P1 autorização  instalar b…  (há 12 min) ↗" {
-		t.Errorf("pendência não truncada: %q", ls[10])
+	if !strings.Contains(l2, "reescreve o importador") || !strings.Contains(l2, "… │") {
+		t.Errorf("2ª linha: %q", l2)
 	}
-	// Sem lugar para o título da onda, a autorização sai primeiro.
-	if ls[0] != "convey · sgo-cli — Comandos ap…  1/4 done · 1 pend" {
-		t.Errorf("cabeçalho estreito: %q", ls[0])
+	if tela.Linhas[n-3].Pane != "wB:p4" || tela.Linhas[n-2].Pane != "wB:p4" || tela.Linhas[n-1].Pane != "" {
+		t.Errorf("alvos: %q %q %q", tela.Linhas[n-3].Pane, tela.Linhas[n-2].Pane, tela.Linhas[n-1].Pane)
 	}
-	// Largura mínima não quebra.
-	_ = desenhar(Opcoes{Coord: "convey", Largura: 5})
+	if got := duasLinhas("curto", 20); len(got) != 1 || got[0] != "curto" {
+		t.Errorf("curto: %q", got)
+	}
+	// A quebra é no espaço, não no hífen de uma opção.
+	if got := duasLinhas("apagar o recurso --cascade=orphan depois", 22); got[0] != "apagar o recurso" || got[1] != "--cascade=orphan depo…" {
+		t.Errorf("hífen: %q", got)
+	}
+	if got := duasLinhas("abcdefghij", 4); fmt.Sprint(got) != "[abcd efg…]" {
+		t.Errorf("palavra longa: %q", got)
+	}
 }
 
 func TestEstilosEOSC8(t *testing.T) {
@@ -182,6 +239,7 @@ func TestEstilosEOSC8(t *testing.T) {
 		tudo += l.Texto + "\n"
 	}
 	vermelho, verde, cinza, laranja := "38;2;224;108;117", "38;2;152;195;121", "38;2;127;132;142", "38;2;255;140;0"
+	amarelo, azul := "38;2;229;192;123", "38;2;97;175;239"
 	casos := []struct{ nome, quer string }{
 		{"draft vermelho com link", "\x1b]8;;https://gitlab.basis.com.br/basis/sgo-cli/-/merge_requests/33\x1b\\\x1b[" + vermelho + "m!33"},
 		{"pronta verde", "\x1b[" + verde + "m!32"},
@@ -191,7 +249,13 @@ func TestEstilosEOSC8(t *testing.T) {
 		{"#ref com link do Taiga", "\x1b]8;;https://agile.basis.com.br/project/sgo-cli/us/313\x1b\\#313\x1b]8;;\x1b\\"},
 		{"status com link de pane", "\x1b]8;;https://orq.local/pane/wB:p4\x1b\\"},
 		{"blocked em negrito vermelho", "\x1b[1;" + vermelho + "m⚠"},
+		{"status blocked em negrito vermelho", "\x1b[1;" + vermelho + "mExec r1 ↗"},
+		{"Rev azul", "\x1b[" + azul + "mRev r2 ↗"},
+		{"Done verde", "\x1b[" + verde + "mDone ↗"},
+		{"Wait cinza", "\x1b[" + cinza + "mWait"},
 		{"pendência ↗ foca a origem", "\x1b]8;;https://orq.local/pane/wB:p4\x1b\\↗\x1b]8;;\x1b\\"},
+		{"tipo autorização amarelo", "\x1b[" + amarelo + "mautorização"},
+		{"nome do coordenador leva ao pane dele", "\x1b]8;;https://orq.local/pane/wB:p1\x1b\\\x1b[1mconvey"},
 	}
 	for _, c := range casos {
 		if !strings.Contains(tudo, c.quer) {
@@ -206,6 +270,98 @@ func TestEstilosEOSC8(t *testing.T) {
 	if !strings.Contains(tudo, "\x1b[1msgo api: chamada REST") {
 		t.Errorf("título da blocked sem destaque")
 	}
+	// Plan roxo e Exec amarelo (sem blocked).
+	s := snapshot()
+	s.Coordenadores[0].Ondas[0].US[1].Herdr = herdr("working")
+	s.Coordenadores[0].Ondas[0].US[2].Status = "plan"
+	tudo = ""
+	for _, l := range cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas {
+		tudo += l.Texto
+	}
+	for nome, quer := range map[string]string{"Plan roxo": "\x1b[38;2;198;120;221mPlan", "Exec amarelo": "\x1b[" + amarelo + "mExec r1 ↗"} {
+		if !strings.Contains(tudo, quer) {
+			t.Errorf("%s: falta %q", nome, quer)
+		}
+	}
+}
+
+// Os escapes OSC 8 e SGR não contam na largura: todas as linhas da tabela têm a mesma largura
+// visível, e as bordas verticais caem nas mesmas colunas com e sem links.
+func TestOSC8NaoAfetaALargura(t *testing.T) {
+	tela := desenhar(Opcoes{Coord: "convey", Largura: 100})
+	var w0 int
+	for i := 2; i <= 11; i++ {
+		l := tela.Linhas[i].Texto
+		if !strings.Contains(l, "\x1b]8;;") && i >= 5 && tela.Linhas[i].Pane != "" && i != 6 && i != 10 {
+			t.Errorf("linha %d sem link: %q", i, l)
+		}
+		w := ansi.StringWidth(l)
+		if i == 2 {
+			w0 = w
+		}
+		if w != w0 || w != ansi.StringWidth(ansi.Strip(l)) {
+			t.Errorf("linha %d com largura %d (plana %d), quer %d", i, w, ansi.StringWidth(ansi.Strip(l)), w0)
+		}
+	}
+	// As bordas verticais caem nas mesmas colunas em todas as linhas, com ou sem link.
+	bordas := func(l string) []int {
+		var cs []int
+		col := 0
+		for _, r := range ansi.Strip(l) {
+			if r == '│' || r == '┼' || r == '┬' {
+				cs = append(cs, col)
+			}
+			col += ansi.StringWidth(string(r))
+		}
+		return cs
+	}
+	ref := fmt.Sprint(bordas(tela.Linhas[3].Texto))
+	for i := 5; i <= 10; i++ {
+		if b := fmt.Sprint(bordas(tela.Linhas[i].Texto)); b != ref {
+			t.Errorf("linha %d com bordas em %s, quer %s", i, b, ref)
+		}
+	}
+}
+
+// Fundos: faixa na largura toda, linhas alternadas, a blocked em destaque, a selecionada com o
+// fundo de seleção em todas as linhas físicas e a Done esmaecida. Claro e escuro têm tons
+// próprios.
+func TestFundosETom(t *testing.T) {
+	bg := func(c string) string { return "48;2;" + c + "m" }
+	for _, caso := range []struct {
+		e                                Estilos
+		faixa, zebra, selecao, bloqueada string
+	}{
+		{Estilos{}, bg("50;56;68"), bg("39;43;51"), bg("62;74;94"), bg("74;42;48")},
+		{Estilos{Claro: true}, bg("227;231;238"), bg("242;243;245"), bg("207;216;230"), bg("251;225;227")},
+	} {
+		tela := caso.e.Desenhar(snapshot(), Opcoes{Coord: "convey", Largura: 100, Agora: agora, Selecao: "us:sgo-cli/225"})
+		l := func(i int) string { return tela.Linhas[i].Texto }
+		if !strings.HasPrefix(l(0), "\x1b["+caso.faixa) || !strings.HasPrefix(l(1), "\x1b["+caso.faixa) {
+			t.Errorf("claro=%v faixa: %q", caso.e.Claro, l(0))
+		}
+		if !strings.Contains(l(5), caso.bloqueada) || !strings.Contains(l(6), caso.bloqueada) {
+			t.Errorf("claro=%v blocked sem destaque: %q", caso.e.Claro, l(5))
+		}
+		if !strings.Contains(l(7), caso.zebra) || strings.Contains(l(8), "48;2;") {
+			t.Errorf("claro=%v zebra: %q / %q", caso.e.Claro, l(7), l(8))
+		}
+		// A #225 (Done, selecionada): as duas linhas com o fundo de seleção e esmaecidas.
+		for _, i := range []int{9, 10} {
+			if !strings.Contains(l(i), caso.selecao) || !strings.Contains(l(i), "\x1b[2;") {
+				t.Errorf("claro=%v linha %d sem seleção ou esmaecido: %q", caso.e.Claro, i, l(i))
+			}
+		}
+		// O fundo volta depois de cada trecho colorido: nenhum reset deixa a célula sem fundo.
+		cel := strings.Split(l(9), "│")[3]
+		if strings.Contains(cel, "\x1b[m") && !strings.Contains(cel, "\x1b[m\x1b[") {
+			t.Errorf("reset sem fundo: %q", cel)
+		}
+	}
+	// Bordas não têm fundo.
+	if strings.Contains(desenhar(Opcoes{Coord: "convey", Largura: 100}).Linhas[2].Texto, "48;2;") {
+		t.Error("borda com fundo")
+	}
 }
 
 func TestErroDeFonteDiscretoMantemValor(t *testing.T) {
@@ -215,28 +371,42 @@ func TestErroDeFonteDiscretoMantemValor(t *testing.T) {
 	u.MRs[0].Erro = &central.Erro{Codigo: "falha_comando", Mensagem: "glab saiu com 1"}
 	tela := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora})
 	ls := planas(tela)
-	if !strings.Contains(ls[4], "sgo jql: consulta avulsa") || !strings.Contains(ls[4], "*  Rev r2 ↗") || !strings.Contains(ls[4], "!32*") {
-		t.Errorf("linha com erro: %q", ls[4])
+	if !strings.Contains(ls[7], "sgo jql: consulta avulsa") || !strings.Contains(ls[7], "…* │ Rev r2 ↗") || !strings.Contains(ls[7], "!32*") {
+		t.Errorf("linha com erro: %q", ls[7])
 	}
 	rod := ansi.Strip(tela.Rodape)
-	for _, quer := range []string{"herdr há 0 min", "taiga há 2 min ✗ autenticacao", "* última consulta falhou"} {
-		if quer == "herdr há 0 min" {
-			quer = "herdr agora"
-		}
+	for _, quer := range []string{"herdr agora", "taiga há 2 min ✗ autenticacao", "* última consulta falhou"} {
 		if !strings.Contains(rod, quer) {
 			t.Errorf("rodapé sem %q: %q", quer, rod)
 		}
 	}
 }
 
+func TestLegenda(t *testing.T) {
+	leg := make([]string, 0, 7)
+	for _, l := range desenhar(Opcoes{Coord: "convey", Largura: 100}).Legenda {
+		leg = append(leg, ansi.Strip(l))
+	}
+	quer := "● trabalhando ⚠ bloqueado · ocioso ✓ concluiu ○ desconhecido ✗ pane fechado – sem pane"
+	if strings.Join(leg, " ") != quer {
+		t.Errorf("legenda: %q", strings.Join(leg, " "))
+	}
+}
+
 func TestTodos(t *testing.T) {
-	ls := planas(desenhar(Opcoes{Todos: true, Largura: 100}))
+	tela := desenhar(Opcoes{Todos: true, Largura: 100})
+	ls := planas(tela)
 	if ls[0] != "Central · 2 coordenadores · 1 pendência aberta" {
 		t.Errorf("cabeçalho: %q", ls[0])
 	}
 	tudo := strings.Join(ls, "\n")
-	if !strings.Contains(tudo, "convey · sgo-cli — Comandos api e jql") || !strings.Contains(tudo, "liven — sem onda aberta") {
+	if !strings.Contains(tudo, " convey · sgo-cli ") || !strings.Contains(tudo, "liven — sem onda aberta") {
 		t.Errorf("blocos:\n%s", tudo)
+	}
+	// O coordenador sem onda é uma linha discreta, sem faixa.
+	ult := tela.Linhas[len(tela.Linhas)-1].Texto
+	if strings.Contains(ult, "48;2;") || !strings.Contains(ult, "orq.local/pane/w7:p1") {
+		t.Errorf("sem onda: %q", ult)
 	}
 }
 
@@ -300,8 +470,7 @@ func TestModeloSobreviveAFalhas(t *testing.T) {
 	if !strings.Contains(v, "#313") || !strings.Contains(v, "leitura falhou") {
 		t.Fatalf("perdeu a tela boa:\n%s", v)
 	}
-	// ↓ seleciona a primeira linha com pane (o cabeçalho), ↓ de novo a US blocked; Enter foca.
-	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	// ↓ pula a faixa e as bordas e seleciona a US blocked; Enter foca.
 	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
@@ -314,11 +483,14 @@ func TestModeloSobreviveAFalhas(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View().Content), "foco em wB:p4 falhou: binario_ausente") {
 		t.Fatalf("erro do foco não aparece:\n%s", ansi.Strip(m.View().Content))
 	}
-	if !strings.HasPrefix(ansi.Strip(strings.Split(m.View().Content, "\n")[1]), "›⚠ #313") {
-		t.Fatalf("seleção: %q", ansi.Strip(strings.Split(m.View().Content, "\n")[1]))
+	// A seleção é o fundo da linha, nas duas linhas físicas da #313.
+	ls := strings.Split(m.View().Content, "\n")
+	if !strings.HasPrefix(ansi.Strip(ls[5]), "│ ⚠ │ #313") || !strings.Contains(ls[5], "48;2;62;74;94m") || !strings.Contains(ls[6], "48;2;62;74;94m") {
+		t.Fatalf("seleção: %q", ls[5])
 	}
-	// Clique na linha da #312 (a 5ª: cabeçalho, #313 e duas MRs antes): pânico vira erro.
-	_, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: 4, Button: tea.MouseLeft})
+	// Clique na 2ª linha da #312... na linha da #312 (a 8ª: faixa, bordas, #313 e a 2ª MR
+	// antes): pânico vira erro.
+	_, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: 7, Button: tea.MouseLeft})
 	if cmd == nil {
 		t.Fatal("clique sem foco")
 	}
@@ -326,9 +498,19 @@ func TestModeloSobreviveAFalhas(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View().Content), "foco em wB:p3 falhou: pânico: herdr sumiu") {
 		t.Fatalf("pânico não virou erro:\n%s", ansi.Strip(m.View().Content))
 	}
-	// Clique em linha sem pane não faz nada.
-	if _, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: 5, Button: tea.MouseLeft}); cmd != nil {
-		t.Fatal("clique na #314 (sem pane) focou")
+	// Clique em linha sem pane não faz nada: US sem pane, borda e faixa.
+	for _, y := range []int{8, 2, 0} {
+		if _, cmd = m.Update(tea.MouseClickMsg{X: 3, Y: y, Button: tea.MouseLeft}); cmd != nil {
+			t.Fatalf("clique na linha %d (sem pane) focou", y)
+		}
+	}
+	// Clique na 2ª linha de MR da #313 foca o pane dela.
+	if _, cmd = m.Update(tea.MouseClickMsg{X: 90, Y: 6, Button: tea.MouseLeft}); cmd == nil {
+		t.Fatal("clique na 2ª MR não focou")
+	}
+	m.Update(cmd())
+	if focos[len(focos)-1] != "wB:p4" {
+		t.Fatalf("focos = %v", focos)
 	}
 }
 
@@ -360,8 +542,7 @@ func TestSelecaoSegueOPane(t *testing.T) {
 	})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.Update(m.carregar())
-	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // #312
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // #312, a primeira sem ninguém blocked
 	if m.tela.Linhas[m.sel].Pane != "wB:p3" {
 		t.Fatalf("seleção em %q", m.tela.Linhas[m.sel].Pane)
 	}
@@ -376,6 +557,103 @@ func TestDesde(t *testing.T) {
 	for d, quer := range map[time.Duration]string{30 * time.Second: "agora", 12 * time.Minute: "há 12 min", 3 * time.Hour: "há 3 h", 72 * time.Hour: "há 3 d"} {
 		if s := desde(agora.Add(-d).Format(time.RFC3339), agora); s != quer {
 			t.Errorf("%v = %q", d, s)
+		}
+	}
+}
+
+func modeloCarregado(t *testing.T, largura int) *Modelo {
+	t.Helper()
+	m := Novo(context.Background(), Config{
+		Carregar: func(context.Context) (central.Snapshot, error) { return snapshot(), nil },
+		Focar:    func(context.Context, string) error { return nil },
+		Opcoes:   Opcoes{Coord: "convey"},
+		Estilos:  cores,
+		Agora:    func() time.Time { return agora },
+	})
+	m.Update(tea.WindowSizeMsg{Width: largura, Height: 40})
+	m.Update(m.carregar())
+	return m
+}
+
+// ↑↓ andam de item em item: pulam faixa, bordas, regras, a US sem pane e as outras linhas
+// físicas da US selecionada.
+func TestNavegacaoPorItem(t *testing.T) {
+	m := modeloCarregado(t, 100)
+	var vistos []string
+	for range 6 {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		vistos = append(vistos, m.tela.Linhas[m.sel].Item)
+	}
+	quer := "[us:sgo-cli/313 us:sgo-cli/312 us:sgo-cli/225 pend:convey/TG-313#P1 pend:convey/TG-313#P1 pend:convey/TG-313#P1]"
+	if fmt.Sprint(vistos) != quer {
+		t.Errorf("↓: %v", vistos)
+	}
+	vistos = nil
+	for range 4 {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		vistos = append(vistos, m.tela.Linhas[m.sel].Item)
+	}
+	// ↑ volta pelos mesmos itens e para na #313, a primeira com pane.
+	if fmt.Sprint(vistos) != "[us:sgo-cli/225 us:sgo-cli/312 us:sgo-cli/313 us:sgo-cli/313]" {
+		t.Errorf("↑: %v", vistos)
+	}
+	// A pendência e a US #313 têm o mesmo pane, mas só a selecionada ganha o fundo.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // pendência
+	sel := "48;2;62;74;94m"
+	for i, l := range m.tela.Linhas {
+		if strings.Contains(l.Texto, sel) != (l.Item == "pend:convey/TG-313#P1") {
+			t.Errorf("linha %d (%s) com seleção errada", i, l.Item)
+		}
+	}
+}
+
+// A cor de fundo chega como mensagem e troca os tons; antes dela vale o escuro. Init não espera
+// a resposta: só devolve comandos.
+func TestCorDeFundoDoTerminal(t *testing.T) {
+	m := modeloCarregado(t, 100)
+	if m.Init() == nil {
+		t.Fatal("Init sem comandos")
+	}
+	escuro, claro := "48;2;50;56;68m", "48;2;227;231;238m"
+	if !strings.Contains(m.tela.Linhas[0].Texto, escuro) {
+		t.Fatalf("padrão não é o escuro: %q", m.tela.Linhas[0].Texto)
+	}
+	m.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 0xfa, G: 0xfa, B: 0xfa, A: 0xff}})
+	if !m.cfg.Estilos.Claro || !strings.Contains(m.tela.Linhas[0].Texto, claro) {
+		t.Fatalf("fundo claro não trocou os tons: %q", m.tela.Linhas[0].Texto)
+	}
+	m.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 0x1e, G: 0x1e, B: 0x1e, A: 0xff}})
+	if m.cfg.Estilos.Claro || !strings.Contains(m.tela.Linhas[0].Texto, escuro) {
+		t.Fatal("fundo escuro não voltou")
+	}
+}
+
+// Rodapé: num pane largo, fontes, legenda e teclas; no estreito a legenda cede primeiro, um
+// ícone por vez, e as teclas continuam.
+func TestRodapeComLegenda(t *testing.T) {
+	ultima := func(m *Modelo) string {
+		ls := strings.Split(m.View().Content, "\n")
+		return ansi.Strip(ls[len(ls)-1])
+	}
+	largo := ultima(modeloCarregado(t, 200))
+	for _, quer := range []string{"herdr agora", "● trabalhando", "– sem pane", "q sai"} {
+		if !strings.Contains(largo, quer) {
+			t.Errorf("rodapé largo sem %q: %q", quer, largo)
+		}
+	}
+	medio := ultima(modeloCarregado(t, 140))
+	if !strings.Contains(medio, "● trabalhando") || strings.Contains(medio, "sem pane") || !strings.HasSuffix(medio, "q sai") {
+		t.Errorf("rodapé médio: %q", medio)
+	}
+	estreito := ultima(modeloCarregado(t, 80))
+	if strings.Contains(estreito, "trabalhando") || !strings.Contains(estreito, "herdr agora") {
+		t.Errorf("rodapé estreito: %q", estreito)
+	}
+	for _, w := range []int{200, 140, 80} {
+		if l := ultima(modeloCarregado(t, w)); ansi.StringWidth(l) > w {
+			t.Errorf("rodapé de %d com %d colunas", w, ansi.StringWidth(l))
 		}
 	}
 }

@@ -97,25 +97,34 @@ Só pane e workspace que existem recebem token. No Herdr o token é por nome, n�
 `orq tui` desenha a Central a partir do mesmo snapshot de `orq snapshot`, relido a cada `--intervalo` (2 s); quem consulta as fontes é o daemon, o TUI só lê o cache. Com `--coord X`, as ondas abertas de um coordenador (é o que roda nos panes do workspace Central); com `--todos`, um bloco por coordenador com o total de pendências abertas (o popup do plugin); sem nenhum dos dois, o coordenador corrente ou, sem ele, todos.
 
 ```
-convey · sgo-cli — Comandos api e jql  [até: MR pronta]  1/4 done · 1 pend
-⚠ #313 sgo api: chamada REST                     Exec r1 ↗
-       !33 draft
-       !412 [IaC] aberta
-● #312 sgo jql: consulta avulsa por JQL…         Rev r2 ↗   !32
-– #314 Menores da TG-312                         Wait
-✓ #225 Criação Suporte/OS                        Done ↗
-       !29 mesclada
-       !31 fechada
-Pendências
- TG-313#P1 autorização  instalar binário e aplicar config pessoal  (há 12 min) ↗
- herdr agora · mr há 1 min · taiga há 2 min ✗ autenticacao   ↑↓ Enter foca · r relê · q sai
+ convey · sgo-cli                               até MR pronta  1/4 ▰▱▱▱  1 pend
+ Comandos api e jql
+╭───┬──────┬──────────────────────────────────────────┬───────────┬────────────╮
+│   │ US   │ título                                   │ status    │ MRs        │
+├───┼──────┼──────────────────────────────────────────┼───────────┼────────────┤
+│ ⚠ │ #313 │ sgo api: chamada REST                    │ Exec r1 ↗ │ !33        │
+│   │      │                                          │           │ !412 [IaC] │
+│ ● │ #312 │ sgo jql: consulta avulsa por JQL com pa… │ Rev r2 ↗  │ !32        │
+│ – │ #314 │ Menores da TG-312                        │ Wait      │            │
+│ ✓ │ #225 │ Criação Suporte/OS                       │ Done ↗    │ !29        │
+│   │      │                                          │           │ !31        │
+╰───┴──────┴──────────────────────────────────────────┴───────────┴────────────╯
+╭───────────┬─────────────┬───────────────────────────────────┬───────────┬───╮
+│ id        │ tipo        │ texto                             │ idade     │   │
+├───────────┼─────────────┼───────────────────────────────────┼───────────┼───┤
+│ TG-313#P1 │ autorização │ instalar binário e aplicar config │ há 12 min │ ↗ │
+│           │             │ pessoal                           │           │   │
+╰───────────┴─────────────┴───────────────────────────────────┴───────────┴───╯
+ herdr agora · mr há 1 min · taiga há 2 min ✗ autenticacao  ● trabalhando ⚠ bloqueado …  ↑↓ Enter foca · r relê · q sai
 ```
 
-- 1ª coluna: o status Herdr do pane da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu. A US com o pane `blocked` sobe para o topo e fica em negrito.
-- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura.
-- Status e rodada (`Exec r1 ↗`) são link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`). No popup, focar fecha o popup.
-- MRs: uma inline quando a US tem uma, uma por linha quando tem mais, com link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
-- Pendências abertas embaixo; o `↗` foca o pane que perguntou.
+- Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas; na 2ª linha, o título da onda. Coordenador sem onda aberta é uma linha discreta.
+- Tabela das US: agente | US | título | status | MRs, com fundo alternado. A 1ª coluna é o status Herdr do pane da US, não o da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu (a legenda vai no rodapé). A US com o pane `blocked` sobe para o topo, com fundo de destaque e título em negrito; a US Done sai esmaecida.
+- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`!412…`); num largo as colunas não passam do conteúdo.
+- Status com cor (Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde) e link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples em qualquer linha da US, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`); a seleção é o fundo da linha. No popup, focar fecha o popup.
+- MRs na mesma célula, uma por linha, com link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
+- Pendências abertas numa tabela menor: id, tipo com cor, texto em até 2 linhas (cortado com `…` depois), idade e o `↗`, que foca o pane que perguntou.
+- Os tons de fundo seguem a cor de fundo que o terminal informa ao bubbletea (claro ou escuro), sem esperar a resposta: até ela chegar, e num terminal que não responde, valem os do escuro.
 - Erro de fonte não esconde o valor: a tela mostra o último valor bom, um `*` apagado marca o título ou a MR cuja consulta mais recente falhou, e o rodapé dá a idade de cada fonte e o código do erro.
 - Nada que a leitura do banco ou o foco façam derruba a tela: o erro vai para a linha de status (ex. `foco em wB:p3 falhou: binario_ausente: …`) e o TUI segue.
 
