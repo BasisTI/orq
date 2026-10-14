@@ -227,6 +227,19 @@ func TestPendenciaEmDuasLinhas(t *testing.T) {
 	if got := duasLinhas("apagar o recurso --cascade=orphan depois", 22); got[0] != "apagar o recurso" || got[1] != "--cascade=orphan depo…" {
 		t.Errorf("hífen: %q", got)
 	}
+	// Caractere largo numa coluna de 1 não trava (o laço tem de andar).
+	feito := make(chan []string, 1)
+	go func() { feito <- duasLinhas("ok 👍 漢字", 1) }()
+	select {
+	case got := <-feito:
+		for _, l := range got {
+			if ansi.StringWidth(l) > 1 {
+				t.Errorf("largo em 1 coluna: %q", got)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("duasLinhas não termina com caractere largo em 1 coluna")
+	}
 	if got := duasLinhas("abcdefghij", 4); fmt.Sprint(got) != "[abcd efg…]" {
 		t.Errorf("palavra longa: %q", got)
 	}
@@ -655,5 +668,25 @@ func TestRodapeComLegenda(t *testing.T) {
 		if l := ultima(modeloCarregado(t, w)); ansi.StringWidth(l) > w {
 			t.Errorf("rodapé de %d com %d colunas", w, ansi.StringWidth(l))
 		}
+	}
+}
+
+// O pane da US selecionada muda (pane relançado): a seleção segue o item.
+func TestSelecaoSegueOItemQuandoOPaneMuda(t *testing.T) {
+	carregada := snapshot()
+	m := Novo(context.Background(), Config{
+		Carregar: func(context.Context) (central.Snapshot, error) { return carregada, nil },
+		Focar:    func(context.Context, string) error { return nil },
+		Opcoes:   Opcoes{Coord: "convey"},
+		Estilos:  cores,
+	})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.Update(m.carregar())
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // #313
+	carregada = snapshot()
+	carregada.Coordenadores[0].Ondas[0].US[1].PaneID = ptr("wB:p9")
+	m.Update(m.carregar())
+	if m.sel < 0 || m.tela.Linhas[m.sel].Item != "us:sgo-cli/313" || m.tela.Linhas[m.sel].Pane != "wB:p9" {
+		t.Fatalf("seleção perdida: sel=%d", m.sel)
 	}
 }

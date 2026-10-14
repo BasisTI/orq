@@ -234,7 +234,7 @@ func (m *Modelo) redesenhar() {
 	m.tela = m.cfg.Estilos.Desenhar(*m.snap, o)
 	m.sel = -1
 	for i, l := range m.tela.Linhas {
-		if antes.Pane != "" && l.Pane == antes.Pane && l.Item == antes.Item {
+		if antes.Item != "" && l.Item == antes.Item || antes.Item == "" && antes.Pane != "" && l.Pane == antes.Pane {
 			m.sel = i
 			break
 		}

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -735,8 +736,17 @@ func duasLinhas(s string, w int) []string {
 			atual = p
 		}
 		for ansi.StringWidth(atual) > w {
-			ls = append(ls, ansi.Truncate(atual, w, ""))
-			atual = ansi.TruncateLeft(atual, w, "")
+			cab := ansi.Truncate(atual, w, "")
+			if cab == "" {
+				// Caractere largo numa coluna de 1: vira … e o texto anda, senão o laço não
+				// termina.
+				_, n := utf8.DecodeRuneInString(atual)
+				ls = append(ls, "…")
+				atual = atual[n:]
+				continue
+			}
+			ls = append(ls, cab)
+			atual = atual[len(cab):]
 		}
 	}
 	if atual != "" || len(ls) == 0 {
