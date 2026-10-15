@@ -5,6 +5,7 @@ package tui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"image/color"
 	"net/url"
 	"sort"
@@ -63,6 +64,8 @@ type Estilos struct {
 type paleta struct {
 	vermelho, verde, amarelo, azul, cinza, apagado, laranja, roxo color.Color
 	faixa, zebra, selecao, bloqueada, borda                       color.Color
+	// projetos são os tons do título da onda, um por projeto (corDoProjeto), legíveis sobre faixa.
+	projetos [8]color.Color
 }
 
 var (
@@ -72,6 +75,8 @@ var (
 		laranja: lipgloss.Color("#ff8c00"), roxo: lipgloss.Color("#c678dd"),
 		faixa: lipgloss.Color("#323844"), zebra: lipgloss.Color("#272b33"), selecao: lipgloss.Color("#3e4a5e"),
 		bloqueada: lipgloss.Color("#4a2a30"), borda: lipgloss.Color("#4b5263"),
+		projetos: tonsProjeto(
+			"#61afef", "#e5c07b", "#56d4dd", "#e07bd6", "#5fd7af", "#ffaf5f", "#a6b8ff", "#c3e88d"),
 	}
 	clara = paleta{
 		vermelho: lipgloss.Color("#e45649"), verde: lipgloss.Color("#50a14f"), amarelo: lipgloss.Color("#b07d00"),
@@ -79,8 +84,27 @@ var (
 		laranja: lipgloss.Color("#d75f00"), roxo: lipgloss.Color("#a626a4"),
 		faixa: lipgloss.Color("#e3e7ee"), zebra: lipgloss.Color("#f2f3f5"), selecao: lipgloss.Color("#cfd8e6"),
 		bloqueada: lipgloss.Color("#fbe1e3"), borda: lipgloss.Color("#c5c8cf"),
+		projetos: tonsProjeto(
+			"#1f5fd6", "#8a6200", "#00798a", "#a3239a", "#0b7a5c", "#b04a00", "#4a4fc4", "#4d7a00"),
 	}
 )
+
+// Os tons dos projetos, na mesma ordem nos dois temas (azul, amarelo, ciano, magenta, verde-água,
+// laranja-claro, índigo, lima): o índice sai do hash do nome, então o projeto tem o mesmo tom
+// em qualquer execução e nos dois temas. Sem vermelho, que já sinaliza draft e bloqueio.
+func tonsProjeto(hex ...string) (t [8]color.Color) {
+	for i, h := range hex {
+		t[i] = lipgloss.Color(h)
+	}
+	return t
+}
+
+// corDoProjeto é o tom fixo do projeto: FNV-1a do nome sobre os tons da paleta.
+func (p paleta) corDoProjeto(projeto string) color.Color {
+	h := fnv.New32a()
+	h.Write([]byte(projeto))
+	return p.projetos[h.Sum32()%uint32(len(p.projetos))]
+}
 
 func (e Estilos) p() paleta {
 	if e.Claro {
@@ -530,7 +554,16 @@ func (e Estilos) faixa(c central.CoordSnapshot, onda central.Onda, nome string, 
 	l1 := esq + strings.Repeat(" ", max(w-ansi.StringWidth(esq)-ansi.StringWidth(dir), 1)) + dir
 	ls := []Linha{{Texto: e.linhaFaixa(l1, w)}}
 	if titulo != "" {
-		ls = append(ls, Linha{Texto: e.linhaFaixa(" "+cortar(titulo, w-2), w)})
+		// O projeto da Central: o padrão do coordenador, se está na onda; senão, o primeiro dela.
+		projeto := ""
+		if len(projetos) > 0 {
+			projeto = projetos[0]
+		}
+		if c.ProjetoPadrao != nil && visto[*c.ProjetoPadrao] {
+			projeto = limpar(*c.ProjetoPadrao)
+		}
+		t := e.novo().Foreground(p.corDoProjeto(projeto)).Bold(true).Render(cortar(titulo, w-2))
+		ls = append(ls, Linha{Texto: e.linhaFaixa(" "+t, w)})
 	}
 	return ls
 }
