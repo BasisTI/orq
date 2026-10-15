@@ -71,7 +71,10 @@ func (s *Store) RegistrarCoord(ctx context.Context, r Registro) (Coordenador, er
 			return err
 		}
 		detalhe["pane_id"], detalhe["workspace_id"], detalhe["projeto_padrao"] = c.PaneID, c.WorkspaceID, c.ProjetoPadrao
-		return s.registrar(ctx, tx, evento{coordenador: nome, tipo: "coord.registrar", detalhe: detalhe})
+		if err := s.registrar(ctx, tx, evento{coordenador: nome, tipo: "coord.registrar", detalhe: detalhe}); err != nil {
+			return err
+		}
+		return s.atribuirTom(ctx, tx, projeto, nome)
 	})
 	return c, err
 }

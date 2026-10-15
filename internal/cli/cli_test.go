@@ -367,3 +367,71 @@ func TestConcorrenciaBancoNovo(t *testing.T) {
 		}
 	}
 }
+
+// Três processos introduzem projetos ao mesmo tempo, dois deles os mesmos: cada projeto fica com
+// um índice só, os índices são 0..n-1 sem repetir nem pular, e cada atribuição deixou o seu evento.
+func TestConcorrenciaTomDoProjeto(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sobe processos")
+	}
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "base")
+	const n = 25
+	procs := [][]string{
+		{"coord", "registrar", "a{i}", "--pane", "", "--projeto", "pa{i}"},
+		{"coord", "registrar", "b{i}", "--pane", "", "--projeto", "pb{i}"},
+		{"coord", "registrar", "c{i}", "--pane", "", "--projeto", "pa{i}"},
+	}
+	var wg sync.WaitGroup
+	erros := make([]error, len(procs))
+	saidas := make([][]byte, len(procs))
+	for i, p := range procs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			args, _ := json.Marshal(p)
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), "ORQ_TEST_HELPER=1", "ORQ_TEST_REPETIR="+strconv.Itoa(n), "ORQ_TEST_ARGS="+string(args),
+				"ORQ_STATE_DIR="+env["ORQ_STATE_DIR"], "ORQ_COORD=", "HERDR_PANE_ID=")
+			saidas[i], erros[i] = cmd.CombinedOutput()
+		}()
+	}
+	wg.Wait()
+	for i, err := range erros {
+		if err != nil {
+			t.Fatalf("processo %d: %v\n%s", i, err, saidas[i])
+		}
+	}
+	var snap struct {
+		Projetos []struct {
+			Projeto string
+			Indice  int
+		}
+	}
+	if err := json.Unmarshal([]byte(ok(t, env, "snapshot")), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Projetos) != 2*n {
+		t.Fatalf("%d projetos, queria %d", len(snap.Projetos), 2*n)
+	}
+	nomes, indices := map[string]bool{}, map[int]bool{}
+	for _, p := range snap.Projetos {
+		if nomes[p.Projeto] || indices[p.Indice] || p.Indice < 0 || p.Indice >= 2*n {
+			t.Fatalf("projeto ou índice repetido ou fora de 0..%d: %+v", 2*n-1, p)
+		}
+		nomes[p.Projeto], indices[p.Indice] = true, true
+	}
+	var es []struct{ Tipo string }
+	if err := json.Unmarshal([]byte(ok(t, env, "diario", "--limite", "0")), &es); err != nil {
+		t.Fatal(err)
+	}
+	conta := 0
+	for _, e := range es {
+		if e.Tipo == "projeto.tom" {
+			conta++
+		}
+	}
+	if conta != 2*n {
+		t.Fatalf("%d eventos projeto.tom, queria %d", conta, 2*n)
+	}
+}

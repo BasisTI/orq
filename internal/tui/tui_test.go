@@ -738,13 +738,10 @@ func TestSeloConcluida(t *testing.T) {
 	}
 }
 
-// O título da onda tem uma cor fixa por projeto: o padrão do coordenador, se está na onda, ou o
-// primeiro da onda; hash estável, com o tom correspondente nos dois temas. A 1ª linha e a faixa
-// sem título não mudam.
+// O título da onda tem a cor do índice de tom do projeto (snapshot.projetos): o padrão do
+// coordenador, se está na onda, ou o primeiro da onda. Cada tom tem a versão do tema; passada a
+// paleta, os tons se repetem; sem índice, o cinza neutro. A faixa sem título não muda.
 func TestCorDoTituloPorProjeto(t *testing.T) {
-	titulo := func(e Estilos, s central.Snapshot) string {
-		return e.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas[1].Texto
-	}
 	comProjeto := func(projetos ...string) central.Snapshot {
 		s := snapshot()
 		o := &s.Coordenadores[0].Ondas[0]
@@ -754,7 +751,11 @@ func TestCorDoTituloPorProjeto(t *testing.T) {
 			u.Projeto = p
 			o.US = append(o.US, u)
 		}
+		s.Projetos = []central.ProjetoTom{{Projeto: "sgo-cli", Indice: 0}, {Projeto: "orq", Indice: 1}, {Projeto: "convey", Indice: 2}, {Projeto: "longe", Indice: 9}}
 		return s
+	}
+	titulo := func(e Estilos, s central.Snapshot) string {
+		return e.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas[1].Texto
 	}
 	fg := func(c color.Color) string {
 		r, g, b, _ := c.RGBA()
@@ -762,53 +763,53 @@ func TestCorDoTituloPorProjeto(t *testing.T) {
 	}
 	for _, e := range []Estilos{{}, {Claro: true}} {
 		p := e.p()
-		// Estável: o mesmo projeto, a mesma cor, em desenhos diferentes.
-		a, b := titulo(e, comProjeto("sgo-cli")), titulo(e, comProjeto("sgo-cli"))
-		if a != b || !strings.Contains(a, fg(p.corDoProjeto("sgo-cli"))) {
-			t.Errorf("claro=%v: título sem a cor do projeto: %q", e.Claro, a)
-		}
-		// Projetos diferentes, cores diferentes (casos escolhidos).
-		vistas := map[color.Color]string{}
-		for _, nome := range []string{"sgo-cli", "orq", "convey", "argocd-apps"} {
-			c := p.corDoProjeto(nome)
-			if outro, ok := vistas[c]; ok {
-				t.Errorf("claro=%v: %s e %s com a mesma cor", e.Claro, nome, outro)
+		// Cada índice, o seu tom, e os oito primeiros são distintos entre si.
+		vistas := map[color.Color]int{}
+		for i := range p.tons {
+			if outro, ok := vistas[p.tons[i]]; ok {
+				t.Errorf("claro=%v: tons %d e %d iguais", e.Claro, i, outro)
 			}
-			vistas[c] = nome
+			vistas[p.tons[i]] = i
 		}
-		// Primeiro projeto da onda, sem padrão; o padrão vale só se está na onda.
-		s := comProjeto("orq", "sgo-cli")
-		if !strings.Contains(titulo(e, s), fg(p.corDoProjeto("orq"))) {
-			t.Errorf("claro=%v: sem padrão, vale o primeiro da onda", e.Claro)
+		for _, c := range []struct {
+			nome   string
+			s      central.Snapshot
+			indice int
+		}{
+			{"primeiro projeto", comProjeto("sgo-cli", "orq"), 0},
+			{"segundo projeto", comProjeto("orq"), 1},
+			{"repete depois da paleta", comProjeto("longe"), 9 % len(p.tons)},
+		} {
+			if got := titulo(e, c.s); !strings.Contains(got, fg(p.tons[c.indice])) {
+				t.Errorf("claro=%v %s: tom %d ausente em %q", e.Claro, c.nome, c.indice, got)
+			}
 		}
-		s.Coordenadores[0].ProjetoPadrao = ptr("sgo-cli")
-		if !strings.Contains(titulo(e, s), fg(p.corDoProjeto("sgo-cli"))) {
+		// Padrão do coordenador: vale se está na onda, não se está fora dela.
+		s := comProjeto("sgo-cli", "orq")
+		s.Coordenadores[0].ProjetoPadrao = ptr("orq")
+		if !strings.Contains(titulo(e, s), fg(p.tons[1])) {
 			t.Errorf("claro=%v: o padrão do coordenador, na onda, vale", e.Claro)
 		}
-		s.Coordenadores[0].ProjetoPadrao = ptr("liven")
-		if !strings.Contains(titulo(e, s), fg(p.corDoProjeto("orq"))) {
+		s.Coordenadores[0].ProjetoPadrao = ptr("convey")
+		if !strings.Contains(titulo(e, s), fg(p.tons[0])) {
 			t.Errorf("claro=%v: padrão fora da onda não vale", e.Claro)
 		}
-	}
-	// Tom correspondente: o mesmo índice da paleta nos dois temas.
-	for _, nome := range []string{"sgo-cli", "orq", "infra-2025"} {
-		var i, j int
-		for k := range escura.projetos {
-			if escura.projetos[k] == escura.corDoProjeto(nome) {
-				i = k
-			}
-			if clara.projetos[k] == clara.corDoProjeto(nome) {
-				j = k
-			}
+		// Sem índice (snapshot antigo ou projeto não listado): cinza neutro.
+		s = comProjeto("desconhecido")
+		if !strings.Contains(titulo(e, s), fg(p.cinza)) {
+			t.Errorf("claro=%v: projeto sem índice sem o tom neutro: %q", e.Claro, titulo(e, s))
 		}
-		if i != j {
-			t.Errorf("%s: tom %d no escuro, %d no claro", nome, i, j)
+		s.Projetos = nil
+		if !strings.Contains(titulo(e, s), fg(p.cinza)) {
+			t.Errorf("claro=%v: snapshot sem projetos sem o tom neutro", e.Claro)
 		}
 	}
-	// Faixa sem título: só a 1ª linha, igual à de antes.
-	s := snapshot()
+	// Faixa sem título: só a 1ª linha, sem a 2ª.
+	s := comProjeto("sgo-cli")
+	com := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas
 	s.Coordenadores[0].Ondas[0].Titulo = ""
-	if n := len(cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas); n != len(desenhar(Opcoes{Coord: "convey", Largura: 100}).Linhas)-1 {
-		t.Errorf("faixa sem título com %d linhas", n)
+	sem := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas
+	if len(sem) != len(com)-1 || sem[0].Texto != com[0].Texto || sem[1].Texto != com[2].Texto {
+		t.Errorf("faixa sem título: %d linhas contra %d", len(sem), len(com))
 	}
 }
