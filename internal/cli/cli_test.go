@@ -3,16 +3,19 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	_ "modernc.org/sqlite"
 )
 
 // TestMain também serve de processo auxiliar do teste de concorrência: com ORQ_TEST_HELPER,
@@ -364,6 +367,130 @@ func TestConcorrenciaBancoNovo(t *testing.T) {
 		var cs []struct{ Nome string }
 		if err := json.Unmarshal([]byte(ok(t, map[string]string{"ORQ_STATE_DIR": dir}, "coord", "list")), &cs); err != nil || len(cs) != procs {
 			t.Fatalf("rodada %d: %d coordenadores, %v", r, len(cs), err)
+		}
+	}
+}
+
+// Três processos introduzem projetos ao mesmo tempo, dois deles os mesmos: cada projeto fica com
+// um índice só, os índices são 0..n-1 sem repetir nem pular, e cada atribuição deixou o seu evento.
+func TestConcorrenciaTomDoProjeto(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sobe processos")
+	}
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "base")
+	const n = 25
+	procs := [][]string{
+		{"coord", "registrar", "a{i}", "--pane", "", "--projeto", "pa{i}"},
+		{"coord", "registrar", "b{i}", "--pane", "", "--projeto", "pb{i}"},
+		{"coord", "registrar", "c{i}", "--pane", "", "--projeto", "pa{i}"},
+	}
+	var wg sync.WaitGroup
+	erros := make([]error, len(procs))
+	saidas := make([][]byte, len(procs))
+	for i, p := range procs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			args, _ := json.Marshal(p)
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), "ORQ_TEST_HELPER=1", "ORQ_TEST_REPETIR="+strconv.Itoa(n), "ORQ_TEST_ARGS="+string(args),
+				"ORQ_STATE_DIR="+env["ORQ_STATE_DIR"], "ORQ_COORD=", "HERDR_PANE_ID=")
+			saidas[i], erros[i] = cmd.CombinedOutput()
+		}()
+	}
+	wg.Wait()
+	for i, err := range erros {
+		if err != nil {
+			t.Fatalf("processo %d: %v\n%s", i, err, saidas[i])
+		}
+	}
+	var snap struct {
+		Projetos []struct {
+			Projeto string
+			Indice  int
+		}
+	}
+	if err := json.Unmarshal([]byte(ok(t, env, "snapshot")), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Projetos) != 2*n {
+		t.Fatalf("%d projetos, queria %d", len(snap.Projetos), 2*n)
+	}
+	nomes, indices := map[string]bool{}, map[int]bool{}
+	for _, p := range snap.Projetos {
+		if nomes[p.Projeto] || indices[p.Indice] || p.Indice < 0 || p.Indice >= 2*n {
+			t.Fatalf("projeto ou índice repetido ou fora de 0..%d: %+v", 2*n-1, p)
+		}
+		nomes[p.Projeto], indices[p.Indice] = true, true
+	}
+	var es []struct{ Tipo string }
+	if err := json.Unmarshal([]byte(ok(t, env, "diario", "--limite", "0")), &es); err != nil {
+		t.Fatal(err)
+	}
+	conta := 0
+	for _, e := range es {
+		if e.Tipo == "projeto.tom" {
+			conta++
+		}
+	}
+	if conta != 2*n {
+		t.Fatalf("%d eventos projeto.tom, queria %d", conta, 2*n)
+	}
+}
+
+// Cada atribuição de tom identifica o projeto no diário, em JSON e em texto.
+func TestDiarioTomIdentificaOProjeto(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a")
+	ok(t, env, "onda", "criar", "o", "--us", "projeto-a/1,projeto-b/1")
+	var es []struct {
+		Tipo    string
+		Detalhe struct {
+			Projeto string
+			Indice  int
+		}
+	}
+	if err := json.Unmarshal([]byte(ok(t, env, "diario", "--limite", "0")), &es); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range es {
+		if e.Tipo == "projeto.tom" {
+			got = append(got, e.Detalhe.Projeto+"="+strconv.Itoa(e.Detalhe.Indice))
+		}
+	}
+	if strings.Join(got, ",") != "projeto-a=0,projeto-b=1" {
+		t.Fatalf("projeto.tom em JSON = %v", got)
+	}
+	texto := ok(t, env, "--output", "text", "diario", "--limite", "0")
+	for _, want := range []string{`"projeto":"projeto-a"`, `"projeto":"projeto-b"`} {
+		if !strings.Contains(texto, want) {
+			t.Errorf("diário em texto sem %s:\n%s", want, texto)
+		}
+	}
+}
+
+// O orq que encontra um banco mais novo que ele manda atualizar os dois binários e reiniciar o
+// daemon, não só rodar o go install.
+func TestBancoMaisNovoCitaOsDoisBinarios(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a")
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	r := rodar(t, env, "snapshot")
+	if r.code != 4 || !strings.Contains(r.err, "versao_do_banco") {
+		t.Fatalf("exit %d: %s", r.code, r.err)
+	}
+	for _, want := range []string{"go install", "herdr plugin install BasisTI/orq --ref main --yes", "daemon"} {
+		if !strings.Contains(r.err, want) {
+			t.Errorf("recovery sem %q: %s", want, r.err)
 		}
 	}
 }

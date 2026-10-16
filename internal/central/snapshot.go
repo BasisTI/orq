@@ -18,6 +18,7 @@ type Snapshot struct {
 	Versao            int              `json:"versao"`
 	GeradoEm          string           `json:"gerado_em"`
 	Coordenadores     []CoordSnapshot  `json:"coordenadores"`
+	Projetos          []ProjetoTom     `json:"projetos"`
 	PendenciasAbertas []Pendencia      `json:"pendencias_abertas"`
 	Fontes            map[string]Fonte `json:"fontes"`
 }
@@ -31,7 +32,7 @@ type CoordSnapshot struct {
 
 // Snapshot lê tudo numa transação só. Por padrão traz só as ondas abertas.
 func (s *Store) Snapshot(ctx context.Context, incluirEncerradas bool) (Snapshot, error) {
-	snap := Snapshot{Versao: VersaoSnapshot, GeradoEm: s.agora(), Coordenadores: []CoordSnapshot{}}
+	snap := Snapshot{Versao: VersaoSnapshot, GeradoEm: s.agora(), Coordenadores: []CoordSnapshot{}, Projetos: []ProjetoTom{}}
 	err := s.ler(ctx, func(tx *sql.Tx) error {
 		cs, err := listarCoords(ctx, tx)
 		if err != nil {
@@ -51,6 +52,9 @@ func (s *Store) Snapshot(ctx context.Context, incluirEncerradas bool) (Snapshot,
 				return err
 			}
 			snap.Coordenadores = append(snap.Coordenadores, CoordSnapshot{Coordenador: c, Herdr: h.pane(c.PaneID), Ondas: os})
+		}
+		if snap.Projetos, err = carregarTons(ctx, tx); err != nil {
+			return err
 		}
 		if snap.PendenciasAbertas, err = carregarPendencias(ctx, tx, `WHERE p.aberta = 1`); err != nil {
 			return err

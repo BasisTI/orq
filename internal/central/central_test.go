@@ -79,7 +79,7 @@ func TestOpenReabreSemRemigrar(t *testing.T) {
 		}
 		var v int
 		var modo string
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 2 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 3 {
 			t.Fatalf("user_version = %d, %v", v, err)
 		}
 		if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&modo); err != nil || modo != "wal" {
@@ -646,9 +646,9 @@ func TestCoordenador(t *testing.T) {
 	}
 	es := eventos(t, s)
 	var d map[string]any
-	_ = json.Unmarshal(es[1].Detalhe, &d)
-	if es[1].Tipo != "coord.registrar" || d["pane_liberado_de"] != "a" {
-		t.Fatalf("evento = %s %s", es[1].Tipo, es[1].Detalhe)
+	_ = json.Unmarshal(es[2].Detalhe, &d)
+	if es[2].Tipo != "coord.registrar" || d["pane_liberado_de"] != "a" {
+		t.Fatalf("evento = %s %s", es[2].Tipo, es[2].Detalhe)
 	}
 }
 
@@ -670,7 +670,7 @@ func TestTodaEscritaGeraEvento(t *testing.T) {
 			t.Fatalf("evento %s sem coordenador", e.Tipo)
 		}
 	}
-	want := "coord.registrar,onda.criar,us.status,mr.add,mr.rm,pend.add,pend.resolver,onda.encerrar"
+	want := "coord.registrar,projeto.tom,onda.criar,us.status,mr.add,mr.rm,pend.add,pend.resolver,onda.encerrar"
 	if strings.Join(tipos, ",") != want {
 		t.Fatalf("tipos = %v", tipos)
 	}
@@ -722,7 +722,7 @@ func TestSnapshot(t *testing.T) {
 		v    any
 		want string
 	}{
-		{"raiz", m, "coordenadores,fontes,gerado_em,pendencias_abertas,versao"},
+		{"raiz", m, "coordenadores,fontes,gerado_em,pendencias_abertas,projetos,versao"},
 		{"fontes", m["fontes"], "herdr,mr,taiga"},
 		{"fonte", m["fontes"].(map[string]any)["mr"], "atualizado_em,consultado_em,erro"},
 		{"coordenador", coordJ, "herdr,nome,ondas,pane_id,projeto_padrao,registrado_em,workspace_id"},

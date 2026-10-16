@@ -17,6 +17,7 @@
 
 - Versão 1, US #3: o esqueleto.
 - Ainda versão 1, US #4: os campos `herdr` (coordenador e US), `taiga` (US), `atualizado_em` e `erro` (MR) e `fontes` (raiz) entraram, e `MR.estado` passou a ser preenchido. Tudo aditivo: `estado` já estava declarado como `draft|aberta|pronta|mesclada|fechada`, e quem lia a versão 1 continua lendo.
+- Ainda versão 1, US #10: o campo `projetos` (raiz) entrou, com o índice de tom de cada projeto. Aditivo.
 
 ## Estado vivo (US #4)
 
@@ -41,8 +42,14 @@ O snapshot não traz os tokens de sidebar. O daemon publica, com nomes próprios
   "versao": 1,
   "gerado_em": data,
   "coordenadores": [Coordenador],
+  "projetos": [ProjetoTom],                # índice de tom de cada projeto, na ordem de chegada
   "pendencias_abertas": [Pendencia],       # todas as abertas, de todos os coordenadores
   "fontes": {"herdr": Fonte, "mr": Fonte, "taiga": Fonte}
+}
+
+ProjetoTom {                               # o TUI pinta o título da onda com paleta[indice % len(paleta)]
+  "projeto": string,
+  "indice": int                            # 0, 1, 2…: dado na 1ª vez que o projeto aparece, nunca muda nem se repete
 }
 
 Fonte {
@@ -235,6 +242,9 @@ Pendencia {
         }
       ]
     }
+  ],
+  "projetos": [
+    {"projeto": "colaboradados", "indice": 0}
   ],
   "pendencias_abertas": [
     {

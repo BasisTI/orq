@@ -32,6 +32,8 @@ type Opcoes struct {
 	Agora   time.Time // relógio de "há 12 min"
 	// Selecao é o Item da linha selecionada: as linhas físicas dele saem com o fundo de seleção.
 	Selecao string
+	// tons é o índice de tom de cada projeto, do snapshot; Desenhar o preenche.
+	tons map[string]int
 }
 
 // Linha é uma linha física da tela. Pane, quando não vazio, é o pane que Enter ou o clique
@@ -63,6 +65,8 @@ type Estilos struct {
 type paleta struct {
 	vermelho, verde, amarelo, azul, cinza, apagado, laranja, roxo color.Color
 	faixa, zebra, selecao, bloqueada, borda                       color.Color
+	// tons são os do título da onda, um por projeto (corDoProjeto), legíveis sobre faixa.
+	tons [8]color.Color
 }
 
 var (
@@ -72,6 +76,8 @@ var (
 		laranja: lipgloss.Color("#ff8c00"), roxo: lipgloss.Color("#c678dd"),
 		faixa: lipgloss.Color("#323844"), zebra: lipgloss.Color("#272b33"), selecao: lipgloss.Color("#3e4a5e"),
 		bloqueada: lipgloss.Color("#4a2a30"), borda: lipgloss.Color("#4b5263"),
+		tons: tonsProjeto(
+			"#61afef", "#e5c07b", "#e07bd6", "#98c379", "#ff9e4a", "#4fd6e0", "#b497ff", "#9fb3c8"),
 	}
 	clara = paleta{
 		vermelho: lipgloss.Color("#e45649"), verde: lipgloss.Color("#50a14f"), amarelo: lipgloss.Color("#b07d00"),
@@ -79,8 +85,30 @@ var (
 		laranja: lipgloss.Color("#d75f00"), roxo: lipgloss.Color("#a626a4"),
 		faixa: lipgloss.Color("#e3e7ee"), zebra: lipgloss.Color("#f2f3f5"), selecao: lipgloss.Color("#cfd8e6"),
 		bloqueada: lipgloss.Color("#fbe1e3"), borda: lipgloss.Color("#c5c8cf"),
+		tons: tonsProjeto(
+			"#1f5fd6", "#8a6200", "#a3239a", "#3f7d1f", "#b04a00", "#00798a", "#6b3fd1", "#4f6478"),
 	}
 )
+
+// Os tons dos projetos, na mesma ordem nos dois temas: azul, amarelo, magenta, verde, laranja,
+// ciano, lilás e ardósia. Os primeiros são os mais distintos entre si, porque são os que mais
+// aparecem. Sem vermelho (draft e bloqueio) e com um verde só. O índice é o do projeto na
+// Central (ordem de chegada, central.ProjetoTom); passado o oitavo, os tons se repetem.
+func tonsProjeto(hex ...string) (t [8]color.Color) {
+	for i, h := range hex {
+		t[i] = lipgloss.Color(h)
+	}
+	return t
+}
+
+// corDoProjeto é o tom do índice; sem índice (snapshot sem o campo, ou projeto que ele não
+// lista), o cinza neutro.
+func (p paleta) corDoProjeto(indice int, tem bool) color.Color {
+	if !tem || indice < 0 {
+		return p.cinza
+	}
+	return p.tons[indice%len(p.tons)]
+}
 
 func (e Estilos) p() paleta {
 	if e.Claro {
@@ -308,6 +336,10 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 		o.Largura = 80
 	}
 	var t Tela
+	o.tons = make(map[string]int, len(s.Projetos))
+	for _, pt := range s.Projetos {
+		o.tons[pt.Projeto] = pt.Indice
+	}
 	coords := s.Coordenadores
 	if o.Coord != "" && !o.Todos {
 		coords = nil
@@ -530,7 +562,17 @@ func (e Estilos) faixa(c central.CoordSnapshot, onda central.Onda, nome string, 
 	l1 := esq + strings.Repeat(" ", max(w-ansi.StringWidth(esq)-ansi.StringWidth(dir), 1)) + dir
 	ls := []Linha{{Texto: e.linhaFaixa(l1, w)}}
 	if titulo != "" {
-		ls = append(ls, Linha{Texto: e.linhaFaixa(" "+cortar(titulo, w-2), w)})
+		// O projeto da Central: o padrão do coordenador, se está na onda; senão, o primeiro dela.
+		projeto := ""
+		if len(onda.US) > 0 {
+			projeto = onda.US[0].Projeto
+		}
+		if c.ProjetoPadrao != nil && visto[*c.ProjetoPadrao] {
+			projeto = *c.ProjetoPadrao
+		}
+		indice, tem := o.tons[projeto]
+		t := e.novo().Foreground(p.corDoProjeto(indice, tem)).Bold(true).Render(cortar(titulo, w-2))
+		ls = append(ls, Linha{Texto: e.linhaFaixa(" "+t, w)})
 	}
 	return ls
 }

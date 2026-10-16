@@ -136,6 +136,9 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 		var reiniciadas []evento
 		for i, u := range lista {
 			chaves[i] = u.Chave()
+			if err := s.atribuirTom(ctx, tx, u.Projeto, coord.Nome); err != nil {
+				return err
+			}
 			var ondaAtual int64
 			var encerrada *string
 			var ateAntigo, status string
