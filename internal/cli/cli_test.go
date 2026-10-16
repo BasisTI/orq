@@ -3,16 +3,19 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	_ "modernc.org/sqlite"
 )
 
 // TestMain também serve de processo auxiliar do teste de concorrência: com ORQ_TEST_HELPER,
@@ -433,5 +436,61 @@ func TestConcorrenciaTomDoProjeto(t *testing.T) {
 	}
 	if conta != 2*n {
 		t.Fatalf("%d eventos projeto.tom, queria %d", conta, 2*n)
+	}
+}
+
+// Cada atribuição de tom identifica o projeto no diário, em JSON e em texto.
+func TestDiarioTomIdentificaOProjeto(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a")
+	ok(t, env, "onda", "criar", "o", "--us", "projeto-a/1,projeto-b/1")
+	var es []struct {
+		Tipo    string
+		Detalhe struct {
+			Projeto string
+			Indice  int
+		}
+	}
+	if err := json.Unmarshal([]byte(ok(t, env, "diario", "--limite", "0")), &es); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range es {
+		if e.Tipo == "projeto.tom" {
+			got = append(got, e.Detalhe.Projeto+"="+strconv.Itoa(e.Detalhe.Indice))
+		}
+	}
+	if strings.Join(got, ",") != "projeto-a=0,projeto-b=1" {
+		t.Fatalf("projeto.tom em JSON = %v", got)
+	}
+	texto := ok(t, env, "--output", "text", "diario", "--limite", "0")
+	for _, want := range []string{`"projeto":"projeto-a"`, `"projeto":"projeto-b"`} {
+		if !strings.Contains(texto, want) {
+			t.Errorf("diário em texto sem %s:\n%s", want, texto)
+		}
+	}
+}
+
+// O orq que encontra um banco mais novo que ele manda atualizar os dois binários e reiniciar o
+// daemon, não só rodar o go install.
+func TestBancoMaisNovoCitaOsDoisBinarios(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a")
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	r := rodar(t, env, "snapshot")
+	if r.code != 4 || !strings.Contains(r.err, "versao_do_banco") {
+		t.Fatalf("exit %d: %s", r.code, r.err)
+	}
+	for _, want := range []string{"go install", "herdr plugin install BasisTI/orq --ref main --yes", "daemon"} {
+		if !strings.Contains(r.err, want) {
+			t.Errorf("recovery sem %q: %s", want, r.err)
+		}
 	}
 }

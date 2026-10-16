@@ -133,7 +133,7 @@ func (s *Store) migrar(ctx context.Context) error {
 			return err
 		}
 		if len(ms) > 0 && atual > ms[len(ms)-1].versao {
-			return &output.Error{Code: "versao_do_banco", Cause: fmt.Sprintf("o banco está na versão %d, mais nova que este orq (%d)", atual, ms[len(ms)-1].versao), Recovery: "atualize o orq com go install github.com/BasisTI/orq/cmd/orq@latest", Exit: output.ExitConflict}
+			return &output.Error{Code: "versao_do_banco", Cause: fmt.Sprintf("o banco está na versão %d, mais nova que este orq (%d)", atual, ms[len(ms)-1].versao), Recovery: "atualize os dois binários: go install github.com/BasisTI/orq/cmd/orq@latest e herdr plugin install BasisTI/orq --ref main --yes; depois reinicie o daemon do plugin (orq daemon --detach, com o daemon antigo parado)", Exit: output.ExitConflict}
 		}
 		for _, m := range ms {
 			if m.versao <= atual {

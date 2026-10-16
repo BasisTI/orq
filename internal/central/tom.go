@@ -23,7 +23,7 @@ func (s *Store) atribuirTom(ctx context.Context, tx *sql.Tx, projeto, coord stri
 	if err != nil {
 		return err
 	}
-	return s.registrar(ctx, tx, evento{coordenador: coord, projeto: projeto, tipo: "projeto.tom", detalhe: map[string]any{"indice": indice}})
+	return s.registrar(ctx, tx, evento{coordenador: coord, projeto: projeto, tipo: "projeto.tom", detalhe: map[string]any{"projeto": projeto, "indice": indice}})
 }
 
 // ProjetoTom é o índice de tom de um projeto, na ordem em que ele chegou à Central.
