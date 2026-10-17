@@ -28,7 +28,11 @@ func TestMain(m *testing.M) {
 	if os.Getenv("ORQ_TEST_MAIN") == "1" {
 		os.Exit(Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, false))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if binFalsoDir != "" {
+		os.RemoveAll(binFalsoDir)
+	}
+	os.Exit(code)
 }
 
 func processoAuxiliar() int {

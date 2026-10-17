@@ -23,6 +23,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `internal/limpeza`: `recursos.json` da US, `orq limpar` (panes, worktree, branches, pastas, Docker por rótulo) e a limpeza automática do daemon (`auto.go`). Plano e execução usam os mesmos itens: o `--dry-run` é o plano sem executar.
 - `internal/herdrcfg`: edição do `config.toml` do Herdr para `orq plugin configurar|desconfigurar` (lexer que preserva o texto, backup, `herdr config check` e restauração).
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
+- `internal/herdrfalso`: herdr falso dos testes de `orq central abrir` (árvore de splits em JSON, regras do Herdr 0.9.3). Os testes de `internal/cli` o compilam uma vez (`go build`); não entra no binário `orq`.
 - `internal/refs`: parse de `projeto/312`, `TG-312`, `TG-312#P2` e URL de MR.
 - `internal/output`: envelope de erro `{"error":{"code","cause","recovery"}}` e códigos de saída.
 - `docs/snapshot.md`: contrato do `orq snapshot`.
