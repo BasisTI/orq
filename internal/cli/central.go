@@ -288,6 +288,7 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 	}
 	sort.Strings(sobras)
 	var fechados []PaneCentral
+	var aFechar []string
 	for _, c := range sobras {
 		p := existentes[c]
 		st, detalhe, err := estadoPane(ctx, f, p, c)
@@ -298,11 +299,33 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 			fechados = append(fechados, PaneCentral{c, p, "ocupado", &detalhe})
 			continue
 		}
+		aFechar = append(aFechar, p)
+	}
+	// Fechar o último pane do workspace remove o workspace. Se é isso que vai acontecer e há
+	// coordenador para abrir, o pane de partida da grade nasce antes, ao lado do primeiro a fechar.
+	if livre == "" && len(coords) > 0 && len(aFechar) > 0 && len(aFechar) == len(pl.Panes) {
+		var sp paneMovido
+		args := append([]string{"pane", "split", aFechar[0], "--direction", "right", "--no-focus"}, flagsEnv...)
+		if err := herdrJSON(ctx, f, &sp, args...); err != nil {
+			return r, err
+		}
+		livre = sp.id()
+		for _, p := range pl.Panes {
+			if p.ID == aFechar[0] {
+				g.tab = p.Tab
+			}
+		}
+	}
+	for _, p := range aFechar {
 		if err := herdrJSON(ctx, f, nil, "pane", "close", p); err != nil {
 			return r, err
 		}
 		g.remover(p)
-		fechados = append(fechados, PaneCentral{c, p, "fechado", nil})
+		for c, id := range existentes {
+			if id == p {
+				fechados = append(fechados, PaneCentral{c, p, "fechado", nil})
+			}
+		}
 	}
 	if err := g.conferir(ctx, temFechado(fechados)); err != nil {
 		return r, err

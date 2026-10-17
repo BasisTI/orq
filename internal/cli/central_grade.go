@@ -308,9 +308,31 @@ func (g *grade) igualar(ctx context.Context) error {
 		ratio float64
 		r     retangulo
 	}
+	// Só as divisões dentro da região dos panes da grade: a que reserva espaço a um pane de fora
+	// (um shell acima, por exemplo) não é da grade.
+	noGrade := map[string]bool{}
+	for _, p := range g.panes {
+		noGrade[p] = true
+	}
+	var reg retangulo
+	primeiro := true
+	for _, p := range l.Panes {
+		if !noGrade[p.ID] {
+			continue
+		}
+		r := p.Rect
+		if primeiro {
+			reg, primeiro = r, false
+			continue
+		}
+		x0, y0 := min(reg.X, r.X), min(reg.Y, r.Y)
+		x1, y1 := max(reg.X+reg.W, r.X+r.W), max(reg.Y+reg.H, r.Y+r.H)
+		reg = retangulo{x0, y0, x1 - x0, y1 - y0}
+	}
 	var ls []linha
 	for _, s := range l.Splits {
-		if s.Direcao == "down" && s.Rect.X == l.Area.X && s.Rect.W == l.Area.W {
+		r := s.Rect
+		if s.Direcao == "down" && r.X == reg.X && r.W == reg.W && r.Y >= reg.Y && r.Y+r.H <= reg.Y+reg.H {
 			ls = append(ls, linha{s.Ratio, s.Rect})
 		}
 	}
@@ -323,7 +345,7 @@ func (g *grade) igualar(ctx context.Context) error {
 		}
 		pane := ""
 		for _, p := range l.Panes {
-			if p.Rect.X == s.r.X && p.Rect.Y == s.r.Y {
+			if noGrade[p.ID] && p.Rect.X == s.r.X && p.Rect.Y == s.r.Y {
 				pane = p.ID
 			}
 		}

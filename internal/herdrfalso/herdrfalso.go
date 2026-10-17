@@ -379,12 +379,21 @@ func Main(args []string, dir string) int {
 		if aba == "" {
 			return erro("pane_not_found", pane)
 		}
+		ws := e.AbaWS[aba]
 		e.Abas[aba] = Retirar(e.Abas[aba], pane)
 		if e.Abas[aba] == nil {
 			delete(e.Abas, aba)
 			delete(e.AbaWS, aba)
 		}
 		delete(e.Panes, pane)
+		// Fechar o último pane do workspace remove o workspace (Herdr 0.9.3).
+		restam := false
+		for _, w := range e.AbaWS {
+			restam = restam || w == ws
+		}
+		if !restam {
+			delete(e.Workspaces, ws)
+		}
 		return res(map[string]any{})
 	case "pane rename":
 		e.Panes[rest[0]].Rotulo = rest[1]

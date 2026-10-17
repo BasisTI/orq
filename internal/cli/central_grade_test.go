@@ -452,3 +452,97 @@ func TestHerdrGradeIsolado(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Revisão r1, sério: todos os coordenadores da Central trocam de uma vez. Fechar o último pane
+// antigo remove o workspace; a mesma chamada tem de abrir o TUI do novo e fechar os antigos.
+func TestCentralTrocaTodosOsCoordenadores(t *testing.T) {
+	for _, n := range []int{1, 2, 4} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			h := novoHerdrGrade(t)
+			coordenadores(t, h.env, 0, n)
+			abrir(t, h.env)
+			for i := 1; i <= n; i++ {
+				ok(t, h.env, "onda", "encerrar", fmt.Sprint(i))
+			}
+			ok(t, h.env, "coord", "registrar", "f", "--pane", "wB:pf", "--projeto", "orq")
+			ok(t, h.env, "--coord", "f", "onda", "criar", "of", "--us", "9")
+			h.limparLog()
+			r := abrir(t, h.env)
+			var criado, fechados int
+			for _, p := range r.Panes {
+				switch p.Acao {
+				case "criado":
+					criado++
+					if p.Coordenador != "f" || p.Detalhe != nil {
+						t.Fatalf("pane = %+v", p)
+					}
+				case "fechado":
+					fechados++
+				}
+			}
+			if criado != 1 || fechados != n || r.WorkspaceID == nil {
+				t.Fatalf("r = %+v", r)
+			}
+			e := h.estado()
+			var tuis []string
+			for id, p := range e.Panes {
+				if strings.HasPrefix(id, "wT:") {
+					if p.Rotulo != RotuloPaneCentral+"f" || len(p.Argv) < 4 || p.Argv[3] != "f" {
+						t.Fatalf("sobrou %s = %+v", id, p)
+					}
+					tuis = append(tuis, id)
+				}
+			}
+			if len(tuis) != 1 || e.Workspaces["wT"] != nomeCentral || len(e.Abas) != 2 {
+				t.Fatalf("panes %v, workspaces %v, abas %v", tuis, e.Workspaces, e.Abas)
+			}
+			// De novo: nada a fazer.
+			h.limparLog()
+			abrir(t, h.env)
+			if w := escritas(h); len(w) != 0 {
+				t.Fatalf("segunda chamada escreveu: %q", w)
+			}
+		})
+	}
+}
+
+// Sem nenhum coordenador com onda, fechar tudo remove o workspace e não há o que abrir.
+func TestCentralTrocaSemNovoCoordenador(t *testing.T) {
+	h := novoHerdrGrade(t)
+	coordenadores(t, h.env, 0, 2)
+	abrir(t, h.env)
+	ok(t, h.env, "onda", "encerrar", "1")
+	ok(t, h.env, "onda", "encerrar", "2")
+	r := abrir(t, h.env)
+	if len(r.Panes) != 2 || r.Panes[0].Acao != "fechado" || r.Panes[1].Acao != "fechado" {
+		t.Fatalf("r = %+v", r)
+	}
+}
+
+// Revisão r1, menor: um shell de fora acima da grade (D(shell, grade)) não recebe resize.
+func TestCentralGradeIgualaSemTocarPaneDeFora(t *testing.T) {
+	h := novoHerdrGrade(t)
+	coordenadores(t, h.env, 0, 1)
+	abrir(t, h.env)
+	e := h.estado()
+	e.Panes["wT:p9"] = &paneFalso{Rotulo: "shell de teste fora da Central"}
+	// O shell fica por cima de tudo: D(p9, p1).
+	e.Abas["wT:t1"] = &noFalso{Direcao: "down", Ratio: 0.5, A: &noFalso{Pane: "wT:p9"}, B: e.Abas["wT:t1"]}
+	h.salvar(e)
+	coordenadores(t, h.env, 1, 3)
+	h.limparLog()
+	abrir(t, h.env)
+	for _, l := range h.log() {
+		if strings.HasPrefix(l, "pane|resize|") && strings.Contains(l, "wT:p9") {
+			t.Fatalf("resize no pane de fora: %s", l)
+		}
+	}
+	rs := h.retangulos("wT:t1")
+	if rs["wT:p9"].H != areaAltura/2 {
+		t.Fatalf("shell de fora mudou de altura: %+v", rs["wT:p9"])
+	}
+	// As duas linhas da grade, dentro da metade de baixo, ficam iguais.
+	if a, b := rs["wT:p1"].H, rs["wT:p3"].H; a-b > 1 || b-a > 1 {
+		t.Fatalf("linhas desiguais: %d e %d", a, b)
+	}
+}
