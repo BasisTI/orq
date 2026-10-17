@@ -1243,3 +1243,119 @@ func TestDepoisDeReabrirALimpezaExigeAMRNovaMesclada(t *testing.T) {
 		t.Fatalf("MR nova aberta: %+v", r)
 	}
 }
+
+// --- R3-S1: o ciclo completo de duas gerações ---
+
+// segundaGeracao recria worktree e branch novos depois do reabrir, liga a MR 10 (mesclada na
+// main, se mesclar) e devolve o sha da cabeça dela.
+func (c *cen) segundaGeracao(rec *Recursos, mesclar bool) (url, sha string) {
+	c.t.Helper()
+	novoWt := c.wt + "-r2"
+	git(c.t, c.repo, "worktree", "add", "-q", "-b", "TG-13-r2", novoWt, "main")
+	escrever(c.t, filepath.Join(novoWt, "r2.txt"), "r2\n")
+	git(c.t, novoWt, "add", ".")
+	git(c.t, novoWt, "commit", "-q", "-m", "correção")
+	git(c.t, novoWt, "push", "-q", "-u", "origin", "TG-13-r2")
+	sha = git(c.t, novoWt, "rev-parse", "HEAD")
+	url = "https://github.com/BasisTI/orq/pull/10"
+	if _, _, err := c.st.AdicionarMR(context.Background(), &c.coord, c.u, url); err != nil {
+		c.t.Fatal(err)
+	}
+	rec.Repos = append(rec.Repos, Repo{Repo: c.repo, Worktree: novoWt, Branch: "TG-13-r2"})
+	if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+		c.t.Fatal(err)
+	}
+	escrever(c.t, filepath.Join(c.tmp(), "evidencia-r2"), "e")
+	estado, merged := "open", false
+	if mesclar {
+		git(c.t, c.repo, "merge", "-q", "--no-ff", "-m", "merge r2", "TG-13-r2")
+		git(c.t, c.repo, "push", "-q", "origin", "main")
+		estado, merged = "closed", true
+	}
+	b, _ := json.Marshal(map[string]any{"state": estado, "merged": merged, "mergeable_state": "clean", "html_url": url,
+		"head": map[string]string{"sha": sha, "ref": "TG-13-r2"}, "base": map[string]string{"ref": "main"}})
+	c.responder("gh", string(b), "api", "repos/BasisTI/orq/pulls/10")
+	return url, sha
+}
+
+func TestCicloCompletoDeDuasGeracoes(t *testing.T) {
+	for _, arquivoAntigo := range []bool{false, true} {
+		name := "apos_limpeza_completa"
+		if arquivoAntigo {
+			name = "reabrir_com_o_arquivo_antigo_presente"
+		}
+		t.Run(name, func(t *testing.T) {
+			c := novo(t)
+			c.mergeNaMain(false, true)
+			if !arquivoAntigo {
+				// Geração 1 limpa por inteiro: o recursos.json (e os aprovados) somem.
+				if r := c.limpar(false); !r.Completa || existe(c.l.Raizes.Arquivo(c.u)) {
+					t.Fatalf("geração 1: %+v", r)
+				}
+			}
+			rec, _, err := c.l.Reabrir(context.Background(), &c.coord, c.u)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Geracao != 1 || len(rec.MRsEncerradas) != 1 {
+				t.Fatalf("reabrir = %+v", rec)
+			}
+			url, sha := c.segundaGeracao(rec, true)
+			rec.Panes = []string{"tg-13_executor"}
+			// MR nova mesclada sem aprovação: recusa, e nada some.
+			r := c.limpar(false)
+			if !strings.Contains(r.Recusa, "sem head aprovado") || !strings.Contains(r.Recusa, url) {
+				t.Fatalf("MR nova sem aprovação passou: %+v", r)
+			}
+			if !existe(c.wt+"-r2") || !existe(filepath.Join(c.tmp(), "evidencia-r2")) {
+				t.Fatal("removeu algo sem aprovação da MR nova")
+			}
+			// Aprovação de outro head: recusa.
+			rec.Aprovados = map[string]string{url: strings.Repeat("1", 40)}
+			if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+				t.Fatal(err)
+			}
+			if r := c.limpar(false); !strings.Contains(r.Recusa, "não é o aprovado") {
+				t.Fatalf("head errado: %+v", r)
+			}
+			// Aprovada: a limpeza da geração 2 termina, e leva a 1 junto se ainda existia.
+			rec.Aprovados[url] = sha
+			if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+				t.Fatal(err)
+			}
+			r = c.limpar(false)
+			if r.Recusa != "" || !r.Completa {
+				t.Fatalf("geração 2: %+v %s", r, estados(r))
+			}
+			for _, p := range []string{c.wt, c.wt + "-r2", c.tmp(), c.trabalho()} {
+				if existe(p) {
+					t.Errorf("%s ficou", p)
+				}
+			}
+			if git(t, c.repo, "branch", "--list", "TG-13-r2", "TG-13") != "" {
+				t.Error("branches locais ficaram")
+			}
+		})
+	}
+}
+
+func TestReabrirSoDepoisDoMerge(t *testing.T) {
+	c := novo(t)
+	// MR aberta: não se reabre.
+	c.mr("open", false, c.tip)
+	_, _, err := c.l.Reabrir(context.Background(), &c.coord, c.u)
+	if err == nil || !strings.Contains(err.Error(), "só se reabre depois do merge") {
+		t.Fatalf("MR aberta: %v", err)
+	}
+	// Mesclada sem o head aprovado (arquivo existe): não vira "encerrada" de graça.
+	c.mr("closed", true, c.tip)
+	c.aprovar("")
+	_, _, err = c.l.Reabrir(context.Background(), &c.coord, c.u)
+	if err == nil || !strings.Contains(err.Error(), "sem o head aprovado") {
+		t.Fatalf("sem aprovado: %v", err)
+	}
+	c.aprovar(c.tip)
+	if _, _, err = c.l.Reabrir(context.Background(), &c.coord, c.u); err != nil {
+		t.Fatal(err)
+	}
+}

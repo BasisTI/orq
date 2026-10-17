@@ -220,6 +220,16 @@ func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos
 	var faltam []string
 	for _, m := range us.MRs {
 		d, err := l.F.ConsultarMRDetalhe(ctx, m.URL)
+		// As MRs encerradas (de antes do `reabrir`) já passaram pelo gate na geração delas, quando
+		// o `reabrir` as conferiu, e o arquivo com os aprovados dela pode ter sido apagado pela
+		// limpeza completa: elas só ajudam a achar a branch, sem gate. A regra vale para as MRs
+		// da geração atual, e uma MR nova sem aprovação continua recusando.
+		if contemStr(rec.MRsEncerradas, m.URL) {
+			if err == nil && d.Estado == "mesclada" {
+				porBranch[d.Origem] = d
+			}
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Sprintf("não consegui conferir a MR %s: %v", m.URL, err)
 		}
@@ -476,11 +486,34 @@ func (l *Limpador) Reabrir(ctx context.Context, coord *central.Coordenador, ref 
 		return nil, "", erroUso(u.Chave() + " não tem MR ligada: não há o que reabrir")
 	}
 	rec, _, err := lerRecursosHash(l.Raizes.Arquivo(u), u)
-	if errors.Is(err, ErrSemRecursos) {
+	semArquivo := errors.Is(err, ErrSemRecursos)
+	if semArquivo {
+		// A limpeza completa apaga o arquivo: o que ele aprovou já passou pelo gate lá.
 		rec, err = &Recursos{}, nil
 	}
 	if err != nil {
 		return nil, "", &output.Error{Code: "recursos_invalido", Cause: err.Error(), Recovery: "corrija ou apague o arquivo", Exit: output.ExitConflict}
+	}
+	// Só se reabre depois do merge: cada MR ainda não encerrada precisa estar mesclada (com o head
+	// aprovado registrado, se o arquivo existe) ou fechada, senão uma MR sem aprovação viraria
+	// "encerrada" e escaparia do gate da limpeza.
+	for _, m := range us.MRs {
+		if contemStr(rec.MRsEncerradas, m.URL) {
+			continue
+		}
+		d, err := l.F.ConsultarMRDetalhe(ctx, m.URL)
+		if err != nil {
+			return nil, "", &output.Error{Code: "mr_nao_conferida", Cause: fmt.Sprintf("não consegui conferir a MR %s: %v", m.URL, err), Recovery: "repita quando a forja responder", Exit: output.ExitConflict}
+		}
+		switch d.Estado {
+		case "fechada":
+		case "mesclada":
+			if ap, ok := rec.Aprovados[m.URL]; !semArquivo && (!ok || d.Head == "" || !strings.HasPrefix(d.Head, ap)) {
+				return nil, "", &output.Error{Code: "reabrir_recusado", Cause: fmt.Sprintf("a MR %s foi mesclada sem o head aprovado registrado (ou diferente dele)", m.URL), Recovery: "registre com orq recursos gravar --aprovado " + m.URL + "=<sha> se a aprovação existiu", Exit: output.ExitConflict}
+			}
+		default:
+			return nil, "", &output.Error{Code: "reabrir_recusado", Cause: fmt.Sprintf("a MR %s está %s: só se reabre depois do merge", m.URL, d.Estado), Recovery: "espere o merge ou feche a MR", Exit: output.ExitConflict}
+		}
 	}
 	rec.Geracao++
 	rec.MRsEncerradas = nil
