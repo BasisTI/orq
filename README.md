@@ -86,6 +86,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq plugin doctor [--config <arquivo>]` | Binários, daemon, plugin registrado, sidebar, teclas e banco. |
 | `orq recursos gravar <ref> [--repo R --worktree W --branch B] [--pane NOME]… [--aprovado URL=SHA]…` | Grava (ou completa) o `recursos.json` da US na pasta de trabalho e imprime o `TMPDIR` do worker e os rótulos Docker (veja [Limpeza depois do merge](#limpeza-depois-do-merge)). |
 | `orq recursos ver <ref>` | Mostra o `recursos.json` da US. |
+| `orq recursos reabrir <ref>` | Abre a rodada de correção depois do teste: sobe a geração do `recursos.json` e guarda as MRs de agora como encerradas. Rode **antes** de recriar o worktree. |
 | `orq limpar <ref> [--dry-run]` | Com todas as MRs da US mescladas, fecha os panes, remove o worktree, as branches, as pastas e os recursos Docker da US; o que não passa numa conferência fica preservado, com o motivo. `--dry-run` só mostra. |
 | `orq limpar --onda <id> [--dry-run]` | Remove os recursos Docker com o rótulo `orq.onda=<id>` de uma onda encerrada ou pronta para encerrar. |
 | `orq version` | Versão. |
@@ -252,9 +253,13 @@ Não há migration nova: o estado é esse arquivo e o diário. Por isso a atuali
 | Docker | Contêineres, redes, volumes e imagens com o rótulo `orq.us=<projeto>/<ref>`, nessa ordem, com os ids listados antes e o rótulo conferido de novo antes de cada remoção. Nunca `prune`. |
 | pasta de trabalho | `~/tmp/orquestrador/<projeto>/TG-<ref>`, por último, e só se todo o resto foi resolvido: ela guarda o `recursos.json`, e sem ele o daemon esqueceria o que ficou. |
 
+**Exclusão mútua e reabertura.** O `orq limpar` segura um `flock` exclusivo da US, em `<ORQ_TRABALHO_DIR>/<projeto>/.TG-<ref>.lock` (fora da pasta que ele apaga), do plano ao último item; `orq recursos gravar` e `orq recursos reabrir` seguram o mesmo, esperando até 2 min uma limpeza em curso. Com a trava ocupada, o `limpar` recusa (o daemon tenta de novo). Para corrigir depois do teste, a ordem é: (1) `orq recursos reabrir <ref>`, que só volta depois de qualquer limpeza em andamento e deixa a US "reaberta"; (2) recriar o worktree a partir da `main`, numa branch nova e **de preferência num caminho novo** (sufixo da rodada, ex. `…TG-13-r2`), para uma limpeza velha nunca apontar para o checkout novo (reusar o caminho funciona, e o `recursos gravar` avisa); (3) `orq recursos gravar` com o worktree novo e `orq mr add` com a MR nova. Enquanto a US não tem MR fora das encerradas, o `limpar` recusa. Recriar o worktree sem o passo 1 não é protegido pela trava, só pelas conferências abaixo.
+
 Antes de cada remoção o orq confere que o plano continua valendo: o `recursos.json` e o conjunto de MRs da US são os mesmos de quando foi conferido, e o worktree segue na branch e no commit conferidos e limpo. Se o coordenador reabriu a US no meio (outra branch, MR nova, recursos regravados), nada mais é removido e tudo vira `preservado`.
 
 O conteúdo "já na branch de destino" é: o commit é o head mesclado da MR, ou mesclar o commit em `origin/<destino>` não muda a árvore (cobre merge, fast-forward e squash, em que a conferência é por conteúdo, não por histórico). Se a `main` mexeu depois nas mesmas linhas, não dá para provar e o recurso fica preservado. `git fetch --prune` roda antes (é a única mudança do `--dry-run`, só nas referências remotas).
+
+**Limite de confiança.** A lista `panes` do `recursos.json` é a autoridade de posse dos panes, e o arquivo é confiável no mesmo nível do usuário local: quem pode escrever nele já opera como esse usuário no Herdr. O orq não o autentica; ele só detecta mudança entre o plano e a execução.
 
 Nunca se apaga caminho fora das raízes: as pastas são derivadas da raiz, do projeto e da ref; o caminho que o `recursos.json` declare diferente do derivado, um link simbólico (no próprio caminho ou nos pais) e uma raiz vazia, `/` ou `$HOME` viram `preservado`.
 

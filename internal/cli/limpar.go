@@ -149,6 +149,7 @@ func (a *App) recursosCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "recursos", Short: "Grava e mostra os recursos que o coordenador criou para a US"}
 	var repo, worktree, branch, remoto string
 	var panes, aprovados []string
+	var avisos []string
 	gravar := &cobra.Command{
 		Use:   "gravar <ref> [--repo R --worktree W --branch B] [--pane NOME]… [--aprovado URL=SHA]…",
 		Short: "Grava (ou completa) o recursos.json da US na pasta de trabalho",
@@ -176,6 +177,12 @@ rótulos Docker (orq.us e orq.onda).`,
 			if err != nil {
 				return err
 			}
+			// A gravação espera uma limpeza em curso (e vice-versa): o arquivo não muda no meio dela.
+			soltar, err := l.Raizes.TravarUS(loc.US, limpeza.EsperaTrava)
+			if err != nil {
+				return err
+			}
+			defer soltar()
 			rec, err := limpeza.LerRecursos(l.Raizes.Arquivo(loc.US), loc.US)
 			if errors.Is(err, limpeza.ErrSemRecursos) {
 				rec, err = &limpeza.Recursos{}, nil
@@ -191,6 +198,9 @@ rótulos Docker (orq.us e orq.onda).`,
 				trocou := false
 				for i := range rec.Repos {
 					if rec.Repos[i].Worktree == r.Worktree {
+						if rec.Repos[i].Branch != r.Branch {
+							avisos = append(avisos, "o worktree "+r.Worktree+" era da branch "+rec.Repos[i].Branch+": na rodada de correção prefira um caminho novo (sufixo da rodada), para uma limpeza velha nunca apontar para o checkout novo")
+						}
 						rec.Repos[i], trocou = r, true
 					}
 				}
@@ -222,7 +232,7 @@ rótulos Docker (orq.us e orq.onda).`,
 				"arquivo": arquivo, "repos": len(rec.Repos), "panes": len(rec.Panes), "aprovados": len(rec.Aprovados)}}}); err != nil {
 				return err
 			}
-			return a.emitRecursos(l, loc, rec, arquivo)
+			return a.emitRecursos(l, loc, rec, arquivo, avisos...)
 		},
 	}
 	gravar.Flags().StringVar(&repo, "repo", "", "checkout principal do repositório")
@@ -264,16 +274,50 @@ rótulos Docker (orq.us e orq.onda).`,
 			return a.emitRecursos(l, loc, rec, arquivo)
 		},
 	}
-	cmd.AddCommand(gravar, ver)
+	reabrir := &cobra.Command{
+		Use:   "reabrir <ref>",
+		Short: "Abre uma rodada de correção: sobe a geração do recursos.json antes de recriar o worktree",
+		Long: `Para corrigir depois do teste, rode isto ANTES de recriar o worktree e os panes. Sob a trava da US
+(espera uma limpeza em andamento terminar), sobe a geração do recursos.json e guarda as MRs de agora
+como encerradas: até haver uma MR nova ligada (orq mr add), o orq limpar recusa. Depois recrie o
+worktree a partir da main, numa branch nova e de preferência num caminho novo (sufixo da rodada), e
+grave-o com orq recursos gravar.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			ref, err := refs.ParseUS(args[0])
+			if err != nil {
+				return usoDe(err)
+			}
+			l, err := a.limpador(ctx)
+			if err != nil {
+				return err
+			}
+			coord, err := a.coordOpcional(ctx, l.St)
+			if err != nil {
+				return err
+			}
+			rec, arquivo, err := l.Reabrir(ctx, coord, ref)
+			if err != nil {
+				return err
+			}
+			loc, _, err := l.St.LocalizarUS(ctx, coord, ref)
+			if err != nil {
+				return err
+			}
+			return a.emitRecursos(l, loc, rec, arquivo)
+		},
+	}
+	cmd.AddCommand(gravar, ver, reabrir)
 	return cmd
 }
 
-func (a *App) emitRecursos(l *limpeza.Limpador, loc central.Localizacao, rec *limpeza.Recursos, arquivo string) error {
+func (a *App) emitRecursos(l *limpeza.Limpador, loc central.Localizacao, rec *limpeza.Recursos, arquivo string, extras ...string) error {
 	out := RecursosGravados{
 		Arquivo: arquivo, Recursos: rec,
 		Env:     map[string]string{"TMPDIR": l.Raizes.PastaTmp(loc.US)},
 		Rotulos: map[string]string{limpeza.RotuloChaveUS: limpeza.RotuloUS(loc.US), limpeza.RotuloChaveOnda: strconv.FormatInt(loc.OndaID, 10)},
-		Avisos:  avisosRyuk(a.Env),
+		Avisos:  append(avisosRyuk(a.Env), extras...),
 	}
 	return a.emit(out, func(w io.Writer) error {
 		fmt.Fprintf(w, "recursos de %s em %s\n", q(loc.US.Chave()), q(arquivo))

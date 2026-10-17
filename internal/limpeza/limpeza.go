@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
@@ -60,6 +61,9 @@ type Limpador struct {
 	Raizes Raizes
 	// PaneProprio é o pane onde o comando roda ($HERDR_PANE_ID): nunca é fechado.
 	PaneProprio string
+	// antesDoItem, se não nulo, roda logo antes de executar cada item (os testes seguram a
+	// execução ali para reabrir a US de outro lado).
+	antesDoItem func(*Item)
 	// aposPlano, se não nulo, roda entre o plano e a execução (os testes intercalam a reabertura).
 	aposPlano func()
 	// Cwd é o diretório corrente; vazio usa os.Getwd. Worktree que contém o Cwd é preservado.
@@ -78,12 +82,31 @@ type Opcoes struct {
 // aprovado, sem recursos.json) volta em Resultado.Recusa, sem erro; erro é só falha do banco
 // ou referência inexistente.
 func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref refs.US, op Opcoes) (Resultado, error) {
-	loc, us, err := l.St.LocalizarUS(ctx, coord, ref)
+	loc, _, err := l.St.LocalizarUS(ctx, coord, ref)
 	if err != nil {
 		return Resultado{}, err
 	}
 	u := loc.US
 	res := Resultado{US: u.Chave(), DryRun: op.DryRun, Itens: []*Item{}}
+	var us central.US
+	if !op.DryRun {
+		// A trava vai do plano ao último item: reabrir a US (e regravar os recursos) espera a
+		// limpeza acabar, e só então o coordenador recria o worktree. O dry-run não escreve e
+		// não trava.
+		soltar, err := l.Raizes.TravarUS(u, 0)
+		if err != nil {
+			if output.AsError(err).Code != "limpeza_em_andamento" {
+				return res, err
+			}
+			res.Recusa = "outra limpeza, gravação ou reabertura desta US está em andamento; tento de novo depois"
+			return res, nil
+		}
+		defer soltar()
+	}
+	// A US é lida já sob a trava.
+	if _, us, err = l.St.LocalizarUS(ctx, coord, ref); err != nil {
+		return res, err
+	}
 	finalizar := func() (Resultado, error) {
 		if !op.DryRun && (op.Registrar == nil || op.Registrar(res)) {
 			if err := l.St.RegistrarExternos(ctx, coord, u, eventos(res)); err != nil {
@@ -181,6 +204,17 @@ func Assinatura(r Resultado) string {
 func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos) (map[string]enriquecer.DetalheMR, string) {
 	if len(us.MRs) == 0 {
 		return nil, "a US não tem MR ligada (orq mr add)"
+	}
+	if len(rec.MRsEncerradas) > 0 {
+		nova := false
+		for _, m := range us.MRs {
+			if !contemStr(rec.MRsEncerradas, m.URL) {
+				nova = true
+			}
+		}
+		if !nova {
+			return nil, "a US foi reaberta e ainda não tem MR nova ligada (orq mr add)"
+		}
 	}
 	porBranch := map[string]enriquecer.DetalheMR{}
 	var faltam []string
@@ -300,6 +334,9 @@ func (l *Limpador) executar(ctx context.Context, itens []*Item, guarda func(cont
 			i.Estado, i.Motivo = Preservado, bloqueio
 			continue
 		}
+		if l.antesDoItem != nil {
+			l.antesDoItem(i)
+		}
 		if guarda != nil {
 			if err := guarda(ctx); err != nil {
 				i.Estado, i.Motivo = Preservado, err.Error()
@@ -401,4 +438,60 @@ func removerArvore(caminho string) error {
 
 func erroUso(cause string) error {
 	return &output.Error{Code: "uso", Cause: cause, Exit: output.ExitUsage}
+}
+
+func contemStr(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}
+
+// EsperaTrava é quanto o `recursos gravar` e o `recursos reabrir` esperam uma limpeza em curso.
+const EsperaTrava = 2 * time.Minute
+
+// Reabrir abre uma rodada de correção da US depois do teste. Sob a trava da US (espera uma
+// limpeza em andamento terminar), sobe a geração do recursos.json e guarda as MRs de agora como
+// encerradas; daí em diante a limpeza recusa até haver uma MR nova ligada, e o coordenador pode
+// recriar o worktree e os panes sem que um `limpar` velho os alcance. Só depois deste comando
+// se recria o worktree, preferindo um caminho novo (sufixo da rodada).
+func (l *Limpador) Reabrir(ctx context.Context, coord *central.Coordenador, ref refs.US) (*Recursos, string, error) {
+	loc, _, err := l.St.LocalizarUS(ctx, coord, ref)
+	if err != nil {
+		return nil, "", err
+	}
+	u := loc.US
+	soltar, err := l.Raizes.TravarUS(u, EsperaTrava)
+	if err != nil {
+		return nil, "", err
+	}
+	defer soltar()
+	_, us, err := l.St.LocalizarUS(ctx, coord, ref)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(us.MRs) == 0 {
+		return nil, "", erroUso(u.Chave() + " não tem MR ligada: não há o que reabrir")
+	}
+	rec, _, err := lerRecursosHash(l.Raizes.Arquivo(u), u)
+	if errors.Is(err, ErrSemRecursos) {
+		rec, err = &Recursos{}, nil
+	}
+	if err != nil {
+		return nil, "", &output.Error{Code: "recursos_invalido", Cause: err.Error(), Recovery: "corrija ou apague o arquivo", Exit: output.ExitConflict}
+	}
+	rec.Geracao++
+	rec.MRsEncerradas = nil
+	for _, m := range us.MRs {
+		rec.MRsEncerradas = append(rec.MRsEncerradas, m.URL)
+	}
+	sort.Strings(rec.MRsEncerradas)
+	arquivo, err := rec.Gravar(l.Raizes, u)
+	if err != nil {
+		return nil, "", erroUso(err.Error())
+	}
+	err = l.St.RegistrarExternos(ctx, coord, u, []central.EventoExterno{{Tipo: "recursos.reabrir", Detalhe: map[string]any{"geracao": rec.Geracao, "mrs_encerradas": rec.MRsEncerradas}}})
+	return rec, arquivo, err
 }

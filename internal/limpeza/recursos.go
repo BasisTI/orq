@@ -96,6 +96,11 @@ type Recursos struct {
 	// raízes, e um valor diferente aqui vira "preservado".
 	Trabalho string `json:"trabalho"`
 	Tmp      string `json:"tmp"`
+	// Geracao sobe a cada `orq recursos reabrir`: a rodada de correção depois do teste.
+	Geracao int `json:"geracao,omitempty"`
+	// MRsEncerradas são as MRs da US quando ela foi reaberta. Enquanto a US não tem nenhuma MR
+	// fora desta lista, a limpeza recusa: a MR nova ainda não foi ligada.
+	MRsEncerradas []string `json:"mrs_encerradas,omitempty"`
 	// Aprovados guarda, por URL de MR, o head aprovado na revisão. Com ele, o head mesclado
 	// diferente recusa a limpeza.
 	Aprovados map[string]string `json:"aprovados,omitempty"`
@@ -131,6 +136,11 @@ func (r *Recursos) Validar(u refs.US) error {
 	for _, n := range r.Panes {
 		if !nomeRe.MatchString(n) {
 			return fmt.Errorf("pane %q inválido: use o nome do agente", n)
+		}
+	}
+	for _, url := range r.MRsEncerradas {
+		if _, err := refs.ParseMR(url); err != nil {
+			return err
 		}
 	}
 	for url, sha := range r.Aprovados {

@@ -54,6 +54,16 @@ func TestRecursosGravarELimparRecusaComMRAberta(t *testing.T) {
 	if len(g.Recursos.Repos) != 1 || len(g.Recursos.Panes) != 3 || g.Recursos.Aprovados["https://github.com/BasisTI/orq/pull/9"] != "abc1234" {
 		t.Fatalf("recursos = %+v", g.Recursos)
 	}
+	// Reabrir sobe a geração e guarda as MRs de agora como encerradas.
+	if err := json.Unmarshal([]byte(ok(t, env, "recursos", "reabrir", "13")), &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.Recursos.Geracao != 1 || len(g.Recursos.MRsEncerradas) != 1 || len(g.Recursos.Panes) != 3 {
+		t.Fatalf("reabrir = %+v", g.Recursos)
+	}
+	if r := rodar(t, env, "recursos", "gravar", "13", "--repo", repo, "--worktree", wt, "--branch", "TG-13-r2"); r.code != 0 || !strings.Contains(r.out, "caminho novo") {
+		t.Fatalf("reuso do caminho do worktree: %d %s", r.code, r.out)
+	}
 	if r := rodar(t, env, "recursos", "gravar", "13", "--repo", repo); r.code != 2 {
 		t.Fatalf("--repo sem --worktree: exit %d", r.code)
 	}
@@ -61,7 +71,7 @@ func TestRecursosGravarELimparRecusaComMRAberta(t *testing.T) {
 	// MR aberta: recusa com exit 4, nada removido, e o dry-run também.
 	for _, args := range [][]string{{"limpar", "13"}, {"limpar", "13", "--dry-run"}} {
 		r := rodar(t, env, args...)
-		if r.code != 4 || !strings.Contains(r.err, "limpeza_recusada") || !strings.Contains(r.out, "MR não mesclada") {
+		if r.code != 4 || !strings.Contains(r.err, "limpeza_recusada") || !strings.Contains(r.out, "reaberta") {
 			t.Fatalf("%v: exit %d\nout %s\nerr %s", args, r.code, r.out, r.err)
 		}
 	}

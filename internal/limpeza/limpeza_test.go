@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1068,5 +1070,176 @@ func TestOndaSegueAbertaAteODockerLimpar(t *testing.T) {
 	o, _ = c.st.VerOnda(context.Background(), c.ondaID)
 	if o.EncerradaEm == nil || !strings.Contains(strings.Join(c.escritas("docker"), "|"), "volume rm onda-volume") {
 		t.Fatalf("onda = %+v", o)
+	}
+}
+
+// --- achado F1 da revisão r2: exclusão mútua entre a limpeza e a reabertura ---
+
+// reabrirDuranteItem segura a limpeza no momento de executar um item do tipo dado (ou, com
+// espera != nil, dentro do próprio comando), reabre a US de outro lado e confere que a reabertura
+// espera a limpeza terminar: o worktree novo só nasce depois, e nada da rodada nova é apagado.
+func (c *cen) reabrirDuranteItem(tipo string, preparar func(), segurar func(liberar func())) {
+	c.t.Helper()
+	c.mergeNaMain(false, false)
+	c.dockerUS()
+	if preparar != nil {
+		preparar()
+	}
+	parado, soltar := make(chan struct{}), make(chan struct{})
+	var uma sync.Once
+	if segurar == nil {
+		c.l.antesDoItem = func(i *Item) {
+			if i.Tipo == tipo {
+				uma.Do(func() { close(parado); <-soltar })
+			}
+		}
+	} else {
+		segurar(func() { close(soltar) })
+	}
+	feito := make(chan Resultado, 1)
+	var limparTerminou atomic.Bool
+	go func() {
+		r, err := c.l.Limpar(context.Background(), &c.coord, c.u, Opcoes{})
+		if err != nil {
+			c.t.Error(err)
+		}
+		limparTerminou.Store(true)
+		feito <- r
+	}()
+	if segurar == nil {
+		<-parado
+	} else {
+		esperarArquivo(c.t, filepath.Join(c.dir, "git.parado"))
+	}
+	reaberta := make(chan *Recursos, 1)
+	var reabriuAntes atomic.Bool
+	go func() {
+		rec, _, err := c.l.Reabrir(context.Background(), &c.coord, c.u)
+		if err != nil {
+			c.t.Error(err)
+		}
+		reabriuAntes.Store(!limparTerminou.Load())
+		reaberta <- rec
+	}()
+	select {
+	case <-reaberta:
+		c.t.Fatal("a reabertura não esperou a limpeza em andamento")
+	case <-time.After(400 * time.Millisecond):
+	}
+	if segurar == nil {
+		close(soltar)
+	} else {
+		segurar(nil)
+	}
+	r := <-feito
+	rec := <-reaberta
+	if reabriuAntes.Load() {
+		c.t.Error("a reabertura terminou antes da limpeza")
+	}
+	if !r.Completa {
+		c.t.Errorf("a limpeza da geração antiga devia terminar inteira: %s", estados(r))
+	}
+	if rec == nil || rec.Geracao != 1 || len(rec.MRsEncerradas) != 1 {
+		c.t.Fatalf("recursos reabertos = %+v", rec)
+	}
+	// Só agora o coordenador recria o worktree (caminho novo) e grava a rodada nova.
+	novoWt := c.wt + "-r2"
+	git(c.t, c.repo, "worktree", "add", "-q", "-b", "TG-13-r2", novoWt)
+	rec.Repos = []Repo{{Repo: c.repo, Worktree: novoWt, Branch: "TG-13-r2"}}
+	rec.Panes = []string{"tg-13_executor"}
+	if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+		c.t.Fatal(err)
+	}
+	escrever(c.t, filepath.Join(c.tmp(), "evidencia-nova"), "e")
+	// Reaberta e sem MR nova ligada: a limpeza recusa e não toca em nada.
+	r2 := c.limpar(false)
+	if !strings.Contains(r2.Recusa, "reaberta") || !existe(novoWt) || !existe(filepath.Join(c.tmp(), "evidencia-nova")) || !existe(c.l.Raizes.Arquivo(c.u)) {
+		c.t.Fatalf("depois da reabertura: %+v", r2)
+	}
+}
+
+func esperarArquivo(t *testing.T, p string) {
+	t.Helper()
+	limite := time.Now().Add(10 * time.Second)
+	for !existe(p) {
+		if time.Now().After(limite) {
+			t.Fatalf("esperando %s", p)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReaberturaEsperaALimpezaEmCadaTipoDeItem(t *testing.T) {
+	for _, tipo := range []string{"pane", "worktree", "pasta_tmp", "docker_volume", "pasta_trabalho"} {
+		t.Run(tipo, func(t *testing.T) {
+			c := novo(t)
+			c.reabrirDuranteItem(tipo, nil, nil)
+		})
+	}
+}
+
+// A variante do revisor: o próprio `git worktree remove` fica parado num wrapper do git.
+func TestReaberturaEsperaOGitWorktreeRemove(t *testing.T) {
+	c := novo(t)
+	wrapper := filepath.Join(c.dir, "bin", "git-lento")
+	script := fmt.Sprintf(`#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "remove" ]; then
+    touch '%[1]s/git.parado'
+    while [ ! -f '%[1]s/git.liberar' ]; do sleep 0.02; done
+  fi
+done
+exec /usr/bin/git "$@"
+`, c.dir)
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c.env["ORQ_GIT_BIN"] = wrapper
+	c.reabrirDuranteItem("", nil, func(liberar func()) {
+		if liberar == nil {
+			escrever(t, filepath.Join(c.dir, "git.liberar"), "")
+		}
+	})
+}
+
+// A trava ocupada faz o limpar recusar (o daemon tenta depois), e a gravação espera.
+func TestLimparRecusaComATravaOcupadaEGravarEspera(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	soltar, err := c.l.Raizes.TravarUS(c.u, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := c.limpar(false); !strings.Contains(r.Recusa, "em andamento") || !existe(c.wt) {
+		t.Fatalf("resultado = %+v", r)
+	}
+	if _, err := c.l.Raizes.TravarUS(c.u, 100*time.Millisecond); err == nil {
+		t.Fatal("pegou a trava duas vezes")
+	}
+	soltar()
+	if r := c.limpar(false); r.Recusa != "" || !r.Completa {
+		t.Fatalf("depois de soltar: %+v", r)
+	}
+}
+
+// Reabrir com a geração antiga ainda no disco: a limpeza só segue com uma MR nova ligada,
+// mesclada e aprovada.
+func TestDepoisDeReabrirALimpezaExigeAMRNovaMesclada(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	if _, _, err := c.l.Reabrir(context.Background(), &c.coord, c.u); err != nil {
+		t.Fatal(err)
+	}
+	if r := c.limpar(false); !strings.Contains(r.Recusa, "reaberta") {
+		t.Fatalf("sem MR nova: %+v", r)
+	}
+	nova := "https://github.com/BasisTI/orq/pull/10"
+	if _, _, err := c.st.AdicionarMR(context.Background(), &c.coord, c.u, nova); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"state": "open", "merged": false, "mergeable_state": "clean", "head": map[string]string{"sha": c.tip, "ref": "TG-13-r2"}, "base": map[string]string{"ref": "main"}})
+	c.responder("gh", string(b), "api", "repos/BasisTI/orq/pulls/10")
+	if r := c.limpar(false); !strings.Contains(r.Recusa, "MR não mesclada") {
+		t.Fatalf("MR nova aberta: %+v", r)
 	}
 }
