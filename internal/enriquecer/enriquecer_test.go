@@ -1,9 +1,12 @@
 package enriquecer
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -485,4 +488,34 @@ func TestDaemonUnico(t *testing.T) {
 		t.Fatalf("depois de soltar: %v", err)
 	}
 	soltar2()
+}
+
+type limpezaContada struct {
+	n   atomic.Int32
+	err error
+}
+
+func (l *limpezaContada) Ciclo(context.Context) error { l.n.Add(1); return l.err }
+
+// A limpeza automática roda ao subir e a cada intervalo, e uma falha dela não derruba o daemon.
+func TestDaemonChamaALimpezaAutomatica(t *testing.T) {
+	c := novoCenario(t)
+	c.sessao(nil, nil)
+	l := &limpezaContada{err: errors.New("docker fora")}
+	var log bytes.Buffer
+	d := &Daemon{E: c.e, Tick: time.Hour, IntervaloRemoto: 20 * time.Millisecond, Limpeza: l, Log: &log}
+	ctx, cancel := context.WithCancel(context.Background())
+	fim := make(chan error, 1)
+	go func() { fim <- d.Rodar(ctx) }()
+	limite := time.Now().Add(10 * time.Second)
+	for l.n.Load() < 3 && time.Now().Before(limite) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-fim; err != nil {
+		t.Fatal(err)
+	}
+	if l.n.Load() < 3 || !strings.Contains(log.String(), "limpeza automática: docker fora") || !strings.Contains(log.String(), "limpeza automática ligada") {
+		t.Fatalf("ciclos %d, log:\n%s", l.n.Load(), log.String())
+	}
 }

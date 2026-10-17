@@ -33,10 +33,12 @@ const (
 
 // VariavelBin é a variável que aponta o caminho absoluto de cada ferramenta.
 var VariavelBin = map[string]string{
-	"herdr": "ORQ_HERDR_BIN",
-	"glab":  "ORQ_GLAB_BIN",
-	"gh":    "ORQ_GH_BIN",
-	"taiga": "ORQ_TAIGA_BIN",
+	"herdr":  "ORQ_HERDR_BIN",
+	"glab":   "ORQ_GLAB_BIN",
+	"gh":     "ORQ_GH_BIN",
+	"taiga":  "ORQ_TAIGA_BIN",
+	"git":    "ORQ_GIT_BIN",
+	"docker": "ORQ_DOCKER_BIN",
 }
 
 // Ferramentas resolve e roda os binários externos.
@@ -171,3 +173,6 @@ func comoFalha(err error) *Falha {
 	}
 	return &Falha{Codigo: ErrFalhaComando, Mensagem: err.Error()}
 }
+
+// ComoFalha devolve err como *Falha, para quem chama de fora do pacote.
+func ComoFalha(err error) *Falha { return comoFalha(err) }
