@@ -174,7 +174,18 @@ func (l *Limpador) planejarWorktree(ctx context.Context, it *Item, r Repo, mr en
 	}
 	it.Estado = Remover
 	it.exec = func(ctx context.Context) error {
-		// Sem --force: o git recusa se a árvore sujou desde o plano.
+		// Reconfere a identidade do worktree na hora: o plano pode ter ficado velho (o worktree
+		// pode estar numa branch nova, com a US reaberta).
+		if b, err := l.git(ctx, alvo, "symbolic-ref", "--short", "-q", "HEAD"); err != nil || b != r.Branch {
+			return preservar(fmt.Sprintf("o worktree agora está em %q, não em %s", b, r.Branch))
+		}
+		if h, err := l.git(ctx, alvo, "rev-parse", "--verify", "HEAD^{commit}"); err != nil || h != tip {
+			return preservar("o HEAD do worktree mudou depois do plano")
+		}
+		if st, err := l.git(ctx, alvo, "status", "--porcelain"); err != nil || st != "" {
+			return preservar("o worktree não está mais limpo")
+		}
+		// Sem --force: o git recusa se a árvore sujou desde a conferência.
 		_, err := l.git(ctx, r.Repo, "worktree", "remove", alvo)
 		if err != nil {
 			return preservar("git worktree remove recusou: " + mensagem(err))

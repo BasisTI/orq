@@ -215,7 +215,7 @@ Com todas as US em `done`, `orq onda proxima` traz `encerramento`; antes disso, 
 }
 ```
 
-Em texto, as linhas `próximo passo:` e `falta:`. O `orq` só sugere: quem encerra é o coordenador, com `orq onda encerrar <id>`. O TUI marca a faixa da onda pronta com o selo `concluída`, pela mesma regra.
+Em texto, as linhas `próximo passo:` e `falta:`. O `orq onda proxima` só sugere; quem encerra é o coordenador, com `orq onda encerrar <id>`, ou o daemon, na [limpeza depois do merge](#limpeza-depois-do-merge). O TUI marca a faixa da onda pronta com o selo `concluída`, pela mesma regra.
 
 ### Limpeza depois do merge
 
@@ -237,20 +237,22 @@ Não há migration nova: o estado é esse arquivo e o diário. Por isso a atuali
 
 **Convenção para os workers** (o coordenador põe nos pacotes):
 
-- `TMPDIR=/tmp/orq/<projeto>/TG-<ref>` (`ORQ_TMP_DIR` troca a raiz), passado com `--env TMPDIR=…` no `herdr tab create`. `orq recursos gravar` imprime o valor.
+- `TMPDIR=/tmp/orq/<projeto>/TG-<ref>` (`ORQ_TMP_DIR` troca a raiz), passado com `--env TMPDIR=…` no `herdr tab create`. `orq recursos gravar` imprime o valor e já cria a pasta.
 - Contêineres, volumes, redes e imagens que o worker criar levam o rótulo `orq.us=<projeto>/<ref>` e `orq.onda=<id da onda>`. Num `docker compose`, o projeto se chama `orq-<projeto>-<ref>` e os serviços levam os rótulos em `labels:`.
 - O Testcontainers limpa o que cria pelo Ryuk, desde que ele não esteja desligado: `orq recursos gravar` avisa se `TESTCONTAINERS_RYUK_DISABLED=true` ou `ryuk.disabled=true` em `~/.testcontainers.properties`.
 
-**O que `orq limpar <ref>` faz.** Só começa se a US tem `recursos.json` e MR, e se cada MR está `mesclada` na forja (consulta na hora, não o cache) com o head igual ao `aprovados` gravado, quando há. Senão sai com `limpeza_recusada` (exit 4), sem remover nada, e grava `limpar.recusada` no diário. Depois, na ordem:
+**O que `orq limpar <ref>` faz.** Só começa se a US tem `recursos.json` e MR, e se cada MR está `mesclada` na forja (consulta na hora, não o cache) com o head igual ao de `aprovados`, que é obrigatório: conteúdo integrado não prova que o head foi aprovado, então sem `--aprovado <url>=<sha>` registrado para cada MR a limpeza recusa. Senão sai com `limpeza_recusada` (exit 4), sem remover nada, e grava `limpar.recusada` no diário. Depois, na ordem:
 
 | Item | Regra |
 |---|---|
-| panes | Os da US: nome de agente em `panes` ou `tg-<ref>_*` / `<projeto>-tg-<ref>_*` (o nome sem projeto só vale se nenhum outro projeto da Central tem uma US com esse número). Fecha só com o agente `idle`/`done`, relido do Herdr logo antes de fechar. Nunca fecha o pane do coordenador nem o que roda o comando. |
+| panes | Só os nomes de agente listados em `panes` do `recursos.json` (nome parecido não prova posse: o Herdr é compartilhado com outros boards). Fecha só com o agente `idle`/`done`, relido do Herdr logo antes de fechar. Nunca fecha o pane do coordenador nem o que roda o comando. |
 | worktree | Registrado no repositório, na branch da US, sem árvore suja, fora do diretório corrente e com o conteúdo já na branch de destino. Sem `--force`. |
 | branch local e remota | Mesma conferência do conteúdo. A remota só é apagada se ainda está no commit conferido (`--force-with-lease`). Nunca `main`, `master`, `develop`, `trunk` nem a branch de destino da MR. |
 | pasta temporária | `/tmp/orq/<projeto>/TG-<ref>`. |
 | Docker | Contêineres, redes, volumes e imagens com o rótulo `orq.us=<projeto>/<ref>`, nessa ordem, com os ids listados antes e o rótulo conferido de novo antes de cada remoção. Nunca `prune`. |
 | pasta de trabalho | `~/tmp/orquestrador/<projeto>/TG-<ref>`, por último, e só se todo o resto foi resolvido: ela guarda o `recursos.json`, e sem ele o daemon esqueceria o que ficou. |
+
+Antes de cada remoção o orq confere que o plano continua valendo: o `recursos.json` e o conjunto de MRs da US são os mesmos de quando foi conferido, e o worktree segue na branch e no commit conferidos e limpo. Se o coordenador reabriu a US no meio (outra branch, MR nova, recursos regravados), nada mais é removido e tudo vira `preservado`.
 
 O conteúdo "já na branch de destino" é: o commit é o head mesclado da MR, ou mesclar o commit em `origin/<destino>` não muda a árvore (cobre merge, fast-forward e squash, em que a conferência é por conteúdo, não por histórico). Se a `main` mexeu depois nas mesmas linhas, não dá para provar e o recurso fica preservado. `git fetch --prune` roda antes (é a única mudança do `--dry-run`, só nas referências remotas).
 
@@ -258,7 +260,7 @@ Nunca se apaga caminho fora das raízes: as pastas são derivadas da raiz, do pr
 
 Cada item sai em `removido`, `preservado` (com o motivo), `falhou` ou `ausente` (já não existia). Cada um que não é `ausente` vira um evento no diário (`limpar.removido`, `limpar.preservado`, `limpar.falhou`). Um pane que não é `idle`/`done` preserva também o resto (worktree, branches, pastas, Docker), porque o agente pode estar usando; o mesmo vale para quem depende de um item preservado.
 
-**No merge, pelo daemon.** A cada `--intervalo-remoto`, o daemon roda o `limpar` nas US com MR, todas `mescladas` no cache, e `recursos.json`. Quando algo fica preservado, tenta de novo a cada 5 min e só grava no diário se o desfecho mudou. Quando a onda aberta (que não é só de plano) está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)) e nenhuma US dela tem mais `recursos.json`, o daemon a encerra (`onda.encerrar`, `limpar.onda`) e remove o Docker com `orq.onda=<id>`. `ORQ_LIMPEZA_AUTOMATICA=0` (também `false`, `nao`, `off`), no ambiente ou no `orq.env` do plugin, desliga as duas coisas; o padrão é ligado, e o daemon já em execução precisa ser reiniciado para ler a mudança. US sem `recursos.json` não são tocadas, e o orq não faz faxina de resíduos antigos.
+**No merge, pelo daemon.** A cada `--intervalo-remoto`, o daemon roda o `limpar` nas US com MR, todas `mescladas` no cache, e `recursos.json`. Quando algo fica preservado, tenta de novo a cada 5 min e só grava no diário se o desfecho mudou. Quando a onda aberta (que não é só de plano) está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)) e nenhuma US dela tem mais `recursos.json`, o daemon remove o Docker com `orq.onda=<id>` e só então a encerra (`onda.encerrar`, `limpar.onda`); se o Docker não limpa por completo (volume em uso, Docker fora do ar), a onda segue aberta e ele tenta de novo a cada 5 min. `ORQ_LIMPEZA_AUTOMATICA=0` (também `false`, `nao`, `off`), no ambiente ou no `orq.env` do plugin, desliga as duas coisas; o padrão é ligado, e o daemon já em execução precisa ser reiniciado para ler a mudança. US sem `recursos.json` não são tocadas, e o orq não faz faxina de resíduos antigos.
 
 ## Licença
 

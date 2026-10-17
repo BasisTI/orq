@@ -31,28 +31,6 @@ func (s *Store) LocalizarUS(ctx context.Context, coord *Coordenador, ref refs.US
 	return Localizacao{US: alvo.US, OndaID: alvo.ondaID, Coordenador: alvo.coordenador}, u, err
 }
 
-// ProjetosDaRef lista os projetos que têm uma US com esse número, para saber se um nome de pane
-// `tg-<ref>_*` (sem projeto) pode ser atribuído a uma US só.
-func (s *Store) ProjetosDaRef(ctx context.Context, ref int) ([]string, error) {
-	var ps []string
-	err := s.ler(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT projeto FROM us WHERE ref = ? ORDER BY projeto`, ref)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var p string
-			if err := rows.Scan(&p); err != nil {
-				return err
-			}
-			ps = append(ps, p)
-		}
-		return rows.Err()
-	})
-	return ps, err
-}
-
 // EventoExterno é o registro, no diário, de algo feito fora do banco (arquivo, pane, git,
 // Docker). Tipo precisa ser um dos TiposExternos.
 type EventoExterno struct {

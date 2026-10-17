@@ -5,6 +5,8 @@
 package limpeza
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,21 +149,29 @@ var ErrSemRecursos = errors.New("sem recursos.json")
 
 // LerRecursos lê e valida o arquivo da US.
 func LerRecursos(arquivo string, u refs.US) (*Recursos, error) {
+	r, _, err := lerRecursosHash(arquivo, u)
+	return r, err
+}
+
+// lerRecursosHash é o LerRecursos com o hash dos bytes lidos, que identifica a geração do
+// arquivo: quem regrava (a reabertura da US) muda o hash.
+func lerRecursosHash(arquivo string, u refs.US) (*Recursos, string, error) {
 	b, err := os.ReadFile(arquivo)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, ErrSemRecursos
+		return nil, "", ErrSemRecursos
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var r Recursos
 	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("%s: %w", arquivo, err)
+		return nil, "", fmt.Errorf("%s: %w", arquivo, err)
 	}
 	if err := r.Validar(u); err != nil {
-		return nil, fmt.Errorf("%s: %w", arquivo, err)
+		return nil, "", fmt.Errorf("%s: %w", arquivo, err)
 	}
-	return &r, nil
+	soma := sha256.Sum256(b)
+	return &r, hex.EncodeToString(soma[:]), nil
 }
 
 // Gravar escreve o arquivo (criando a pasta de trabalho) por rename, para o daemon nunca ler
@@ -180,6 +190,10 @@ func (r *Recursos) Gravar(raizes Raizes, u refs.US) (string, error) {
 	}
 	dir := raizes.PastaTrabalho(u)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	// O worker começa com TMPDIR apontando para cá: a pasta precisa existir antes do despacho.
+	if err := os.MkdirAll(raizes.PastaTmp(u), 0o700); err != nil {
 		return "", err
 	}
 	b, err := json.MarshalIndent(r, "", "  ")

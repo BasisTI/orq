@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/BasisTI/orq/internal/refs"
 )
 
-// planejarPanes acha os panes da US pelo nome do agente: os listados no recursos.json e os que
-// seguem `tg-<ref>_*` ou `<projeto>-tg-<ref>_*`. O nome sem projeto só vale se nenhum outro
-// projeto da Central tem uma US com esse número. Só fecha o pane cujo agente está idle ou done.
-func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) []*Item {
+// planejarPanes acha os panes da US pelo nome de agente listado no recursos.json, e só eles.
+// Só fecha o pane cujo agente está idle ou done.
+func (l *Limpador) planejarPanes(ctx context.Context, rec *Recursos) []*Item {
 	sessao, err := l.F.ConsultarHerdr(ctx)
 	if err != nil {
 		return []*Item{{Tipo: "herdr", Alvo: "panes", Estado: Preservado, Motivo: "Herdr indisponível, não consegui conferir os panes: " + err.Error()}}
@@ -27,34 +24,13 @@ func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) 
 			coords[*c.PaneID] = true
 		}
 	}
-	semProjeto := false
-	if ps, err := l.St.ProjetosDaRef(ctx, u.Ref); err == nil && len(ps) == 1 {
-		semProjeto = true
-	}
-	tg := strings.ToLower(refs.Exibir(u.Ref))
-	prefixos := []string{u.Projeto + "-" + tg + "_"}
-	if semProjeto {
-		prefixos = append(prefixos, tg+"_")
-	}
+	// Só os panes registrados em recursos.json: um nome parecido (tg-<ref>_*) não prova que o
+	// pane é desta US, porque o Herdr é compartilhado com outros boards e coordenadores.
 	exatos := map[string]bool{}
 	for _, n := range rec.Panes {
 		exatos[strings.ToLower(n)] = true
 	}
-	casa := func(nome string) bool {
-		nome = strings.ToLower(nome)
-		if nome == "" {
-			return false
-		}
-		if exatos[nome] {
-			return true
-		}
-		for _, p := range prefixos {
-			if strings.HasPrefix(nome, p) {
-				return true
-			}
-		}
-		return false
-	}
+	casa := func(nome string) bool { return nome != "" && exatos[strings.ToLower(nome)] }
 	var ids []string
 	for id, p := range sessao.Panes {
 		if casa(p.Nome) {

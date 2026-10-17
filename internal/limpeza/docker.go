@@ -111,14 +111,14 @@ func (l *Limpador) removerDocker(ctx context.Context, rd recursoDocker, id, chav
 
 // LimparOnda remove os recursos Docker com o rótulo orq.onda=<id>. Só o Docker: panes, git e
 // pastas são das US.
-func (l *Limpador) LimparOnda(ctx context.Context, ondaID int64, dry bool) (Resultado, error) {
+func (l *Limpador) LimparOnda(ctx context.Context, ondaID int64, dry bool, registrar func(Resultado) bool) (Resultado, error) {
 	valor := fmt.Sprint(ondaID)
 	res := Resultado{US: "onda " + valor, DryRun: dry, Itens: l.planejarDocker(ctx, RotuloChaveOnda, valor)}
 	if !dry {
-		l.executar(ctx, res.Itens)
+		l.executar(ctx, res.Itens, nil)
 	}
 	res.Agiu, res.Completa = resumo(res.Itens)
-	if !dry {
+	if !dry && (registrar == nil || registrar(res)) {
 		if err := l.St.RegistrarExternosOnda(ctx, ondaID, eventos(res)); err != nil {
 			return res, err
 		}

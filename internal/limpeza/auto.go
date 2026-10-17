@@ -157,7 +157,7 @@ func resumoLinha(r Resultado) string {
 
 // encerrarOndas encerra a onda aberta (que não é só de plano) quando a regra de encerramento diz
 // pronta — todas as US no limite, MRs mescladas ou fechadas, nenhuma pendência aberta — e
-// nenhuma US dela ainda tem recursos por limpar. Depois remove o Docker com o rótulo da onda.
+// nenhuma US dela ainda tem recursos por limpar. Antes de encerrar, remove o Docker com o rótulo da onda; se isso não termina, a onda segue aberta e tenta de novo.
 func (a *Auto) encerrarOndas(ctx context.Context) error {
 	snap, err := a.L.St.Snapshot(ctx, false)
 	if err != nil {
@@ -183,19 +183,61 @@ func (a *Auto) encerrarOndas(ctx context.Context) error {
 			if pendente {
 				continue
 			}
-			if _, err := a.L.St.EncerrarOnda(ctx, c.Nome, o.ID); err != nil {
+			if err := a.fecharOnda(ctx, c.Nome, o.ID); err != nil {
 				return err
 			}
-			a.logf("onda %d encerrada: todas as US prontas e limpas", o.ID)
-			if err := a.L.St.RegistrarExternosOnda(ctx, o.ID, []central.EventoExterno{{Tipo: "limpar.onda", Detalhe: map[string]any{"acao": "encerrada pelo daemon", "motivo": "todas as US no limite, MRs mescladas ou fechadas, sem pendência aberta e sem recursos por limpar"}}}); err != nil {
-				return err
-			}
-			res, err := a.L.LimparOnda(ctx, o.ID, false)
-			if err != nil {
-				return err
-			}
-			a.logf("Docker da onda %d: %d recurso(s), completa=%t", o.ID, len(res.Itens), res.Completa)
 		}
 	}
 	return nil
+}
+
+// fecharOnda limpa o Docker da onda e só então a encerra: com a limpeza incompleta (volume em
+// uso, Docker fora do ar) a onda segue aberta e pronta, e o próximo ciclo, depois do reintento,
+// tenta de novo sem depender de memória do daemon.
+func (a *Auto) fecharOnda(ctx context.Context, coord string, id int64) error {
+	chave := fmt.Sprintf("onda %d", id)
+	a.mu.Lock()
+	if a.tentado == nil {
+		a.tentado = map[string]*tentativa{}
+	}
+	t := a.tentado[chave]
+	if t == nil {
+		t = &tentativa{}
+		a.tentado[chave] = t
+	}
+	espera := a.agora().Before(t.proxima)
+	a.mu.Unlock()
+	if espera {
+		return nil
+	}
+	res, err := a.L.LimparOnda(ctx, id, false, func(r Resultado) bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		nova := Assinatura(r)
+		novo := nova != t.assinatura
+		t.assinatura = nova
+		return novo
+	})
+	if err != nil {
+		return err
+	}
+	if !res.Completa {
+		reintento := a.Reintento
+		if reintento == 0 {
+			reintento = ReintentoPadrao
+		}
+		a.mu.Lock()
+		t.proxima = a.agora().Add(reintento)
+		a.mu.Unlock()
+		a.logf("Docker da onda %d incompleto, a onda segue aberta (tenta de novo em %s): %s", id, reintento, resumoLinha(res))
+		return nil
+	}
+	a.mu.Lock()
+	delete(a.tentado, chave)
+	a.mu.Unlock()
+	if _, err := a.L.St.EncerrarOnda(ctx, coord, id); err != nil {
+		return err
+	}
+	a.logf("onda %d encerrada: todas as US prontas e limpas", id)
+	return a.L.St.RegistrarExternosOnda(ctx, id, []central.EventoExterno{{Tipo: "limpar.onda", Detalhe: map[string]any{"acao": "encerrada pelo daemon", "motivo": "todas as US no limite, MRs mescladas ou fechadas, sem pendência aberta, sem recursos por limpar e com o Docker da onda limpo"}}})
 }

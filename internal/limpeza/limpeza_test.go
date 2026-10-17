@@ -48,6 +48,8 @@ type cen struct {
 	env    map[string]string
 	coord  central.Coordenador
 	ondaID int64
+	// extras são panes do Herdr que não pertencem à US (outro board).
+	extras []map[string]any
 }
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -121,7 +123,7 @@ func novo(t *testing.T) *cen {
 	}
 	raizes := Raizes{Trabalho: filepath.Join(dir, "trabalho"), Tmp: filepath.Join(dir, "tmp")}
 	c.l = &Limpador{St: st, F: enriquecer.Ferramentas{Env: func(k string) string { return c.env[k] }, Timeout: 20 * time.Second}, Raizes: raizes, PaneProprio: "wA:p99", Cwd: dir}
-	rec := &Recursos{Repos: []Repo{{Repo: c.repo, Worktree: c.wt, Branch: "TG-13"}}, Panes: []string{"tg-13_executor"}}
+	rec := &Recursos{Repos: []Repo{{Repo: c.repo, Worktree: c.wt, Branch: "TG-13"}}, Panes: []string{"tg-13_executor"}, Aprovados: map[string]string{c.url: c.tip}}
 	if _, err := rec.Gravar(raizes, c.u); err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +168,7 @@ func (c *cen) herdr(panes map[string]string) {
 		{"pane_id": "wB:p1", "workspace_id": "wB", "agent": "claude", "agent_status": "idle", "name": "orq-coordenador"},
 		{"pane_id": "wA:p7", "workspace_id": "wA", "agent": "claude", "agent_status": "idle", "name": "tg-130_executor"},
 	}
+	ps = append(ps, c.extras...)
 	ids := make([]string, 0, len(panes))
 	for id := range panes {
 		ids = append(ids, id)
@@ -245,6 +248,23 @@ func (c *cen) mergeNaMain(squash, apagarRemota bool) {
 	git(c.t, c.repo, "push", "-q", "origin", "main")
 	if apagarRemota {
 		git(c.t, c.repo, "push", "-q", "origin", "--delete", "TG-13")
+	}
+}
+
+// aprovar regrava o head aprovado da MR no recursos.json.
+func (c *cen) aprovar(sha string) {
+	c.t.Helper()
+	rec, err := LerRecursos(c.l.Raizes.Arquivo(c.u), c.u)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	if sha == "" {
+		rec.Aprovados = nil
+	} else {
+		rec.Aprovados = map[string]string{c.url: sha}
+	}
+	if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+		c.t.Fatal(err)
 	}
 }
 
@@ -335,6 +355,7 @@ func TestLimparSquashConferePorConteudo(t *testing.T) {
 	c := novo(t)
 	c.mergeNaMain(true, true)
 	// O head da forja não é o da branch local: a conferência cai no conteúdo.
+	c.aprovar(strings.Repeat("0", 40))
 	c.mr("closed", true, strings.Repeat("0", 40))
 	r := c.limpar(false)
 	if r.Recusa != "" || !r.Completa {
@@ -352,6 +373,7 @@ func TestLimparSquashComMudancaDepoisNaMainPreserva(t *testing.T) {
 	escrever(t, filepath.Join(c.repo, "b.txt"), "b mudou\n")
 	git(t, c.repo, "commit", "-q", "-am", "depois")
 	git(t, c.repo, "push", "-q", "origin", "main")
+	c.aprovar(strings.Repeat("0", 40))
 	c.mr("closed", true, strings.Repeat("0", 40))
 	r := c.limpar(false)
 	if r.Completa || !existe(c.wt) {
@@ -895,5 +917,156 @@ func TestAutoNaoEncerraOndaDePlano(t *testing.T) {
 	o2, _ := c.st.VerOnda(context.Background(), o.ID)
 	if o2.EncerradaEm != nil {
 		t.Fatal("encerrou onda de plano sozinho")
+	}
+}
+
+// --- achados da revisão r1 ---
+
+// F1: o plano foi montado, a US foi reaberta (mesmo worktree em branch nova, MR nova, recursos
+// regravados, evidência nova no TMPDIR) e só então a execução rodou: nada da geração nova some.
+func TestReaberturaDepoisDoPlanoPreservaAGeracaoNova(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.l.aposPlano = func() {
+		git(t, c.wt, "checkout", "-q", "-b", "TG-13-correcao")
+		escrever(t, filepath.Join(c.wt, "correcao.txt"), "c")
+		git(t, c.wt, "add", ".")
+		git(t, c.wt, "commit", "-q", "-m", "correção")
+		if _, _, err := c.st.AdicionarMR(context.Background(), &c.coord, c.u, "https://github.com/BasisTI/orq/pull/10"); err != nil {
+			t.Fatal(err)
+		}
+		rec := &Recursos{Repos: []Repo{{Repo: c.repo, Worktree: c.wt, Branch: "TG-13-correcao"}}, Panes: []string{"tg-13_executor"}}
+		if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+			t.Fatal(err)
+		}
+		escrever(t, filepath.Join(c.tmp(), "evidencia-nova"), "e")
+	}
+	r := c.limpar(false)
+	if r.Agiu {
+		t.Fatalf("removeu algo de um plano velho: %s", estados(r))
+	}
+	for _, p := range []string{c.wt, c.l.Raizes.Arquivo(c.u), filepath.Join(c.tmp(), "evidencia-nova")} {
+		if !existe(p) {
+			t.Errorf("%s sumiu", p)
+		}
+	}
+	if len(c.escritas("herdr")) != 0 {
+		t.Error("fechou pane com o plano velho")
+	}
+	if b := git(t, c.wt, "symbolic-ref", "--short", "HEAD"); b != "TG-13-correcao" {
+		t.Errorf("branch = %s", b)
+	}
+	for _, i := range r.Itens {
+		if i.Estado == Preservado && !strings.Contains(i.Motivo, "mudou") && !strings.Contains(i.Motivo, "ficou") {
+			t.Errorf("motivo estranho: %+v", i)
+		}
+	}
+}
+
+// F1, variante: só o worktree muda de branch (sem regravar o arquivo): a identidade é reconferida.
+func TestWorktreeEmOutraBranchNaHoraDeRemover(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.l.aposPlano = func() { git(t, c.wt, "checkout", "-q", "-b", "outra") }
+	r := c.limpar(false)
+	if wt := c.estadoDe(r, "worktree")[0]; wt.Estado != Preservado || !existe(c.wt) {
+		t.Fatalf("worktree = %+v", wt)
+	}
+}
+
+// F2: um pane com nome parecido, de outro board e fora do recursos.json, nunca é fechado.
+func TestPaneDeOutroBoardNaoEFechado(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.extras = []map[string]any{
+		{"pane_id": "wOutro:p1", "workspace_id": "wOutro", "agent": "claude", "agent_status": "idle", "name": "tg-13_revisor"},
+		{"pane_id": "wOutro:p2", "workspace_id": "wOutro", "agent": "claude", "agent_status": "idle", "name": "orq-tg-13_executor"},
+	}
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	r := c.limpar(false)
+	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+		t.Fatalf("panes fechados = %v", got)
+	}
+	if n := len(c.estadoDe(r, "pane")); n != 1 {
+		t.Errorf("%d panes no plano", n)
+	}
+}
+
+// F3: o TMPDIR que o orq recursos gravar publica existe antes de o worker começar.
+func TestTmpExisteDepoisDeGravar(t *testing.T) {
+	raizes := Raizes{Trabalho: filepath.Join(t.TempDir(), "t"), Tmp: filepath.Join(t.TempDir(), "tmp")}
+	u := refs.US{Projeto: "orq", Ref: 13}
+	rec := &Recursos{}
+	if _, err := rec.Gravar(raizes, u); err != nil {
+		t.Fatal(err)
+	}
+	d, err := os.MkdirTemp(raizes.PastaTmp(u), "worker-")
+	if err != nil {
+		t.Fatalf("MkdirTemp no TMPDIR publicado: %v", err)
+	}
+	if st, _ := os.Stat(raizes.PastaTmp(u)); st.Mode().Perm() != 0o700 {
+		t.Errorf("modo %v", st.Mode())
+	}
+	_ = d
+}
+
+// F4: sem head aprovado registrado, a limpeza recusa, mesmo com o conteúdo integrado.
+func TestSemAprovadoRecusa(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.aprovar("")
+	r := c.limpar(false)
+	if !strings.Contains(r.Recusa, "sem head aprovado") || r.Agiu {
+		t.Fatalf("resultado = %+v", r)
+	}
+	for _, p := range []string{c.wt, c.tmp(), c.trabalho()} {
+		if !existe(p) {
+			t.Errorf("%s removido sem aprovação", p)
+		}
+	}
+	if len(c.escritas("herdr")) != 0 {
+		t.Error("fechou pane sem aprovação")
+	}
+}
+
+// F5: Docker da onda que falha não deixa a onda fechada sem nova tentativa.
+func TestOndaSegueAbertaAteODockerLimpar(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.docker("orq.onda", fmt.Sprint(c.ondaID), "", "", "onda-volume", "")
+	c.mesclarNoBanco()
+	err := os.WriteFile(filepath.Join(c.dir, "resp", "docker", chave("volume", "rm", "onda-volume")+".err"), []byte("volume is in use"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agora := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	a := &Auto{L: c.l, Agora: func() time.Time { return agora }}
+	if err := a.Ciclo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	o, _ := c.st.VerOnda(context.Background(), c.ondaID)
+	if o.EncerradaEm != nil {
+		t.Fatal("encerrou a onda com o Docker dela falhando")
+	}
+	if !strings.Contains(strings.Join(c.escritas("docker"), "|"), "volume rm onda-volume") {
+		t.Fatal("não tentou remover")
+	}
+	// Antes do reintento, nada de nova tentativa; depois dele, com o erro resolvido, fecha.
+	if err := a.Ciclo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.escritas("docker")) != 0 {
+		t.Error("tentou antes do reintento")
+	}
+	if err := os.Remove(filepath.Join(c.dir, "resp", "docker", chave("volume", "rm", "onda-volume")+".err")); err != nil {
+		t.Fatal(err)
+	}
+	agora = agora.Add(6 * time.Minute)
+	if err := a.Ciclo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	o, _ = c.st.VerOnda(context.Background(), c.ondaID)
+	if o.EncerradaEm == nil || !strings.Contains(strings.Join(c.escritas("docker"), "|"), "volume rm onda-volume") {
+		t.Fatalf("onda = %+v", o)
 	}
 }

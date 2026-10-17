@@ -70,7 +70,7 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 				if enc := central.EncerramentoDe(o); o.EncerradaEm == nil && (enc == nil || !enc.Pronta) {
 					return &output.Error{Code: "onda_aberta", Cause: fmt.Sprintf("a onda %d não está encerrada nem pronta para encerrar", onda), Recovery: "veja orq onda proxima " + strconv.FormatInt(onda, 10), Exit: output.ExitConflict}
 				}
-				if res, err = l.LimparOnda(ctx, onda, dry); err != nil {
+				if res, err = l.LimparOnda(ctx, onda, dry, nil); err != nil {
 					return err
 				}
 			case len(args) == 1 && onda == 0:

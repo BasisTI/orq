@@ -60,6 +60,8 @@ type Limpador struct {
 	Raizes Raizes
 	// PaneProprio é o pane onde o comando roda ($HERDR_PANE_ID): nunca é fechado.
 	PaneProprio string
+	// aposPlano, se não nulo, roda entre o plano e a execução (os testes intercalam a reabertura).
+	aposPlano func()
 	// Cwd é o diretório corrente; vazio usa os.Getwd. Worktree que contém o Cwd é preservado.
 	Cwd string
 }
@@ -90,7 +92,7 @@ func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref r
 		}
 		return res, nil
 	}
-	rec, err := LerRecursos(l.Raizes.Arquivo(u), u)
+	rec, hash, err := lerRecursosHash(l.Raizes.Arquivo(u), u)
 	switch {
 	case errors.Is(err, ErrSemRecursos):
 		res.Recusa = "sem recursos gravados em " + l.Raizes.Arquivo(u) + " (grave com orq recursos gravar)"
@@ -107,7 +109,10 @@ func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref r
 	itens := l.planejar(ctx, u, rec, mrs)
 	res.Itens = itens
 	if !op.DryRun {
-		l.executar(ctx, itens)
+		if l.aposPlano != nil {
+			l.aposPlano()
+		}
+		l.executar(ctx, itens, l.geracao(coord, u, hash, urlsDasMRs(us)))
 	}
 	res.Agiu, res.Completa = resumo(itens)
 	return finalizar()
@@ -188,7 +193,12 @@ func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos
 			faltam = append(faltam, fmt.Sprintf("%s (%s)", m.URL, d.Estado))
 			continue
 		}
-		if ap, ok := rec.Aprovados[m.URL]; ok && !strings.HasPrefix(d.Head, ap) {
+		// Conteúdo integrado não prova aprovação: sem o head aprovado registrado, preserva.
+		ap, ok := rec.Aprovados[m.URL]
+		if !ok {
+			return nil, fmt.Sprintf("sem head aprovado registrado para a MR %s (orq recursos gravar --aprovado %s=<sha>)", m.URL, m.URL)
+		}
+		if d.Head == "" || !strings.HasPrefix(d.Head, ap) {
 			return nil, fmt.Sprintf("o head mesclado da MR %s (%s) não é o aprovado (%s)", m.URL, d.Head, ap)
 		}
 		porBranch[d.Origem] = d
@@ -204,7 +214,7 @@ func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos
 // de trabalho (onde mora o recursos.json) só some se todo o resto foi resolvido: senão o daemon
 // esqueceria o que ficou.
 func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs map[string]enriquecer.DetalheMR) []*Item {
-	panes := l.planejarPanes(ctx, u, rec)
+	panes := l.planejarPanes(ctx, rec)
 	var itens []*Item
 	itens = append(itens, panes...)
 	for _, r := range rec.Repos {
@@ -243,9 +253,38 @@ func propagar(itens []*Item) {
 	}
 }
 
+func urlsDasMRs(us central.US) string {
+	var ps []string
+	for _, m := range us.MRs {
+		ps = append(ps, m.URL)
+	}
+	sort.Strings(ps)
+	return strings.Join(ps, "\n")
+}
+
+// geracao devolve a guarda de uma execução: o plano vale para o recursos.json e o conjunto de MRs
+// que foram conferidos. Se o coordenador reabriu a US depois (regravou os recursos, ligou MR
+// nova), o plano está velho e nada mais é removido.
+func (l *Limpador) geracao(coord *central.Coordenador, u refs.US, hash, mrs string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if _, atual, err := lerRecursosHash(l.Raizes.Arquivo(u), u); err != nil || atual != hash {
+			return fmt.Errorf("o recursos.json mudou depois do plano (a US foi reaberta?)")
+		}
+		_, us, err := l.St.LocalizarUS(ctx, coord, u)
+		if err != nil {
+			return fmt.Errorf("não consegui reler a US: %v", err)
+		}
+		if urlsDasMRs(us) != mrs {
+			return fmt.Errorf("as MRs da US mudaram depois do plano (a US foi reaberta?)")
+		}
+		return nil
+	}
+}
+
 // executar roda os itens em Remover, na ordem. Um item só roda se todas as dependências
-// terminaram bem (Removido ou Ausente); senão fica Preservado.
-func (l *Limpador) executar(ctx context.Context, itens []*Item) {
+// terminaram bem (Removido ou Ausente) e se a guarda de geração, quando há, ainda passa; senão
+// fica Preservado.
+func (l *Limpador) executar(ctx context.Context, itens []*Item, guarda func(context.Context) error) {
 	for _, i := range itens {
 		if i.Estado != Remover {
 			continue
@@ -260,6 +299,12 @@ func (l *Limpador) executar(ctx context.Context, itens []*Item) {
 		if bloqueio != "" {
 			i.Estado, i.Motivo = Preservado, bloqueio
 			continue
+		}
+		if guarda != nil {
+			if err := guarda(ctx); err != nil {
+				i.Estado, i.Motivo = Preservado, err.Error()
+				continue
+			}
 		}
 		err := i.exec(ctx)
 		var p preservar
