@@ -50,7 +50,9 @@ orq tui --coord X para cada coordenador com onda aberta. Idempotente: os panes s
 pelo rótulo "orq · <coordenador>" e conferidos com herdr pane process-info. Com o TUI rodando,
 o pane fica (mantido); de volta ao shell (o TUI saiu com q, caiu ou não subiu), o TUI é
 lançado de novo no mesmo pane (relancado); com outro processo em primeiro plano, nada é
-mandado para ele (ocupado). O que falta é criado, e o pane de um coordenador que não tem mais
+mandado para ele (ocupado). O que falta é criado numa grade de duas colunas, preenchida por
+linha (o par à direita do anterior, o ímpar numa linha de largura total embaixo, linhas de
+mesma altura), e o pane de um coordenador que não tem mais
 onda aberta é fechado, se estiver no TUI ou no shell (ele não teria o que mostrar; a próxima
 chamada o recria quando houver onda). Panes sem esse rótulo no workspace não são tocados.
 Depois de lançar, espera até 5 s o TUI aparecer; se não aparece, o detalhe da ação diz.
@@ -212,6 +214,7 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 		}
 	}
 	livre := "" // pane de shell recém-criado com o workspace, ainda sem coordenador
+	g := &grade{f: f, flagsEnv: flagsEnv}
 	if ws == "" {
 		if len(coords) == 0 {
 			return r, nil
@@ -220,6 +223,9 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 			Workspace struct {
 				ID string `json:"workspace_id"`
 			} `json:"workspace"`
+			Tab struct {
+				ID string `json:"tab_id"`
+			} `json:"tab"`
 			RootPane struct {
 				ID string `json:"pane_id"`
 			} `json:"root_pane"`
@@ -232,36 +238,78 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 			return r, err
 		}
 		ws, livre, r.Criado = wc.Workspace.ID, wc.RootPane.ID, true
+		g.tab = wc.Tab.ID
 	}
 	r.WorkspaceID = &ws
+	g.ws = ws
 
 	var pl struct {
 		Panes []struct {
 			ID    string `json:"pane_id"`
 			Label string `json:"label"`
+			Tab   string `json:"tab_id"`
 		} `json:"panes"`
 	}
 	if err := herdrJSON(ctx, f, &pl, "pane", "list", "--workspace", ws); err != nil {
 		return r, err
 	}
 	existentes := map[string]string{} // coordenador → pane
-	ultimo := ""
+	porAba := map[string][]string{}   // aba → panes da Central, na ordem da lista
+	baseID, baseAba := "", ""         // primeiro pane de fora da Central, onde a grade começa se não há pane dela
 	for _, p := range pl.Panes {
 		if c, ok := strings.CutPrefix(p.Label, RotuloPaneCentral); ok {
 			if _, dup := existentes[c]; !dup {
 				existentes[c] = p.ID
 			}
-			ultimo = p.ID
-		} else if ultimo == "" && p.ID != livre {
-			ultimo = p.ID
+			porAba[p.Tab] = append(porAba[p.Tab], p.ID)
+		} else if baseID == "" && p.ID != livre {
+			baseID, baseAba = p.ID, p.Tab
 		}
 	}
-	if ultimo == "" {
-		ultimo = livre
+	// A grade é a aba com mais panes da Central; panes dela em outras abas ficam como estão.
+	for aba, ps := range porAba {
+		if g.tab == "" || len(ps) > len(porAba[g.tab]) || (len(ps) == len(porAba[g.tab]) && aba < g.tab) {
+			g.tab = aba
+		}
 	}
+	g.panes = porAba[g.tab]
+
+	// O que sobra (coordenador sem onda aberta) fecha primeiro, para a grade se refazer sem buraco
+	// antes de ganhar pane novo; o resultado vai no fim da lista.
 	quer := map[string]bool{}
 	for _, c := range coords {
 		quer[c] = true
+	}
+	var sobras []string
+	for c := range existentes {
+		if !quer[c] {
+			sobras = append(sobras, c)
+		}
+	}
+	sort.Strings(sobras)
+	var fechados []PaneCentral
+	for _, c := range sobras {
+		p := existentes[c]
+		st, detalhe, err := estadoPane(ctx, f, p, c)
+		if err != nil {
+			return r, err
+		}
+		if st == paneOutro {
+			fechados = append(fechados, PaneCentral{c, p, "ocupado", &detalhe})
+			continue
+		}
+		if err := herdrJSON(ctx, f, nil, "pane", "close", p); err != nil {
+			return r, err
+		}
+		g.remover(p)
+		fechados = append(fechados, PaneCentral{c, p, "fechado", nil})
+	}
+	if err := g.conferir(ctx, temFechado(fechados)); err != nil {
+		return r, err
+	}
+
+	criou := false
+	for _, c := range coords {
 		if p, ok := existentes[c]; ok {
 			// O rótulo não basta: o TUI pode ter saído (q), caído ou nunca subido, e o pane
 			// ficou no shell. Só o shell recebe o comando de novo; outro processo no pane é
@@ -281,55 +329,46 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 			default:
 				r.Panes = append(r.Panes, PaneCentral{c, p, "ocupado", &detalhe})
 			}
-			ultimo = p
 			continue
 		}
-		pane := livre
-		if pane != "" {
-			livre = ""
-		} else {
-			var sp struct {
-				Pane struct {
-					ID string `json:"pane_id"`
-				} `json:"pane"`
+		var pane string
+		switch {
+		case livre != "":
+			pane, livre = livre, ""
+			g.panes = append(g.panes, pane)
+		case len(g.panes) == 0:
+			// Workspace sem pane da Central: a grade começa ao lado do primeiro pane que há.
+			if baseID == "" {
+				return r, herdrErro([]string{"pane", "list", "--workspace", ws}, fmt.Errorf("workspace sem pane"))
 			}
-			args := append([]string{"pane", "split", ultimo, "--direction", "down", "--no-focus"}, flagsEnv...)
+			var sp paneMovido
+			args := append([]string{"pane", "split", baseID, "--direction", "right", "--no-focus"}, flagsEnv...)
 			if err := herdrJSON(ctx, f, &sp, args...); err != nil {
 				return r, err
 			}
-			pane = sp.Pane.ID
+			pane, g.tab = sp.id(), baseAba
+			g.panes = append(g.panes, pane)
+		default:
+			var err error
+			if pane, err = g.acrescentar(ctx, ""); err != nil {
+				return r, err
+			}
 		}
+		criou = true
 		if err := herdrJSON(ctx, f, nil, "pane", "rename", pane, RotuloPaneCentral+c); err != nil {
 			return r, err
 		}
 		if err := herdrJSON(ctx, f, nil, "pane", "run", pane, comandoShell(exe, "tui", "--coord", c)); err != nil {
 			return r, err
 		}
-		ultimo = pane
 		r.Panes = append(r.Panes, PaneCentral{c, pane, "criado", esperarTUI(ctx, f, pane, c)})
 	}
-	var sobras []string
-	for c := range existentes {
-		if !quer[c] {
-			sobras = append(sobras, c)
-		}
-	}
-	sort.Strings(sobras)
-	for _, c := range sobras {
-		p := existentes[c]
-		st, detalhe, err := estadoPane(ctx, f, p, c)
-		if err != nil {
+	if criou {
+		if err := g.igualar(ctx); err != nil {
 			return r, err
 		}
-		if st == paneOutro {
-			r.Panes = append(r.Panes, PaneCentral{c, p, "ocupado", &detalhe})
-			continue
-		}
-		if err := herdrJSON(ctx, f, nil, "pane", "close", p); err != nil {
-			return r, err
-		}
-		r.Panes = append(r.Panes, PaneCentral{c, p, "fechado", nil})
 	}
+	r.Panes = append(r.Panes, fechados...)
 	if focar && len(coords) > 0 {
 		if err := herdrJSON(ctx, f, nil, "workspace", "focus", ws); err != nil {
 			return r, err
@@ -337,6 +376,15 @@ func (a *App) abrirCentral(ctx context.Context, nome string, focar bool) (Result
 		r.Focado = true
 	}
 	return r, nil
+}
+
+func temFechado(ps []PaneCentral) bool {
+	for _, p := range ps {
+		if p.Acao == "fechado" {
+			return true
+		}
+	}
+	return false
 }
 
 // Estado do processo em primeiro plano num pane da Central.

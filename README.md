@@ -141,7 +141,19 @@ Só pane e workspace que existem recebem token. No Herdr o token é por nome, n�
 
 ### Workspace Central
 
-`orq central abrir` acha o workspace pelo rótulo (`--nome`, padrão `$ORQ_CENTRAL_NOME` ou `Central`), cria se não existe e deixa nele um pane rodando `orq tui --coord X` (pelo caminho absoluto do `orq` que rodou o comando, com `ORQ_STATE_DIR` e os binários dele) para cada coordenador com onda aberta. É idempotente: os panes são reconhecidos pelo rótulo `orq · <coordenador>` e conferidos com `herdr pane process-info`. Com o `orq tui --coord X` rodando, o pane fica (`mantido`); de volta ao shell, porque o TUI saiu com `q`, caiu ou nunca subiu, o TUI é lançado de novo no mesmo pane (`relancado`); com outro processo em primeiro plano, o orq não manda nada para ele (`ocupado`, com o processo no `detalhe`). O que falta é criado (dividindo o último pane do orq), e depois de cada lançamento o comando espera até 5 s o TUI aparecer; se não aparece, o `detalhe` da ação diz. O pane de um coordenador sem onda aberta é fechado, se estiver no TUI ou no shell, porque não teria o que mostrar (a próxima chamada o recria quando houver onda). Panes sem esse rótulo não são tocados. Sem coordenador com onda aberta, o workspace não é criado. Sem `--sem-foco`, foca o workspace no fim.
+`orq central abrir` acha o workspace pelo rótulo (`--nome`, padrão `$ORQ_CENTRAL_NOME` ou `Central`), cria se não existe e deixa nele um pane rodando `orq tui --coord X` (pelo caminho absoluto do `orq` que rodou o comando, com `ORQ_STATE_DIR` e os binários dele) para cada coordenador com onda aberta. É idempotente: os panes são reconhecidos pelo rótulo `orq · <coordenador>` e conferidos com `herdr pane process-info`. Com o `orq tui --coord X` rodando, o pane fica (`mantido`); de volta ao shell, porque o TUI saiu com `q`, caiu ou nunca subiu, o TUI é lançado de novo no mesmo pane (`relancado`); com outro processo em primeiro plano, o orq não manda nada para ele (`ocupado`, com o processo no `detalhe`). O que falta é criado na grade (abaixo), e depois de cada lançamento o comando espera até 5 s o TUI aparecer; se não aparece, o `detalhe` da ação diz. O pane de um coordenador sem onda aberta é fechado, se estiver no TUI ou no shell, porque não teria o que mostrar (a próxima chamada o recria quando houver onda), e a grade se refaz sem buraco. Panes sem esse rótulo não são tocados. Sem coordenador com onda aberta, o workspace não é criado. Sem `--sem-foco`, foca o workspace no fim.
+
+A Central é uma grade de duas colunas, preenchida por linha, na ordem de criação:
+
+```
+1 pane:  |   1   |        3 panes: |  1  |  2  |      5 panes: |  1  |  2  |
+                                   |    3      |               |  3  |  4  |
+                                                               |    5      |
+```
+
+O pane de posição par entra à direita do anterior, meio a meio; o de posição ímpar (a partir do 3º) abre uma linha de largura total embaixo de tudo, e as linhas ficam com a mesma altura depois de cada criação. Os panes que já existem não mudam de lugar ao criar um novo. Ao fechar o pane de um coordenador sem onda, os seguintes sobem uma posição; uma grade que o usuário arrumou de outro jeito (colunas, por exemplo) também é refeita, do 2º pane em diante. Os processos (`orq tui`) não reiniciam ao mover. Panes sem o rótulo `orq · ` não são tocados nem contados, mas ocupam espaço na aba: com um deles ao lado da grade, as linhas deixam de ter a largura da aba inteira.
+
+O Herdr 0.9.3 não divide a aba inteira (`pane split` e `pane move --split` dividem um pane, e sem `--target-pane` o pane focado) e `pane move` dentro da mesma aba responde `same_tab`. Por isso a linha nova sai de tirar o pane da direita da última linha para uma aba temporária (`--new-tab`), dividir para baixo o da esquerda e devolver o outro com `--tab --target-pane --split right`; as alturas vêm de `pane resize`. Se um passo falha no meio, o erro diz qual pane ficou na aba temporária e o comando que o traz de volta.
 
 ### Plugin do Herdr
 

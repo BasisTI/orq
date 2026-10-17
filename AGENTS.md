@@ -22,6 +22,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `internal/tui`: o `orq tui` (bubbletea v2 + lipgloss v2, de `charm.land`). Não volte ao bubbletea v1: o `init` dele consulta o fundo do terminal (OSC 11) em todo processo, e qualquer comando `orq` num tty que não responde esperava 5 s. `tela.go` desenha a partir do snapshot, sem terminal, e é o que os testes conferem (texto, estilos, OSC 8); `modelo.go` é o laço, o teclado e o mouse.
 - `internal/herdrcfg`: edição do `config.toml` do Herdr para `orq plugin configurar|desconfigurar` (lexer que preserva o texto, backup, `herdr config check` e restauração).
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
+- `internal/herdrfalso`: herdr falso dos testes de `orq central abrir` (árvore de splits em JSON, regras do Herdr 0.9.3). Os testes de `internal/cli` o compilam uma vez (`go build`); não entra no binário `orq`.
 - `internal/refs`: parse de `projeto/312`, `TG-312`, `TG-312#P2` e URL de MR.
 - `internal/output`: envelope de erro `{"error":{"code","cause","recovery"}}` e códigos de saída.
 - `docs/snapshot.md`: contrato do `orq snapshot`.
