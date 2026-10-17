@@ -15,6 +15,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -159,6 +160,15 @@ daemon, não sobe outro e sai com sucesso dizendo o pid dele.`,
 				return err
 			}
 			d := &enriquecer.Daemon{E: e, Socket: enriquecer.CaminhoSocket(a.Env), Tick: tick, IntervaloRemoto: remoto, Log: a.Err}
+			if limpeza.LigadaPeloAmbiente(a.Env) {
+				l, err := a.limpador(ctx)
+				if err != nil {
+					return err
+				}
+				d.Limpeza = &limpeza.Auto{L: l, Log: func(format string, args ...any) {
+					fmt.Fprintf(a.Err, "%s limpeza: %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
+				}}
+			}
 			return d.Rodar(ctx)
 		},
 	}
@@ -209,7 +219,7 @@ func (a *App) desacoplarDaemon(ctx context.Context, dir string, tick, remoto tim
 	// O filho recebe o ambiente do processo e, por cima, o ORQ_* que esta execução resolveu
 	// (inclusive o do orq.env do plugin), com o diretório de estado fixado.
 	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+dir)
-	for _, k := range []string{"ORQ_HERDR_BIN", "ORQ_GLAB_BIN", "ORQ_GH_BIN", "ORQ_TAIGA_BIN"} {
+	for _, k := range []string{"ORQ_HERDR_BIN", "ORQ_GLAB_BIN", "ORQ_GH_BIN", "ORQ_TAIGA_BIN", "ORQ_GIT_BIN", "ORQ_DOCKER_BIN", "ORQ_TRABALHO_DIR", "ORQ_TMP_DIR", "ORQ_LIMPEZA_AUTOMATICA"} {
 		if v := a.Env(k); v != "" {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}

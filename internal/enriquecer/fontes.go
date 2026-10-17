@@ -104,18 +104,37 @@ func forjaDe(rawURL string) (forja, error) {
 	return f, nil
 }
 
+// DetalheMR é o que a forja diz de uma MR: o estado normalizado, o head (o último commit da
+// branch de origem, que numa MR mesclada é o head mesclado) e as branches.
+type DetalheMR struct {
+	Estado string
+	WebURL string
+	Head   string
+	Origem string // branch de origem
+	Alvo   string // branch de destino
+}
+
 // ConsultarMR lê a MR na forja (só leitura) e devolve o estado normalizado.
 func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.ValorMR, error) {
-	fj, err := forjaDe(rawURL)
+	d, err := f.ConsultarMRDetalhe(ctx, rawURL)
 	if err != nil {
 		return central.ValorMR{}, err
+	}
+	return central.ValorMR{Estado: d.Estado, WebURL: d.WebURL}, nil
+}
+
+// ConsultarMRDetalhe é o ConsultarMR com o head e as branches, que a limpeza confere.
+func (f Ferramentas) ConsultarMRDetalhe(ctx context.Context, rawURL string) (DetalheMR, error) {
+	fj, err := forjaDe(rawURL)
+	if err != nil {
+		return DetalheMR{}, err
 	}
 	if fj.ferramenta == "glab" {
 		// O path do projeto vai inteiro codificado num segmento: basis%2Fiac%2Fplataforma.
 		caminho := "projects/" + url.QueryEscape(fj.projeto) + "/merge_requests/" + strconv.Itoa(fj.iid)
 		out, err := f.Rodar(ctx, "glab", "api", "--hostname", fj.host, caminho)
 		if err != nil {
-			return central.ValorMR{}, classificarForja(err)
+			return DetalheMR{}, classificarForja(err)
 		}
 		var r struct {
 			State               string  `json:"state"`
@@ -124,11 +143,15 @@ func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.Va
 			DetailedMergeStatus string  `json:"detailed_merge_status"`
 			MergedAt            *string `json:"merged_at"`
 			WebURL              string  `json:"web_url"`
+			SHA                 string  `json:"sha"`
+			SourceBranch        string  `json:"source_branch"`
+			TargetBranch        string  `json:"target_branch"`
 		}
 		if err := json.Unmarshal(out, &r); err != nil || r.State == "" {
-			return central.ValorMR{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "glab api devolveu algo que não é uma MR: " + resumir(out)}
+			return DetalheMR{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "glab api devolveu algo que não é uma MR: " + resumir(out)}
 		}
-		return central.ValorMR{Estado: NormalizarGitLab(r.State, r.Draft || r.WorkInProgress, r.DetailedMergeStatus, r.MergedAt != nil), WebURL: r.WebURL}, nil
+		return DetalheMR{Estado: NormalizarGitLab(r.State, r.Draft || r.WorkInProgress, r.DetailedMergeStatus, r.MergedAt != nil), WebURL: r.WebURL,
+			Head: r.SHA, Origem: r.SourceBranch, Alvo: r.TargetBranch}, nil
 	}
 	args := []string{"api"}
 	if fj.host != "github.com" {
@@ -137,7 +160,7 @@ func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.Va
 	args = append(args, "repos/"+fj.projeto+"/pulls/"+strconv.Itoa(fj.iid))
 	out, err := f.Rodar(ctx, "gh", args...)
 	if err != nil {
-		return central.ValorMR{}, classificarForja(err)
+		return DetalheMR{}, classificarForja(err)
 	}
 	var r struct {
 		State          string `json:"state"`
@@ -145,11 +168,19 @@ func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.Va
 		Merged         bool   `json:"merged"`
 		MergeableState string `json:"mergeable_state"`
 		HTMLURL        string `json:"html_url"`
+		Head           struct {
+			SHA string `json:"sha"`
+			Ref string `json:"ref"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
 	}
 	if err := json.Unmarshal(out, &r); err != nil || r.State == "" {
-		return central.ValorMR{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "gh api devolveu algo que não é um PR: " + resumir(out)}
+		return DetalheMR{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "gh api devolveu algo que não é um PR: " + resumir(out)}
 	}
-	return central.ValorMR{Estado: NormalizarGitHub(r.State, r.Draft, r.Merged, r.MergeableState), WebURL: r.HTMLURL}, nil
+	return DetalheMR{Estado: NormalizarGitHub(r.State, r.Draft, r.Merged, r.MergeableState), WebURL: r.HTMLURL,
+		Head: r.Head.SHA, Origem: r.Head.Ref, Alvo: r.Base.Ref}, nil
 }
 
 // NormalizarGitLab traduz a MR do GitLab: mesclada, fechada, draft, pronta (aberta e

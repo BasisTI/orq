@@ -30,6 +30,9 @@ type Daemon struct {
 	// Reconexao é a espera antes de tentar o socket de novo; zero usa 5 s.
 	Reconexao time.Duration
 	Log       io.Writer
+	// Limpeza, se não nulo, roda a cada IntervaloRemoto: a limpeza automática dos recursos da US
+	// no merge. Falha dela vai para o log e não derruba o laço.
+	Limpeza interface{ Ciclo(context.Context) error }
 
 	mu      sync.Mutex
 	ultimos map[string]string
@@ -56,6 +59,13 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 			erros <- err
 		}
 	}()
+	if d.Limpeza != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.limpeza(ctx)
+		}()
+	}
 	if d.Socket != "" {
 		wg.Add(1)
 		go func() {
@@ -63,7 +73,7 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 			d.assinatura(ctx, panes, sinalizar)
 		}()
 	}
-	d.logf("início", "orq daemon no ar (tick %s, socket %s)", tick, valorOu(d.Socket, "desligado"))
+	d.logf("início", "orq daemon no ar (tick %s, socket %s, limpeza automática %s)", tick, valorOu(d.Socket, "desligado"), map[bool]string{true: "ligada", false: "desligada"}[d.Limpeza != nil])
 	t := time.NewTicker(tick)
 	defer t.Stop()
 	var assinados []string
@@ -230,6 +240,25 @@ func (d *Daemon) remoto(ctx context.Context, sinalizar func()) error {
 	}
 }
 
+// limpeza chama a limpeza automática a cada IntervaloRemoto, depois de um primeiro ciclo logo
+// ao subir. Fica fora do laço das MRs para um git fetch lento não atrasar a consulta às forjas.
+func (d *Daemon) limpeza(ctx context.Context) {
+	t := time.NewTicker(valorDur(d.IntervaloRemoto, 15*time.Second))
+	defer t.Stop()
+	for {
+		if err := d.Limpeza.Ciclo(ctx); err != nil && ctx.Err() == nil {
+			d.logf("limpeza", "limpeza automática: %v", err)
+		} else if err == nil {
+			d.logf("limpeza", "")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
 // assinatura mantém a assinatura de eventos do Herdr com a lista de panes mais recente. Todo
 // (re)início, inclusive depois de events_lost, pede um ciclo: a leitura completa reconcilia o
 // que se perdeu.
@@ -286,14 +315,16 @@ func (d *Daemon) logf(chave, format string, args ...any) {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
+	// Uma trava só para a tabela e para a escrita: o laço, a assinatura e a limpeza logam ao mesmo
+	// tempo, e o Writer não é obrigado a aceitar escritas concorrentes.
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if chave != "" {
-		d.mu.Lock()
 		if d.ultimos == nil {
 			d.ultimos = map[string]string{}
 		}
 		antes := d.ultimos[chave]
 		d.ultimos[chave] = msg
-		d.mu.Unlock()
 		if msg == antes {
 			return
 		}

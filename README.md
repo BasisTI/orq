@@ -84,15 +84,19 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq plugin configurar [--tecla prefix+u] [--tecla-central prefix+shift+u] [--config <arquivo>]` | Acrescenta ao `config.toml` do Herdr as linhas da sidebar e as teclas do plugin. |
 | `orq plugin desconfigurar [--config <arquivo>]` | Tira do `config.toml` só o que `configurar` acrescentou. |
 | `orq plugin doctor [--config <arquivo>]` | Binários, daemon, plugin registrado, sidebar, teclas e banco. |
+| `orq recursos gravar <ref> [--repo R --worktree W --branch B] [--pane NOME]… [--aprovado URL=SHA]…` | Grava (ou completa) o `recursos.json` da US na pasta de trabalho e imprime o `TMPDIR` do worker e os rótulos Docker (veja [Limpeza depois do merge](#limpeza-depois-do-merge)). |
+| `orq recursos ver <ref>` | Mostra o `recursos.json` da US. |
+| `orq limpar <ref> [--dry-run]` | Com todas as MRs da US mescladas, fecha os panes, remove o worktree, as branches, as pastas e os recursos Docker da US; o que não passa numa conferência fica preservado, com o motivo. `--dry-run` só mostra. |
+| `orq limpar --onda <id> [--dry-run]` | Remove os recursos Docker com o rótulo `orq.onda=<id>` de uma onda encerrada ou pronta para encerrar. |
 | `orq version` | Versão. |
 
 ### Daemon e enriquecedores
 
 `orq daemon` roda em primeiro plano (o log vai para o stderr; o plugin do Herdr o inicia com `--detach`, e o log vai para `daemon.log` no diretório de estado) e só existe um por diretório de estado: ele segura um `flock` em `daemon.lock`, e o segundo sai com `daemon_ativo` (exit 4) dizendo o pid do primeiro. A cada tick ele lê o Herdr (`herdr api snapshot`) e confere os tokens; MR e Taiga são olhados a cada `--intervalo-remoto`, cada chave com o seu TTL (MR 60 s, Taiga 5 min). Ele também assina `pane.agent_status_changed` dos panes das ondas abertas no socket do Herdr (`$HERDR_SOCKET_PATH`, a sessão de `$HERDR_SESSION` ou `~/.config/herdr/herdr.sock`) e republica na hora; em `events_lost`, reassina e reconcilia com uma leitura completa. Ao sair, limpa os tokens que publicou e que ainda têm o valor dele.
 
-Só leituras nas forjas e no Taiga. Falha de uma consulta (binário ausente, autenticação, rede) fica no cache com o código e o snapshot mostra o último valor bom com o `erro`; nenhuma derruba o processo. Erro de autenticação (na taiga-cli, o exit 3) suspende a ferramenta por 30 min: o orq não tenta login nem define token. `--forcar` passa por cima de uma suspensão anterior, mas uma recusa na própria execução interrompe as chamadas seguintes da ferramenta.
+Só leituras nas forjas e no Taiga (a limpeza automática do merge é a exceção; veja [Limpeza depois do merge](#limpeza-depois-do-merge)). Falha de uma consulta (binário ausente, autenticação, rede) fica no cache com o código e o snapshot mostra o último valor bom com o `erro`; nenhuma derruba o processo. Erro de autenticação (na taiga-cli, o exit 3) suspende a ferramenta por 30 min: o orq não tenta login nem define token. `--forcar` passa por cima de uma suspensão anterior, mas uma recusa na própria execução interrompe as chamadas seguintes da ferramenta.
 
-As ferramentas são chamadas por caminho absoluto, porque num pane ou numa ação de plugin o PATH não tem `~/.local/bin`. A ordem: `ORQ_HERDR_BIN`, `ORQ_GLAB_BIN`, `ORQ_GH_BIN` e `ORQ_TAIGA_BIN`; para o herdr, `$HERDR_BIN_PATH`; e então `~/.local/bin`, `~/go/bin`, `~/bin`, `/home/linuxbrew/.linuxbrew/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` e `/bin`. O PATH do processo não entra.
+As ferramentas são chamadas por caminho absoluto, porque num pane ou numa ação de plugin o PATH não tem `~/.local/bin`. A ordem: `ORQ_HERDR_BIN`, `ORQ_GLAB_BIN`, `ORQ_GH_BIN`, `ORQ_TAIGA_BIN`, `ORQ_GIT_BIN` e `ORQ_DOCKER_BIN`; para o herdr, `$HERDR_BIN_PATH`; e então `~/.local/bin`, `~/go/bin`, `~/bin`, `/home/linuxbrew/.linuxbrew/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` e `/bin`. O PATH do processo não entra.
 
 Tokens de sidebar (`herdr pane|workspace report-metadata --source orq`), conferidos a cada tick contra o que o Herdr mostra — os tokens somem quando o servidor do Herdr reinicia, e o daemon republica:
 
@@ -164,6 +168,7 @@ As ações, o startup e os panes do plugin rodam com o ambiente do servidor do H
 cat > "$(herdr plugin config-dir orq)/orq.env" <<'X'
 ORQ_STATE_DIR=/caminho/do/estado
 ORQ_CENTRAL_NOME=Central
+# ORQ_LIMPEZA_AUTOMATICA=0   # desliga a limpeza do daemon no merge
 X
 ```
 
@@ -211,6 +216,49 @@ Com todas as US em `done`, `orq onda proxima` traz `encerramento`; antes disso, 
 ```
 
 Em texto, as linhas `próximo passo:` e `falta:`. O `orq` só sugere: quem encerra é o coordenador, com `orq onda encerrar <id>`. O TUI marca a faixa da onda pronta com o selo `concluída`, pela mesma regra.
+
+### Limpeza depois do merge
+
+Depois do merge, o orq limpa sozinho o que o coordenador criou para a US, sem perguntar. Se for preciso corrigir algo depois do teste, o coordenador recria worktree e panes a partir da `main`, numa branch nova, grava os recursos de novo e liga a MR nova; o `limpar` age outra vez no merge seguinte.
+
+**Recursos conhecidos desde o despacho.** O coordenador grava, por US, o que criou, com `orq recursos gravar`. O arquivo é `recursos.json` na pasta de trabalho `~/tmp/orquestrador/<projeto>/TG-<ref>` (`ORQ_TRABALHO_DIR` troca a raiz):
+
+```json
+{
+  "versao": 1, "projeto": "orq", "ref": 13,
+  "repos": [{"repo": "/home/u/Projetos/orq", "worktree": "/home/u/Projetos/orq.TG-13", "branch": "TG-13"}],
+  "panes": ["tg-13_executor", "tg-13_revisor"],
+  "trabalho": "/home/u/tmp/orquestrador/orq/TG-13", "tmp": "/tmp/orq/orq/TG-13",
+  "aprovados": {"https://github.com/BasisTI/orq/pull/9": "a1b2c3d"}
+}
+```
+
+Não há migration nova: o estado é esse arquivo e o diário. Por isso a atualização dos binários não precisa da ordem da seção [Atualização](#atualização); só o daemon antigo, que não limpa, precisa ser reiniciado para passar a limpar.
+
+**Convenção para os workers** (o coordenador põe nos pacotes):
+
+- `TMPDIR=/tmp/orq/<projeto>/TG-<ref>` (`ORQ_TMP_DIR` troca a raiz), passado com `--env TMPDIR=…` no `herdr tab create`. `orq recursos gravar` imprime o valor.
+- Contêineres, volumes, redes e imagens que o worker criar levam o rótulo `orq.us=<projeto>/<ref>` e `orq.onda=<id da onda>`. Num `docker compose`, o projeto se chama `orq-<projeto>-<ref>` e os serviços levam os rótulos em `labels:`.
+- O Testcontainers limpa o que cria pelo Ryuk, desde que ele não esteja desligado: `orq recursos gravar` avisa se `TESTCONTAINERS_RYUK_DISABLED=true` ou `ryuk.disabled=true` em `~/.testcontainers.properties`.
+
+**O que `orq limpar <ref>` faz.** Só começa se a US tem `recursos.json` e MR, e se cada MR está `mesclada` na forja (consulta na hora, não o cache) com o head igual ao `aprovados` gravado, quando há. Senão sai com `limpeza_recusada` (exit 4), sem remover nada, e grava `limpar.recusada` no diário. Depois, na ordem:
+
+| Item | Regra |
+|---|---|
+| panes | Os da US: nome de agente em `panes` ou `tg-<ref>_*` / `<projeto>-tg-<ref>_*` (o nome sem projeto só vale se nenhum outro projeto da Central tem uma US com esse número). Fecha só com o agente `idle`/`done`, relido do Herdr logo antes de fechar. Nunca fecha o pane do coordenador nem o que roda o comando. |
+| worktree | Registrado no repositório, na branch da US, sem árvore suja, fora do diretório corrente e com o conteúdo já na branch de destino. Sem `--force`. |
+| branch local e remota | Mesma conferência do conteúdo. A remota só é apagada se ainda está no commit conferido (`--force-with-lease`). Nunca `main`, `master`, `develop`, `trunk` nem a branch de destino da MR. |
+| pasta temporária | `/tmp/orq/<projeto>/TG-<ref>`. |
+| Docker | Contêineres, redes, volumes e imagens com o rótulo `orq.us=<projeto>/<ref>`, nessa ordem, com os ids listados antes e o rótulo conferido de novo antes de cada remoção. Nunca `prune`. |
+| pasta de trabalho | `~/tmp/orquestrador/<projeto>/TG-<ref>`, por último, e só se todo o resto foi resolvido: ela guarda o `recursos.json`, e sem ele o daemon esqueceria o que ficou. |
+
+O conteúdo "já na branch de destino" é: o commit é o head mesclado da MR, ou mesclar o commit em `origin/<destino>` não muda a árvore (cobre merge, fast-forward e squash, em que a conferência é por conteúdo, não por histórico). Se a `main` mexeu depois nas mesmas linhas, não dá para provar e o recurso fica preservado. `git fetch --prune` roda antes (é a única mudança do `--dry-run`, só nas referências remotas).
+
+Nunca se apaga caminho fora das raízes: as pastas são derivadas da raiz, do projeto e da ref; o caminho que o `recursos.json` declare diferente do derivado, um link simbólico (no próprio caminho ou nos pais) e uma raiz vazia, `/` ou `$HOME` viram `preservado`.
+
+Cada item sai em `removido`, `preservado` (com o motivo), `falhou` ou `ausente` (já não existia). Cada um que não é `ausente` vira um evento no diário (`limpar.removido`, `limpar.preservado`, `limpar.falhou`). Um pane que não é `idle`/`done` preserva também o resto (worktree, branches, pastas, Docker), porque o agente pode estar usando; o mesmo vale para quem depende de um item preservado.
+
+**No merge, pelo daemon.** A cada `--intervalo-remoto`, o daemon roda o `limpar` nas US com MR, todas `mescladas` no cache, e `recursos.json`. Quando algo fica preservado, tenta de novo a cada 5 min e só grava no diário se o desfecho mudou. Quando a onda aberta (que não é só de plano) está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)) e nenhuma US dela tem mais `recursos.json`, o daemon a encerra (`onda.encerrar`, `limpar.onda`) e remove o Docker com `orq.onda=<id>`. `ORQ_LIMPEZA_AUTOMATICA=0` (também `false`, `nao`, `off`), no ambiente ou no `orq.env` do plugin, desliga as duas coisas; o padrão é ligado, e o daemon já em execução precisa ser reiniciado para ler a mudança. US sem `recursos.json` não são tocadas, e o orq não faz faxina de resíduos antigos.
 
 ## Licença
 

@@ -1,0 +1,359 @@
+package limpeza
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/output"
+	"github.com/BasisTI/orq/internal/refs"
+)
+
+// Estados de um item da limpeza. Remover é o plano (dry-run); Removido, Preservado e Falhou são
+// o resultado de executar. Ausente quer dizer que não havia nada a fazer (já tinha sumido).
+const (
+	Remover    = "remover"
+	Removido   = "removido"
+	Ausente    = "ausente"
+	Preservado = "preservado"
+	Falhou     = "falhou"
+)
+
+// Item é um recurso da US e o que a limpeza faz (ou fez) com ele.
+type Item struct {
+	Tipo   string `json:"tipo"` // pane, worktree, branch_local, branch_remota, pasta_tmp, pasta_trabalho, docker_*
+	Alvo   string `json:"alvo"`
+	Estado string `json:"estado"`
+	Motivo string `json:"motivo,omitempty"`
+
+	deps []*Item
+	exec func(ctx context.Context) error
+}
+
+// preservar é o erro de um exec que, na hora de agir, achou motivo para não remover.
+type preservar string
+
+func (p preservar) Error() string { return string(p) }
+
+// Resultado é a saída de orq limpar.
+type Resultado struct {
+	US     string  `json:"us"`
+	DryRun bool    `json:"dry_run"`
+	Recusa string  `json:"recusa,omitempty"` // a limpeza nem começou: o porquê
+	Itens  []*Item `json:"itens"`
+	// Agiu: removeu ao menos um recurso. Completa: nenhum item ficou preservado ou falhou, e a
+	// pasta de trabalho (com o recursos.json) se foi.
+	Agiu     bool `json:"agiu"`
+	Completa bool `json:"completa"`
+}
+
+// Limpador remove os recursos de uma US.
+type Limpador struct {
+	St     *central.Store
+	F      enriquecer.Ferramentas
+	Raizes Raizes
+	// PaneProprio é o pane onde o comando roda ($HERDR_PANE_ID): nunca é fechado.
+	PaneProprio string
+	// Cwd é o diretório corrente; vazio usa os.Getwd. Worktree que contém o Cwd é preservado.
+	Cwd string
+}
+
+// Opcoes de uma execução.
+type Opcoes struct {
+	DryRun bool
+	// Registrar decide se o resultado vai para o diário; nil registra sempre (menos no dry-run).
+	// O daemon usa para não repetir o mesmo "preservado" a cada tentativa.
+	Registrar func(Resultado) bool
+}
+
+// Limpar confere a US e remove os recursos dela. A recusa (MR não mesclada, head diferente do
+// aprovado, sem recursos.json) volta em Resultado.Recusa, sem erro; erro é só falha do banco
+// ou referência inexistente.
+func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref refs.US, op Opcoes) (Resultado, error) {
+	loc, us, err := l.St.LocalizarUS(ctx, coord, ref)
+	if err != nil {
+		return Resultado{}, err
+	}
+	u := loc.US
+	res := Resultado{US: u.Chave(), DryRun: op.DryRun, Itens: []*Item{}}
+	finalizar := func() (Resultado, error) {
+		if !op.DryRun && (op.Registrar == nil || op.Registrar(res)) {
+			if err := l.St.RegistrarExternos(ctx, coord, u, eventos(res)); err != nil {
+				return res, err
+			}
+		}
+		return res, nil
+	}
+	rec, err := LerRecursos(l.Raizes.Arquivo(u), u)
+	switch {
+	case errors.Is(err, ErrSemRecursos):
+		res.Recusa = "sem recursos gravados em " + l.Raizes.Arquivo(u) + " (grave com orq recursos gravar)"
+		return finalizar()
+	case err != nil:
+		res.Recusa = "recursos.json inválido: " + err.Error()
+		return finalizar()
+	}
+	mrs, recusa := l.conferirMRs(ctx, us, rec)
+	if recusa != "" {
+		res.Recusa = recusa
+		return finalizar()
+	}
+	itens := l.planejar(ctx, u, rec, mrs)
+	res.Itens = itens
+	if !op.DryRun {
+		l.executar(ctx, itens)
+	}
+	res.Agiu, res.Completa = resumo(itens)
+	return finalizar()
+}
+
+// resumo calcula Agiu e Completa. Completa exige que a pasta de trabalho tenha sido removida
+// (ou nem exista), que é o último item.
+func resumo(itens []*Item) (agiu, completa bool) {
+	completa = true
+	for _, i := range itens {
+		switch i.Estado {
+		case Removido:
+			agiu = true
+		case Ausente:
+		default:
+			completa = false
+		}
+	}
+	return agiu, completa
+}
+
+func eventos(r Resultado) []central.EventoExterno {
+	if r.Recusa != "" {
+		return []central.EventoExterno{{Tipo: "limpar.recusada", Detalhe: map[string]any{"motivo": r.Recusa}}}
+	}
+	var es []central.EventoExterno
+	for _, i := range r.Itens {
+		tipo := ""
+		switch i.Estado {
+		case Removido:
+			tipo = "limpar.removido"
+		case Preservado:
+			tipo = "limpar.preservado"
+		case Falhou:
+			tipo = "limpar.falhou"
+		default:
+			continue
+		}
+		d := map[string]any{"tipo": i.Tipo, "alvo": i.Alvo}
+		if i.Motivo != "" {
+			d["motivo"] = i.Motivo
+		}
+		es = append(es, central.EventoExterno{Tipo: tipo, Detalhe: d})
+	}
+	return es
+}
+
+// Assinatura identifica o desfecho de um resultado, para o daemon não repetir o que já registrou.
+func Assinatura(r Resultado) string {
+	var ps []string
+	if r.Recusa != "" {
+		ps = append(ps, "recusa:"+r.Recusa)
+	}
+	for _, i := range r.Itens {
+		if i.Estado != Ausente {
+			ps = append(ps, i.Estado+"|"+i.Tipo+"|"+i.Alvo+"|"+i.Motivo)
+		}
+	}
+	sort.Strings(ps)
+	return strings.Join(ps, "\n")
+}
+
+// conferirMRs consulta cada MR da US na forja (não confia no cache): todas precisam estar
+// mescladas e, havendo head aprovado gravado, o head mesclado tem de ser ele. Devolve as MRs
+// mescladas por branch de origem.
+func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos) (map[string]enriquecer.DetalheMR, string) {
+	if len(us.MRs) == 0 {
+		return nil, "a US não tem MR ligada (orq mr add)"
+	}
+	porBranch := map[string]enriquecer.DetalheMR{}
+	var faltam []string
+	for _, m := range us.MRs {
+		d, err := l.F.ConsultarMRDetalhe(ctx, m.URL)
+		if err != nil {
+			return nil, fmt.Sprintf("não consegui conferir a MR %s: %v", m.URL, err)
+		}
+		if d.Estado != "mesclada" {
+			faltam = append(faltam, fmt.Sprintf("%s (%s)", m.URL, d.Estado))
+			continue
+		}
+		if ap, ok := rec.Aprovados[m.URL]; ok && !strings.HasPrefix(d.Head, ap) {
+			return nil, fmt.Sprintf("o head mesclado da MR %s (%s) não é o aprovado (%s)", m.URL, d.Head, ap)
+		}
+		porBranch[d.Origem] = d
+	}
+	if len(faltam) > 0 {
+		return nil, "MR não mesclada: " + strings.Join(faltam, ", ")
+	}
+	return porBranch, ""
+}
+
+// planejar monta os itens, nesta ordem: panes, git (worktree, branch local, branch remota),
+// pasta temporária, Docker e, por último, a pasta de trabalho. Tudo depende dos panes, e a pasta
+// de trabalho (onde mora o recursos.json) só some se todo o resto foi resolvido: senão o daemon
+// esqueceria o que ficou.
+func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs map[string]enriquecer.DetalheMR) []*Item {
+	panes := l.planejarPanes(ctx, u, rec)
+	var itens []*Item
+	itens = append(itens, panes...)
+	for _, r := range rec.Repos {
+		for _, i := range l.planejarRepo(ctx, r, mrs) {
+			i.deps = append(i.deps, panes...)
+			itens = append(itens, i)
+		}
+	}
+	tmp := l.itemPasta("pasta_tmp", l.Raizes.Tmp, l.Raizes.PastaTmp(u), rec.Tmp, u)
+	tmp.deps = panes
+	itens = append(itens, tmp)
+	for _, i := range l.planejarDocker(ctx, "orq.us", RotuloUS(u)) {
+		i.deps = append(i.deps, panes...)
+		itens = append(itens, i)
+	}
+	trabalho := l.itemPasta("pasta_trabalho", l.Raizes.Trabalho, l.Raizes.PastaTrabalho(u), rec.Trabalho, u)
+	trabalho.deps = append([]*Item(nil), itens...)
+	itens = append(itens, trabalho)
+	propagar(itens)
+	return itens
+}
+
+// propagar marca como Preservado, já no plano, o item que depende de outro preservado: o
+// dry-run mostra o que de fato seria removido.
+func propagar(itens []*Item) {
+	for _, i := range itens {
+		if i.Estado != Remover {
+			continue
+		}
+		for _, d := range i.deps {
+			if d.Estado == Preservado || d.Estado == Falhou {
+				i.Estado, i.Motivo = Preservado, fmt.Sprintf("%s %s ficou preservado", d.Tipo, d.Alvo)
+				break
+			}
+		}
+	}
+}
+
+// executar roda os itens em Remover, na ordem. Um item só roda se todas as dependências
+// terminaram bem (Removido ou Ausente); senão fica Preservado.
+func (l *Limpador) executar(ctx context.Context, itens []*Item) {
+	for _, i := range itens {
+		if i.Estado != Remover {
+			continue
+		}
+		bloqueio := ""
+		for _, d := range i.deps {
+			if d.Estado != Removido && d.Estado != Ausente {
+				bloqueio = fmt.Sprintf("%s %s ficou %s", d.Tipo, d.Alvo, d.Estado)
+				break
+			}
+		}
+		if bloqueio != "" {
+			i.Estado, i.Motivo = Preservado, bloqueio
+			continue
+		}
+		err := i.exec(ctx)
+		var p preservar
+		switch {
+		case err == nil:
+			i.Estado = Removido
+		case errors.As(err, &p):
+			i.Estado, i.Motivo = Preservado, string(p)
+		default:
+			i.Estado, i.Motivo = Falhou, err.Error()
+		}
+	}
+}
+
+// itemPasta planeja a remoção de uma pasta derivada da raiz. declarado é o que o recursos.json
+// diz; diferente do derivado, a pasta é preservada.
+func (l *Limpador) itemPasta(tipo, raiz, caminho, declarado string, u refs.US) *Item {
+	it := &Item{Tipo: tipo, Alvo: caminho}
+	if declarado != "" && filepath.Clean(declarado) != caminho {
+		it.Estado, it.Motivo = Preservado, fmt.Sprintf("o recursos.json declara %s, fora do caminho derivado da raiz", declarado)
+		return it
+	}
+	existe, motivo := pastaSegura(raiz, caminho, u)
+	switch {
+	case motivo != "":
+		it.Estado, it.Motivo = Preservado, motivo
+	case !existe:
+		it.Estado = Ausente
+	default:
+		it.Estado = Remover
+		it.exec = func(context.Context) error {
+			// Confere de novo na hora: o plano pode ter ficado velho.
+			if _, motivo := pastaSegura(raiz, caminho, u); motivo != "" {
+				return preservar(motivo)
+			}
+			return removerArvore(caminho)
+		}
+	}
+	return it
+}
+
+// pastaSegura confere que caminho é <raiz>/<projeto>/TG-<ref> de verdade: não é symlink, e depois
+// de resolver os links do caminho e da raiz continua exatamente ali, abaixo da raiz.
+func pastaSegura(raiz, caminho string, u refs.US) (existe bool, motivo string) {
+	if raiz == "" || caminho == "" || !filepath.IsAbs(raiz) || !filepath.IsAbs(caminho) {
+		return false, "caminho vazio ou relativo"
+	}
+	st, err := os.Lstat(caminho)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, ""
+	}
+	if err != nil {
+		return false, "não consegui ler " + caminho + ": " + err.Error()
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		return false, caminho + " é um link simbólico"
+	}
+	if !st.IsDir() {
+		return false, caminho + " não é uma pasta"
+	}
+	rr, err := filepath.EvalSymlinks(raiz)
+	if err != nil {
+		return false, "não consegui resolver a raiz " + raiz + ": " + err.Error()
+	}
+	if rr == "/" || rr == filepath.Clean(os.Getenv("HOME")) {
+		return false, "a raiz " + raiz + " é " + rr
+	}
+	rc, err := filepath.EvalSymlinks(caminho)
+	if err != nil {
+		return false, "não consegui resolver " + caminho + ": " + err.Error()
+	}
+	esperado := filepath.Join(rr, u.Projeto, refs.Exibir(u.Ref))
+	if rc != esperado || !dentro(rr, rc) {
+		return false, fmt.Sprintf("%s resolve para %s, fora de %s", caminho, rc, esperado)
+	}
+	return true, ""
+}
+
+// removerArvore apaga a pasta e o que há nela. Pastas sem permissão de escrita (o cache de
+// módulos do Go, por exemplo) ganham u+rwx antes. Links simbólicos são apagados, nunca seguidos.
+func removerArvore(caminho string) error {
+	err := os.RemoveAll(caminho)
+	if err == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(caminho, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(p, 0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(caminho)
+}
+
+func erroUso(cause string) error {
+	return &output.Error{Code: "uso", Cause: cause, Exit: output.ExitUsage}
+}
