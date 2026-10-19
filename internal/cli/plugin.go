@@ -75,10 +75,12 @@ Mesmo backup e mesmo check de configurar.`,
 	doctor := &cobra.Command{
 		Use:   "doctor [--config <arquivo>]",
 		Short: "Diagnóstico: binários, daemon, plugin no Herdr, sidebar, teclas e banco",
-		Long: `Confere, sem mudar nada: os binários que o orq chama (herdr, glab, gh, taiga), o daemon
+		Long: `Confere, sem mudar nada: os binários que o orq chama (herdr, glab, gh, taiga, git, docker e go, com a
+origem do caminho e a comparação com o que o daemon em execução usa, lido de /proc), as raízes
+ORQ_STATE_DIR, ORQ_TRABALHO_DIR, ORQ_TMP_DIR e ORQ_LIMPEZA_AUTOMATICA, o daemon
 (trava daemon.lock no diretório de estado), o plugin orq registrado e habilitado no Herdr, as
 linhas da sidebar e as teclas no config.toml e o banco. "ok" é falso quando falta algo de que
-a Central precisa; glab, gh e taiga ausentes são só avisos.`,
+a Central precisa; as demais ferramentas ausentes são só avisos.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := caminho()
@@ -179,7 +181,7 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 	}
 	a.doctorAmbiente(add)
 	f := enriquecer.Ferramentas{Env: a.Env, OrigemVar: a.origemVar, Timeout: 10 * time.Second}
-	binarios := []string{"herdr", "glab", "gh", "taiga"}
+	binarios := ferramentasDoctor
 	for _, n := range binarios {
 		r, err := f.Resolver(n)
 		switch {
@@ -192,7 +194,6 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 			add("binario "+n, "aviso", err.Error())
 		}
 	}
-	a.doctorMesmoCaminho(add, binarios)
 	dir, err := central.DirPadrao(a.Env)
 	if err != nil {
 		add("estado", "erro", err.Error())
@@ -204,6 +205,9 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 		} else {
 			add("daemon", "erro", "nenhum orq daemon com o estado "+dir+": o plugin o sobe no início do servidor do Herdr; à mão, orq daemon --detach")
 		}
+	}
+	if err == nil {
+		a.doctorDaemonEShell(add, dir)
 	}
 	var pl struct {
 		Plugins []struct {
@@ -315,41 +319,6 @@ func (a *App) doctorAmbiente(add func(nome, estado, detalhe string)) {
 		return
 	}
 	add("orq.env", "ok", fmt.Sprintf("%s: %d chaves ORQ_ lidas", arq, len(a.arquivoEnv)))
-}
-
-// doctorMesmoCaminho compara o caminho que o daemon resolve com o do shell atual. O daemon
-// nasce do plugin, com o ambiente do servidor do Herdr: só o orq.env fornece ORQ_*, e uma
-// ORQ_*_BIN exportada no shell não chega a ele. O shell vê o ambiente do processo mais o orq.env.
-func (a *App) doctorMesmoCaminho(add func(nome, estado, detalhe string), nomes []string) {
-	daemon := enriquecer.Ferramentas{Timeout: 10 * time.Second, Env: func(k string) string {
-		if strings.HasPrefix(k, "ORQ_") {
-			return a.arquivoEnv[k]
-		}
-		if a.envProcesso != nil {
-			return a.envProcesso(k)
-		}
-		return a.Env(k)
-	}}
-	shell := enriquecer.Ferramentas{Env: a.Env}
-	var difere []string
-	for _, n := range nomes {
-		rd, errD := daemon.Resolver(n)
-		rs, errS := shell.Resolver(n)
-		switch {
-		case errD != nil && errS != nil:
-		case errD != nil:
-			difere = append(difere, fmt.Sprintf("%s: daemon não acha, shell usa %s", n, rs.Caminho))
-		case errS != nil:
-			difere = append(difere, fmt.Sprintf("%s: daemon usa %s, shell não acha", n, rd.Caminho))
-		case rd.Caminho != rs.Caminho:
-			difere = append(difere, fmt.Sprintf("%s: daemon usa %s, shell usa %s", n, rd.Caminho, rs.Caminho))
-		}
-	}
-	if len(difere) == 0 {
-		add("daemon e shell", "ok", "resolvem o mesmo caminho em "+strings.Join(nomes, ", "))
-		return
-	}
-	add("daemon e shell", "aviso", strings.Join(difere, "; ")+": ponha a variável ORQ_<NOME>_BIN no orq.env")
 }
 
 func textoDoctor(w io.Writer, d Doctor) error {

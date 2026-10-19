@@ -85,17 +85,20 @@ func TestLimparDryRunAchaGlabNoNixProfile(t *testing.T) {
 	env["ORQ_TMP_DIR"] = filepath.Join(t.TempDir(), "tmp")
 	env["HOME"] = t.TempDir()
 	env["USER"] = "ana"
+	// O herdr falso é só para o resto do limpar; o glab, o que importa, não tem variável.
+	_, herdr := novoHerdrCentral(t)
+	env["ORQ_HERDR_BIN"] = herdr["ORQ_HERDR_BIN"]
 	mr := "https://gitlab.exemplo.test/basis/proj/-/merge_requests/5"
 	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")
 	ok(t, env, "onda", "criar", "o", "--us", "13", "--ate", "merge")
 	ok(t, env, "mr", "add", "13", mr)
-	ok(t, env, "recursos", "gravar", "13", "--pane", "tg-13_executor")
+	ok(t, env, "recursos", "gravar", "13", "--pane", "tg-13_executor", "--aprovado", mr+"=abc1234")
 
 	log := filepath.Join(t.TempDir(), "glab.log")
 	scriptFalso(t, filepath.Join(env["HOME"], ".nix-profile", "bin", "glab"),
 		"echo \"$@\" >> '"+log+"'\necho '{\"state\":\"merged\",\"merged_at\":\"2026-10-19T10:00:00Z\",\"web_url\":\""+mr+"\",\"sha\":\"abc1234\",\"source_branch\":\"TG-13\",\"target_branch\":\"main\"}'\n")
 	r := rodar(t, env, "limpar", "13", "--dry-run")
-	if strings.Contains(r.err+r.out, "binario_ausente") {
+	if r.code != 0 || strings.Contains(r.err+r.out, "binario_ausente") {
 		t.Fatalf("não achou o glab: exit %d\nout %s\nerr %s", r.code, r.out, r.err)
 	}
 	b, err := os.ReadFile(log)
@@ -150,7 +153,7 @@ func TestDoctorOrigemEDaemonEShell(t *testing.T) {
 		t.Errorf("orq.env = %+v", it)
 	}
 	// O gh (e o herdr falso do teste) só existem em variáveis do shell: o daemon não as vê, e o doctor avisa.
-	if it := m["daemon e shell"]; it.Estado != "aviso" || !strings.Contains(it.Detalhe, "gh: daemon") || strings.Contains(it.Detalhe, "taiga:") {
+	if it := m["daemon e shell"]; it.Estado != "aviso" || !strings.Contains(it.Detalhe, "gh: o daemon") || strings.Contains(it.Detalhe, "taiga:") || !strings.Contains(it.Detalhe, "o daemon em execução não foi conferido") {
 		t.Errorf("daemon e shell = %+v", it)
 	}
 	// Com a variável no orq.env em vez do shell, os dois concordam.
@@ -159,7 +162,14 @@ func TestDoctorOrigemEDaemonEShell(t *testing.T) {
 	delete(env, "ORQ_HERDR_BIN")
 	escreverMkdir(t, filepath.Join(home, ".config", "herdr", "plugins", "config", "orq", ArquivoAmbientePlugin),
 		"ORQ_TAIGA_BIN="+porArquivo+"\nORQ_GH_BIN="+porVariavel+"\nORQ_HERDR_BIN="+herdrFalso+"\n")
-	if it := lerDoctor()["daemon e shell"]; it.Estado != "ok" {
+	// Sem daemon para conferir, é simulação: nunca "ok", e o item diz que não conferiu.
+	if it := lerDoctor()["daemon e shell"]; it.Estado != "aviso" || !strings.Contains(it.Detalhe, "a simulação dá o mesmo caminho") || !strings.Contains(it.Detalhe, "não foi conferido") {
 		t.Errorf("daemon e shell = %+v", it)
+	}
+	// git, docker e go entram na origem e na comparação.
+	for _, n := range []string{"git", "docker", "go"} {
+		if _, ok := lerDoctor()["binario "+n]; !ok {
+			t.Errorf("sem item binario %s", n)
+		}
 	}
 }

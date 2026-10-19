@@ -36,6 +36,10 @@ type App struct {
 	envProcesso func(string) string
 	arquivoEnv  map[string]string
 
+	// Os testes do doctor trocam: a raiz do /proc (padrão /proc) e a conferência do daemon.
+	procRaiz        string
+	confirmarDaemon func(dir, pid string) error
+
 	ran       bool
 	output    string
 	flagCoord string

@@ -116,6 +116,10 @@ func (a Ambiente) confirmarDaemon(pid string) error {
 	return nil
 }
 
+// ConfirmarDaemon é confirmarDaemon para quem só quer saber se o pid da trava de dir é o daemon
+// do orq daquele diretório (o orq plugin doctor, antes de ler o ambiente dele). Não manda sinal.
+func ConfirmarDaemon(dir, pid string) error { return Ambiente{Dir: dir}.confirmarDaemon(pid) }
+
 // seguraTrava diz se o pid é o dono de uma flock sobre o arquivo, lendo /proc/locks.
 func seguraTrava(pid int, arquivo string) bool {
 	st, err := os.Stat(arquivo)
