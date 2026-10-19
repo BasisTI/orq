@@ -24,6 +24,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `internal/herdrcfg`: edição do `config.toml` do Herdr para `orq plugin configurar|desconfigurar` (lexer que preserva o texto, backup, `herdr config check` e restauração).
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
 - `internal/herdrfalso`: herdr falso dos testes de `orq central abrir` (árvore de splits em JSON, regras do Herdr 0.9.3). Os testes de `internal/cli` o compilam uma vez (`go build`); não entra no binário `orq`.
+- `internal/upgrade`: o `orq upgrade` (go install, plugin, reinício do daemon e conferência de versões). Não abre o banco; o `version` de cada binário traz o commit e o `schema`.
 - `internal/refs`: parse de `projeto/312`, `TG-312`, `TG-312#P2` e URL de MR.
 - `internal/output`: envelope de erro `{"error":{"code","cause","recovery"}}` e códigos de saída.
 - `docs/snapshot.md`: contrato do `orq snapshot`.
@@ -38,6 +39,6 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - O plugin roda com o ambiente do servidor do Herdr (PATH mínimo): comandos do manifesto chamam `$HERDR_PLUGIN_ROOT/bin/orq` e `$HERDR_BIN_PATH`; `ORQ_*` para eles vem de `orq.env` no config-dir do plugin.
 - Teste da limpeza usa repositório git temporário, Herdr e Docker falsos e raízes (`ORQ_TRABALHO_DIR`, `ORQ_TMP_DIR`) temporárias: nunca rode `orq limpar` nem o daemon contra recursos reais para testar.
 - Não edite o `~/.config/herdr/config.toml` real em teste: use `--config` numa cópia.
-- Migration nova é arquivo novo; nunca edite uma já publicada.
+- Migration nova é arquivo novo; nunca edite uma já publicada. Toda migration declara no cabeçalho `-- orq:leitor-minimo N` e `-- orq:escritor-minimo N` (menor `schema` que ainda lê/escreve o banco migrado; sem diretiva vale o número dela): só aditiva e compatível com a escrita dos binários anteriores pode declarar um número menor que o seu. Veja o README, "Versão mínima de leitor".
 - Mudança que remove ou muda o sentido de um campo do snapshot sobe `versao` e atualiza `docs/snapshot.md`.
 - Commit: verbo no infinitivo e `orq #N` no final (ex.: `Criar o esqueleto da CLI orq orq #3`). Um PR por US, base `main`.

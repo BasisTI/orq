@@ -39,6 +39,7 @@ var VariavelBin = map[string]string{
 	"taiga":  "ORQ_TAIGA_BIN",
 	"git":    "ORQ_GIT_BIN",
 	"docker": "ORQ_DOCKER_BIN",
+	"go":     "ORQ_GO_BIN",
 }
 
 // Ferramentas resolve e roda os binários externos.
@@ -87,6 +88,13 @@ func (f Ferramentas) Caminho(nome string) (string, error) {
 		dirs = append(dirs, filepath.Join(home, ".local", "bin"), filepath.Join(home, "go", "bin"), filepath.Join(home, "bin"))
 	}
 	dirs = append(dirs, "/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+	if nome == "go" {
+		// Os mesmos lugares que scripts/build-plugin.sh procura.
+		dirs = append(dirs, "/usr/local/go/bin", "/usr/lib/go/bin")
+		if home := env("HOME"); home != "" {
+			dirs = append(dirs, filepath.Join(home, ".local", "go", "bin"), filepath.Join(home, "sdk", "go", "bin"))
+		}
+	}
 	for _, d := range dirs {
 		if p := filepath.Join(d, nome); executavel(p) {
 			return p, nil

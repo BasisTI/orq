@@ -12,11 +12,16 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/output"
+	"github.com/BasisTI/orq/internal/upgrade"
 	"github.com/spf13/cobra"
 )
 
 // Version é definida no build com -ldflags "-X github.com/BasisTI/orq/internal/cli.Version=...".
 var Version = "dev"
+
+// Commit é o commit completo do build, definido com -ldflags "-X github.com/BasisTI/orq/internal/cli.Commit=...".
+// Sem ele, vale o vcs.revision do go build ou o commit que a versão carrega (go install @ref).
+var Commit = ""
 
 // App carrega a E/S e o ambiente do processo, para os comandos serem testáveis.
 type App struct {
@@ -58,13 +63,14 @@ func (a *App) root() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			v := currentVersion()
-			return a.emit(map[string]string{"versao": v}, func(w io.Writer) error {
+			info := versaoInfo{Versao: v, Commit: currentCommit(v), Schema: central.Schema()}
+			return a.emit(info, func(w io.Writer) error {
 				_, err := fmt.Fprintln(w, "orq "+v)
 				return err
 			})
 		},
 	})
-	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd(), a.atualizarCmd(), a.daemonCmd(), a.tuiCmd(), a.focarCmd(), a.centralCmd(), a.pluginCmd(), a.limparCmd(), a.recursosCmd())
+	root.AddCommand(a.coordCmd(), a.ondaCmd(), a.usCmd(), a.mrCmd(), a.pendCmd(), a.snapshotCmd(), a.diarioCmd(), a.atualizarCmd(), a.daemonCmd(), a.tuiCmd(), a.focarCmd(), a.centralCmd(), a.pluginCmd(), a.limparCmd(), a.recursosCmd(), a.upgradeCmd())
 	return root
 }
 
@@ -133,7 +139,7 @@ func (a *App) store(ctx context.Context) (*central.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := central.Open(ctx, dir)
+	st, err := central.OpenCom(ctx, dir, central.Opcoes{AntesDeMigrar: a.avisarLeitores})
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +176,30 @@ func usoErr(format string, args ...any) error {
 
 func usoDe(err error) error {
 	return &output.Error{Code: "uso", Cause: err.Error(), Exit: output.ExitUsage}
+}
+
+// versaoInfo é a saída de orq version. O orq upgrade lê o commit para conferir se os binários
+// estão na mesma versão e o schema para saber se cada um abre o banco.
+type versaoInfo struct {
+	Versao string `json:"versao"`
+	Commit string `json:"commit,omitempty"`
+	Schema int    `json:"schema"`
+}
+
+// currentCommit prefere o ldflags, depois o vcs.revision do go build e, por fim, o commit que
+// a versão carrega (pseudo-versão do go install, git describe).
+func currentCommit(versao string) string {
+	if Commit != "" {
+		return Commit
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info != nil {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				return s.Value
+			}
+		}
+	}
+	return upgrade.CommitDe(versao)
 }
 
 // moduleVersion casa a versão de módulo que `go install …@versão` grava.

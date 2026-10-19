@@ -26,14 +26,33 @@ Precisa de Go 1.27 ou mais novo, também para o build do plugin. Não usa cgo. O
 
 ### Atualização
 
-O `orq` do `PATH` e o do plugin compartilham o mesmo banco, e uma migration é de mão única: quem abre o banco migra, e o binário anterior, que recusa um banco mais novo que ele, passa a sair com `versao_do_banco` (exit 4) em qualquer comando, inclusive no daemon e no TUI. A partir da migration 0003 (tom do projeto, US #10) atualize os dois binários juntos, logo em seguida um do outro:
+O `orq` do `PATH` (o do `go install`) e o do plugin do Herdr compartilham o mesmo banco, e uma migration é de mão única: quem abre o banco migra. Um comando atualiza tudo:
 
 ```bash
-go install github.com/BasisTI/orq/cmd/orq@latest          # o orq do PATH
-herdr plugin install BasisTI/orq --ref main --yes         # o orq do plugin (rebuild)
+orq upgrade [--ref main]
 ```
 
-Depois reinicie o daemon, que segue rodando com o binário antigo: pare o processo (o pid sai de `orq daemon --detach` com um daemon no ar e de `orq plugin doctor`; `kill <pid>` e ele limpa os tokens) e suba o novo com `orq daemon --detach`. Reiniciar o servidor do Herdr também o faz, mas não é preciso. Os panes `orq tui` já abertos pedem para ser fechados e abertos de novo. Um caminho de upgrade que atualize todos os binários de uma vez, e a leitura de um banco mais novo pelo binário antigo, ficam para depois.
+Ele roda `go install github.com/BasisTI/orq/cmd/orq@<ref>` (só quando existe um `orq` do `go install` que não é o mesmo arquivo que o do plugin) e `herdr plugin install BasisTI/orq --ref <ref> --yes`, e então reinicia o daemon: manda `SIGTERM` ao antigo, espera a trava `daemon.lock` soltar e sobe o novo com o mesmo ambiente e os mesmos `--tick` e `--intervalo-remoto`. No fim, confere que cada binário encontrado (`PATH`, `go install`, plugin) e o daemon em execução estão no mesmo commit; o que ficou para trás sai nomeado, com o motivo e se ainda abre o banco, e o comando termina com `upgrade_incompleto` (exit 4).
+
+- Uma falha no `go install` ou no plugin não impede a outra etapa. Se nenhum binário atualizou, o daemon nem é tocado; se algum atualizou, o daemon sobe a partir dele. Se o daemon novo não sobe, o comando volta ao daemon anterior (guarda uma cópia do binário dele durante a troca). O daemon que não solta a trava em 30 s fica como está: o upgrade não usa `SIGKILL`. Nada disso deixa o daemon parado, a não ser que nem o anterior volte, e então a etapa `daemon` diz `daemon PARADO`.
+- Rodar de novo só repete o que falta: o daemon que já roda a versão nova não é reiniciado.
+- Um `orq` do `PATH` que não é o do `go install` nem o do plugin não é atualizado, mas entra na conferência.
+- Os panes `orq tui` já abertos seguem com o binário antigo. O Herdr 0.9.3 não tem como reabrir um pane com outro comando, então o upgrade lista os pids e pede para fechá-los e abri-los de novo (`orq central abrir`).
+- O comando não abre o banco, então funciona mesmo quando o `orq` instalado recusa o banco com `versao_do_banco`. Não reinicia nem para o servidor do Herdr.
+- `orq version --output json` traz `versao`, `commit` e `schema`; é o que o upgrade lê de cada binário. O build do plugin (`scripts/build-plugin.sh`) grava o commit; o `go install` o traz na pseudo-versão.
+
+#### Versão mínima de leitor
+
+A versão de um `orq`, para ler o banco, é a última migration que ele embute (`schema`). Cada migration declara, em comentários do próprio `.sql`, a menor versão que ainda usa o banco migrado por ela:
+
+```sql
+-- orq:leitor-minimo 4     -- abre o banco e lê
+-- orq:escritor-minimo 5   -- também escreve
+```
+
+Sem diretiva, vale o número da própria migration (só abre quem a tem, como antes); `escritor-minimo` sem declaração também vale o número dela, de modo que declarar só o leitor deixa o binário anterior **ler, mas não escrever**. O banco guarda o maior valor de cada um entre as migrations aplicadas, em `banco_meta` (`leitor_minimo`, `escritor_minimo`), criada pela migration 0004 (que declara 4 e 4). Um `orq` abre um banco mais novo que ele, sem migrar, quando o `schema` dele é maior ou igual ao `leitor_minimo`: para escrever, também ao `escritor_minimo`; abaixo disso as escritas saem com `banco_somente_leitura` (exit 4). Abaixo do `leitor_minimo`, ou em banco mais novo sem `banco_meta` (anterior à 0004), o `orq` recusa com `versao_do_banco`. Os dois erros apontam para `orq upgrade`. Os binários anteriores à 0004 não conhecem nada disso e recusam qualquer banco mais novo que o deles.
+
+Antes de aplicar uma migration, o `orq` consulta `version` dos outros binários conhecidos (`PATH`, `go install`, plugin e o daemon em execução) e avisa no stderr os que deixam de abrir o banco, ou passam a abri-lo só para leitura, depois dela.
 
 ## Estado
 
@@ -89,7 +108,8 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq recursos reabrir <ref>` | Abre a rodada de correção depois do teste: sobe a geração do `recursos.json` e guarda as MRs de agora como encerradas. Rode **antes** de recriar o worktree. |
 | `orq limpar <ref> [--dry-run]` | Com todas as MRs da US mescladas, fecha os panes, remove o worktree, as branches, as pastas e os recursos Docker da US; o que não passa numa conferência fica preservado, com o motivo. `--dry-run` só mostra. |
 | `orq limpar --onda <id> [--dry-run]` | Remove os recursos Docker com o rótulo `orq.onda=<id>` de uma onda encerrada ou pronta para encerrar. |
-| `orq version` | Versão. |
+| `orq upgrade [--ref main]` | Atualiza o `orq` do `go install` e o do plugin, reinicia o daemon e confere que todos estão no mesmo commit (veja [Atualização](#atualização)). |
+| `orq version` | Versão, commit e `schema` (a última migration que o binário embute). |
 
 ### Daemon e enriquecedores
 
@@ -246,7 +266,7 @@ Depois do merge, o orq limpa sozinho o que o coordenador criou para a US, sem pe
 }
 ```
 
-Não há migration nova: o estado é esse arquivo e o diário. Por isso a atualização dos binários não precisa da ordem da seção [Atualização](#atualização); só o daemon antigo, que não limpa, precisa ser reiniciado para passar a limpar.
+Não há migration nova: o estado é esse arquivo e o diário. Por isso a atualização dos binários (`orq upgrade`) não depende de ordem; só o daemon antigo, que não limpa, precisa ser reiniciado para passar a limpar.
 
 **Convenção para os workers** (o coordenador põe nos pacotes):
 

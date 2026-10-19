@@ -26,11 +26,13 @@ if [ -z "$go_bin" ]; then
 fi
 
 versao=dev
+commit=
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
 	versao=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 	versao=${versao#v}
+	commit=$(git rev-parse HEAD 2>/dev/null || true)
 fi
 
 mkdir -p bin
-CGO_ENABLED=0 "$go_bin" build -trimpath -ldflags "-X github.com/BasisTI/orq/internal/cli.Version=$versao" -o bin/orq ./cmd/orq
+CGO_ENABLED=0 "$go_bin" build -trimpath -ldflags "-X github.com/BasisTI/orq/internal/cli.Version=$versao -X github.com/BasisTI/orq/internal/cli.Commit=$commit" -o bin/orq ./cmd/orq
 echo "orq: bin/orq $versao ($("$go_bin" version))"

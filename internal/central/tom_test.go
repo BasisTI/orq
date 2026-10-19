@@ -79,6 +79,9 @@ func TestMigracaoPreencheTons(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, "DROP TABLE projeto_tom"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(ctx, "DROP TABLE banco_meta"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
 		t.Fatal(err)
 	}

@@ -7,15 +7,12 @@ package central
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,9 +20,6 @@ import (
 	"github.com/BasisTI/orq/internal/output"
 	_ "modernc.org/sqlite"
 )
-
-//go:embed migrations/*.sql
-var migrations embed.FS
 
 // Arquivo é o nome do banco dentro do diretório de estado; ArquivoTrava serializa a abertura.
 const (
@@ -39,6 +33,9 @@ const busyTimeout = 15 * time.Second
 // Store é o acesso ao banco da Central.
 type Store struct {
 	db *sql.DB
+	// somenteLeitura vale quando o banco é mais novo que este orq e a sua migration declarou que
+	// quem tem uma versão menor que a dela não escreve (escritor-minimo). Veja versao.go.
+	somenteLeitura *EstadoVersao
 	// Now é o relógio; os testes o trocam.
 	Now func() time.Time
 }
@@ -65,6 +62,11 @@ func DirPadrao(env func(string) string) (string, error) {
 
 // Open abre (e cria, se preciso) o banco em dir e aplica as migrations pendentes.
 func Open(ctx context.Context, dir string) (*Store, error) {
+	return OpenCom(ctx, dir, Opcoes{})
+}
+
+// OpenCom é Open com as opções de Opcoes.
+func OpenCom(ctx context.Context, dir string, o Opcoes) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, &output.Error{Code: "estado_indisponivel", Cause: err.Error(), Recovery: "confira ORQ_STATE_DIR e as permissões do diretório", Exit: output.ExitUnexpected}
 	}
@@ -89,7 +91,7 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 		_ = db.Close()
 		return nil, ocupado(err, inicio)
 	}
-	if err := s.migrar(ctx); err != nil {
+	if err := s.migrar(ctx, o); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -100,62 +102,64 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 // migrar aplica, numa transação só, os arquivos NNNN_*.sql com número acima do user_version.
-func (s *Store) migrar(ctx context.Context) error {
-	entries, err := fs.ReadDir(migrations, "migrations")
+// Um banco mais novo que este orq só é aberto, sem migrar, se a migration que o levou até lá
+// declarou que esta versão ainda o lê (veja versao.go).
+func (s *Store) migrar(ctx context.Context, o Opcoes) error {
+	ms, err := listarMigrations(o.fonte())
 	if err != nil {
 		return err
 	}
-	type mig struct {
-		versao int
-		nome   string
-	}
-	var ms []mig
-	for _, e := range entries {
-		n, err := strconv.Atoi(strings.SplitN(e.Name(), "_", 2)[0])
-		if err != nil {
-			return fmt.Errorf("migration %s sem número", e.Name())
-		}
-		ms = append(ms, mig{n, e.Name()})
-	}
-	sort.Slice(ms, func(i, j int) bool { return ms[i].versao < ms[j].versao })
 	// Banco em dia não toma a trava de escrita: a maioria das aberturas é só leitura.
 	var atual int
 	inicio := time.Now()
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&atual); err != nil {
 		return ocupado(err, inicio)
 	}
-	if len(ms) > 0 && atual == ms[len(ms)-1].versao {
+	ultima := 0
+	if len(ms) > 0 {
+		ultima = ms[len(ms)-1].versao
+	}
+	if atual == ultima {
 		return nil
+	}
+	if atual > ultima {
+		return s.abrirMaisNovo(ctx, atual, ultima)
+	}
+	if o.AntesDeMigrar != nil {
+		leitor, escritor, err := s.declarado(ctx, ms, atual)
+		if err != nil {
+			return err
+		}
+		o.AntesDeMigrar(Migracao{De: atual, Para: ultima, LeitorMinimo: leitor, EscritorMinimo: escritor})
 	}
 	return s.escrever(ctx, func(tx *sql.Tx) error {
 		var atual int
 		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&atual); err != nil {
 			return err
 		}
-		if len(ms) > 0 && atual > ms[len(ms)-1].versao {
-			return &output.Error{Code: "versao_do_banco", Cause: fmt.Sprintf("o banco está na versão %d, mais nova que este orq (%d)", atual, ms[len(ms)-1].versao), Recovery: "atualize os dois binários: go install github.com/BasisTI/orq/cmd/orq@latest e herdr plugin install BasisTI/orq --ref main --yes; depois reinicie o daemon do plugin (orq daemon --detach, com o daemon antigo parado)", Exit: output.ExitConflict}
+		if atual > ultima {
+			return erroVersaoDoBanco(atual, ultima, 0)
 		}
 		for _, m := range ms {
 			if m.versao <= atual {
 				continue
 			}
-			b, err := migrations.ReadFile("migrations/" + m.nome)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, string(b)); err != nil {
+			if _, err := tx.ExecContext(ctx, m.sql); err != nil {
 				return fmt.Errorf("migration %s: %w", m.nome, err)
 			}
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.versao)); err != nil {
 				return err
 			}
 		}
-		return nil
+		return gravarVersoes(ctx, tx, ms, atual)
 	})
 }
 
 // escrever roda fn numa transação de escrita; o driver abre com BEGIN IMMEDIATE (_txlock).
 func (s *Store) escrever(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	if s.somenteLeitura != nil {
+		return s.erroSomenteLeitura()
+	}
 	inicio := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
