@@ -17,6 +17,7 @@ import (
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
+	"github.com/BasisTI/orq/internal/semdaemon"
 	_ "modernc.org/sqlite"
 )
 
@@ -34,7 +35,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := semdaemon.Main(m)
 	if binsDir != "" {
 		os.RemoveAll(binsDir)
 	}
@@ -104,6 +105,9 @@ func novaCasa(t *testing.T) *casa {
 	antigo, novo := binarios(t)
 	raiz := t.TempDir()
 	c := &casa{t: t, raiz: raiz, estado: filepath.Join(raiz, "estado"), antigo: antigo, novo: novo}
+	// O upgrade sobe um daemon novo por conta própria; este cleanup o para em qualquer teste,
+	// também quando o teste falha no meio. Roda antes do t.TempDir() apagar o estado.
+	t.Cleanup(c.pararDaemon)
 	c.goBin = filepath.Join(raiz, "go", "bin", "orq")
 	c.plugin = filepath.Join(raiz, "plugin", "bin", "orq")
 	c.path = filepath.Join(raiz, ".local", "bin", "orq")
@@ -180,7 +184,6 @@ func (c *casa) subirDaemon(bin string) string {
 	if err != nil || !ativo {
 		c.t.Fatalf("daemon não ativo: %v", err)
 	}
-	c.t.Cleanup(func() { c.pararDaemon() })
 	return pid
 }
 
