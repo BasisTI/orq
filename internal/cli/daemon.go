@@ -120,6 +120,7 @@ func textoAtualizar(w io.Writer, r enriquecer.Resultado) error {
 func (a *App) daemonCmd() *cobra.Command {
 	var tick, remoto time.Duration
 	var detach bool
+	var prontoFD int
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Mantém o cache e os tokens de sidebar vivos, em primeiro plano (um por máquina)",
@@ -130,8 +131,15 @@ um. Assina pane.agent_status_changed no socket do Herdr ($HERDR_SOCKET_PATH ou
 Só roda um por diretório de estado: o segundo sai com daemon_ativo. O log vai para o stderr.
 
 Com --detach (o startup do plugin), sobe o daemon como outro processo, numa sessão própria e
-com o log em daemon.log no diretório de estado, espera ele segurar a trava e sai. Se já há um
-daemon, não sobe outro e sai com sucesso dizendo o pid dele.`,
+com o log em daemon.log no diretório de estado, espera ele estar pronto — trava de daemon
+tomada, banco aberto e compatível com este orq — e sai. Se o filho sai antes (banco de versão
+que este orq não abre, por exemplo), o --detach falha com o erro dele, tirado do daemon.log. Se
+já há um daemon, não sobe outro e sai com sucesso dizendo o pid dele.
+
+Um daemon em funcionamento confere o banco a cada transação. Se outro processo migrar o banco
+para uma versão que este daemon não escreve (banco_somente_leitura) ou não lê (versao_do_banco),
+ele registra o erro no log, solta a trava e sai com código 4, em vez de ficar vivo sem escrever;
+rode orq upgrade para subir um daemon da versão nova.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := central.DirPadrao(a.Env)
@@ -148,6 +156,13 @@ daemon, não sobe outro e sai com sucesso dizendo o pid dele.`,
 					return err
 				})
 			}
+			var pronto *os.File
+			if prontoFD > 0 {
+				// Primeiro de tudo: o descritor do --detach não pode vazar para o herdr, o go e o
+				// resto dos subprocessos que o daemon lança.
+				syscall.CloseOnExec(prontoFD)
+				pronto = os.NewFile(uintptr(prontoFD), "pronto")
+			}
 			soltar, err := enriquecer.TravarDaemon(dir)
 			if err != nil {
 				return err
@@ -157,6 +172,11 @@ daemon, não sobe outro e sai com sucesso dizendo o pid dele.`,
 			defer parar()
 			e, err := a.enriquecedor(ctx)
 			if err != nil {
+				return err
+			}
+			// Só pronto quando o daemon já pode escrever: um banco que este orq só lê (ou não lê)
+			// faria o primeiro ciclo sair logo.
+			if err := e.St.ConferirEscrita(ctx); err != nil {
 				return err
 			}
 			d := &enriquecer.Daemon{E: e, Socket: enriquecer.CaminhoSocket(a.Env), Tick: tick, IntervaloRemoto: remoto, Log: a.Err}
@@ -169,12 +189,18 @@ daemon, não sobe outro e sai com sucesso dizendo o pid dele.`,
 					fmt.Fprintf(a.Err, "%s limpeza: %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 				}}
 			}
+			if pronto != nil {
+				_, _ = pronto.Write([]byte{1})
+				_ = pronto.Close()
+			}
 			return d.Rodar(ctx)
 		},
 	}
 	cmd.Flags().DurationVar(&tick, "tick", 5*time.Second, "intervalo da consulta ao Herdr e da conferência dos tokens")
 	cmd.Flags().DurationVar(&remoto, "intervalo-remoto", 15*time.Second, "intervalo com que MR e Taiga são olhados (cada um ainda respeita o TTL)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "sobe o daemon em segundo plano, com o log em daemon.log, e sai")
+	cmd.Flags().IntVar(&prontoFD, "pronto-fd", 0, "uso interno do --detach: descritor em que avisar que o banco abriu")
+	_ = cmd.Flags().MarkHidden("pronto-fd")
 	return cmd
 }
 
@@ -215,7 +241,19 @@ func (a *App) desacoplarDaemon(ctx context.Context, dir string, tick, remoto tim
 	if err != nil {
 		return r, err
 	}
-	cmd := exec.Command(exe, "daemon", "--tick", tick.String(), "--intervalo-remoto", remoto.String())
+	// O filho avisa por este pipe quando o banco abriu: só a trava de daemon não basta, porque
+	// ele ainda pode sair com versao_do_banco (ou esperar a trava de início de outro orq).
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return r, err
+	}
+	defer pr.Close()
+	var tamanhoLog int64
+	if st, err := lf.Stat(); err == nil {
+		tamanhoLog = st.Size()
+	}
+	cmd := exec.Command(exe, "daemon", "--tick", tick.String(), "--intervalo-remoto", remoto.String(), "--pronto-fd", "3")
+	cmd.ExtraFiles = []*os.File{pw}
 	// O filho recebe o ambiente do processo e, por cima, o ORQ_* que esta execução resolveu
 	// (inclusive o do orq.env do plugin), com o diretório de estado fixado.
 	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+dir)
@@ -226,33 +264,58 @@ func (a *App) desacoplarDaemon(ctx context.Context, dir string, tick, remoto tim
 	}
 	cmd.Stdout, cmd.Stderr = lf, lf
 	desacoplar(cmd)
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	_ = pw.Close()
+	if err != nil {
 		return r, &output.Error{Code: "daemon_nao_subiu", Cause: err.Error(), Recovery: "rode orq daemon em primeiro plano para ver o erro", Exit: output.ExitUnexpected}
 	}
 	saiu := make(chan error, 1)
 	go func() { saiu <- cmd.Wait() }()
-	limite := time.NewTimer(5 * time.Second)
+	pronto := make(chan bool, 1)
+	go func() {
+		var b [1]byte
+		n, _ := pr.Read(b[:])
+		pronto <- n == 1
+	}()
+	limite := time.NewTimer(prontidaoDaemon)
 	defer limite.Stop()
-	tique := time.NewTicker(50 * time.Millisecond)
-	defer tique.Stop()
 	for {
 		select {
 		case err := <-saiu:
-			// Saiu antes de segurar a trava. Outro --detach pode ter ganho a corrida.
+			// Saiu antes de ficar pronto. Outro --detach pode ter ganho a corrida.
 			if ativo, pid, _ := enriquecer.DaemonAtivo(dir); ativo {
 				r.Estado, r.PID = "ja_ativo", pid
 				return r, nil
 			}
-			return r, &output.Error{Code: "daemon_nao_subiu", Cause: fmt.Sprintf("o daemon saiu logo ao subir (%v)", err), Recovery: "veja " + log, Exit: output.ExitUnexpected}
-		case <-tique.C:
-			if ativo, pid, _ := enriquecer.DaemonAtivo(dir); ativo && pid == strconv.Itoa(cmd.Process.Pid) {
-				r.Estado, r.PID = "iniciado", pid
+			return r, &output.Error{Code: "daemon_nao_subiu", Cause: fmt.Sprintf("o daemon saiu ao subir (%v): %s", err, caudaDoLog(log, tamanhoLog)), Recovery: "veja " + log, Exit: output.ExitConflict}
+		case ok := <-pronto:
+			if ok {
+				r.Estado, r.PID = "iniciado", strconv.Itoa(cmd.Process.Pid)
 				return r, nil
 			}
+			// Pipe fechado sem aviso: o filho saiu, e o ramo acima traz o motivo.
+			pronto = nil
 		case <-limite.C:
-			return r, &output.Error{Code: "daemon_nao_subiu", Cause: "o daemon não segurou a trava em 5 s (pid " + strconv.Itoa(cmd.Process.Pid) + ")", Recovery: "veja " + log, Exit: output.ExitUnexpected}
+			return r, &output.Error{Code: "daemon_nao_subiu", Cause: fmt.Sprintf("o daemon (pid %d) não ficou pronto em %s: não abriu o banco", cmd.Process.Pid, prontidaoDaemon), Recovery: "veja " + log, Exit: output.ExitUnexpected}
 		case <-ctx.Done():
 			return r, ctx.Err()
 		}
 	}
+}
+
+// prontidaoDaemon é quanto o --detach espera o filho abrir o banco (inclui a fila da trava de
+// início e uma migration em andamento).
+const prontidaoDaemon = 20 * time.Second
+
+// caudaDoLog devolve o que o filho escreveu no log a partir de desde, em uma linha.
+func caudaDoLog(log string, desde int64) string {
+	b, err := os.ReadFile(log)
+	if err != nil || int64(len(b)) <= desde {
+		return "sem saída no log"
+	}
+	t := strings.Join(strings.Fields(string(b[desde:])), " ")
+	if r := []rune(t); len(r) > 600 {
+		t = string(r[len(r)-600:])
+	}
+	return t
 }

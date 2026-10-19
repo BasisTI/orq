@@ -79,8 +79,8 @@ func TestOpenReabreSemRemigrar(t *testing.T) {
 		}
 		var v int
 		var modo string
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 3 {
-			t.Fatalf("user_version = %d, %v", v, err)
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != Schema() {
+			t.Fatalf("user_version = %d (queria %d), %v", v, Schema(), err)
 		}
 		if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&modo); err != nil || modo != "wal" {
 			t.Fatalf("journal_mode = %q, %v", modo, err)

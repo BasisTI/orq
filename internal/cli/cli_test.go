@@ -475,13 +475,16 @@ func TestDiarioTomIdentificaOProjeto(t *testing.T) {
 	}
 }
 
-// O orq que encontra um banco mais novo que ele manda atualizar os dois binários e reiniciar o
-// daemon, não só rodar o go install.
-func TestBancoMaisNovoCitaOsDoisBinarios(t *testing.T) {
+// O orq que encontra um banco mais novo que ele manda rodar o orq upgrade.
+func TestBancoMaisNovoApontaOUpgrade(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a")
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db"))
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db")+"?_pragma=busy_timeout(15000)")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Sem banco_meta, o banco mais novo é recusado como sempre.
+	if _, err := db.Exec("DROP TABLE banco_meta"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
@@ -492,7 +495,7 @@ func TestBancoMaisNovoCitaOsDoisBinarios(t *testing.T) {
 	if r.code != 4 || !strings.Contains(r.err, "versao_do_banco") {
 		t.Fatalf("exit %d: %s", r.code, r.err)
 	}
-	for _, want := range []string{"go install", "herdr plugin install BasisTI/orq --ref main --yes", "daemon"} {
+	for _, want := range []string{"orq upgrade", "daemon"} {
 		if !strings.Contains(r.err, want) {
 			t.Errorf("recovery sem %q: %s", want, r.err)
 		}
