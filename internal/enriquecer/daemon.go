@@ -41,6 +41,9 @@ type Daemon struct {
 // Rodar segue até ctx acabar (SIGTERM/SIGINT no orq daemon) e, ao sair, relê o Herdr e limpa
 // os tokens que publicou e ainda têm o valor do orq. Falha de fonte não derruba o laço; só o erro do banco volta.
 func (d *Daemon) Rodar(ctx context.Context) error {
+	// Cancelar ao sair do laço por erro derruba também as goroutines auxiliares, que esperam o ctx.
+	ctx, cancelar := context.WithCancel(ctx)
+	defer cancelar()
 	tick := valorDur(d.Tick, 5*time.Second)
 	gatilho := make(chan struct{}, 1)
 	sinalizar := func() {
@@ -110,7 +113,13 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 			break
 		}
 	}
+	cancelar()
 	wg.Wait()
+	if falha != nil {
+		// Inclui banco_somente_leitura e versao_do_banco: outro processo migrou o banco para
+		// além deste daemon. Sai (e solta a trava) em vez de ficar vivo sem poder escrever.
+		d.logf("", "orq daemon sai por erro (%s): %v", output.AsError(falha).Code, falha)
+	}
 	// ctx já acabou: a limpeza ganha um prazo próprio.
 	fim, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -141,6 +150,9 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 // ciclo consulta o Herdr, confere os tokens e devolve os panes a assinar (nil se o Herdr
 // falhou e a lista não é confiável).
 func (d *Daemon) ciclo(ctx context.Context) ([]string, error) {
+	if err := d.E.St.ConferirEscrita(ctx); err != nil {
+		return nil, err
+	}
 	r, err := d.E.AtualizarHerdr(ctx)
 	if err != nil {
 		return nil, err

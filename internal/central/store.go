@@ -33,9 +33,9 @@ const busyTimeout = 15 * time.Second
 // Store é o acesso ao banco da Central.
 type Store struct {
 	db *sql.DB
-	// somenteLeitura vale quando o banco é mais novo que este orq e a sua migration declarou que
-	// quem tem uma versão menor que a dela não escreve (escritor-minimo). Veja versao.go.
-	somenteLeitura *EstadoVersao
+	// ultima é a última migration que este Store conhece (o Schema dele). Toda transação
+	// confere o banco contra ela, porque outro processo pode migrá-lo com este aberto. Veja versao.go.
+	ultima int
 	// Now é o relógio; os testes o trocam.
 	Now func() time.Time
 }
@@ -119,11 +119,12 @@ func (s *Store) migrar(ctx context.Context, o Opcoes) error {
 	if len(ms) > 0 {
 		ultima = ms[len(ms)-1].versao
 	}
+	s.ultima = ultima
 	if atual == ultima {
 		return nil
 	}
 	if atual > ultima {
-		return s.abrirMaisNovo(ctx, atual, ultima)
+		return s.compativel(ctx, s.db, false)
 	}
 	if o.AntesDeMigrar != nil {
 		leitor, escritor, err := s.declarado(ctx, ms, atual)
@@ -157,12 +158,15 @@ func (s *Store) migrar(ctx context.Context, o Opcoes) error {
 
 // escrever roda fn numa transação de escrita; o driver abre com BEGIN IMMEDIATE (_txlock).
 func (s *Store) escrever(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	if s.somenteLeitura != nil {
-		return s.erroSomenteLeitura()
-	}
 	inicio := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return ocupado(err, inicio)
+	}
+	// Com a trava de escrita já tomada: um banco migrado por outro processo depois da abertura
+	// pode ter passado a exigir mais de quem escreve.
+	if err := s.compativel(ctx, tx, true); err != nil {
+		_ = tx.Rollback()
 		return ocupado(err, inicio)
 	}
 	if err := fn(tx); err != nil {
@@ -180,6 +184,9 @@ func (s *Store) ler(ctx context.Context, fn func(tx *sql.Tx) error) error {
 		return ocupado(err, inicio)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.compativel(ctx, tx, false); err != nil {
+		return ocupado(err, inicio)
+	}
 	return ocupado(fn(tx), inicio)
 }
 

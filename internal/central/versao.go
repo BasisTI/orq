@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BasisTI/orq/internal/output"
 )
@@ -203,20 +204,44 @@ func gravarVersoes(ctx context.Context, tx *sql.Tx, ms []migracao, de int) error
 	return nil
 }
 
-// abrirMaisNovo decide o que fazer com um banco de versão atual, maior que a última migration
-// (ultima) deste binário: abrir, só para leitura ou recusar.
-func (s *Store) abrirMaisNovo(ctx context.Context, atual, ultima int) error {
-	leitor, escritor, ok, err := lerMeta(ctx, s.db)
+// compativel confere, na transação q, o banco contra o Schema deste Store (ultima). Banco até a
+// ultima migration é compatível. Um mais novo só abre se ultima >= leitor mínimo gravado nele
+// (versao_do_banco, também sem banco_meta) e só aceita escrita se ultima >= escritor mínimo
+// (banco_somente_leitura). Roda em toda transação, e não só na abertura: o daemon fica aberto
+// enquanto outro processo migra o banco.
+func (s *Store) compativel(ctx context.Context, q consultador, escrita bool) error {
+	var atual int
+	if err := q.QueryRowContext(ctx, "PRAGMA user_version").Scan(&atual); err != nil {
+		return err
+	}
+	if atual <= s.ultima {
+		return nil
+	}
+	leitor, escritor, ok, err := lerMeta(ctx, q)
 	if err != nil {
 		return err
 	}
-	if !ok || ultima < leitor {
-		return erroVersaoDoBanco(atual, ultima, leitor)
+	if !ok || s.ultima < leitor {
+		return erroVersaoDoBanco(atual, s.ultima, leitor)
 	}
-	if ultima < escritor {
-		s.somenteLeitura = &EstadoVersao{Banco: atual, LeitorMinimo: leitor, EscritorMinimo: escritor, Binario: ultima}
+	if escrita && s.ultima < escritor {
+		return erroSomenteLeitura(EstadoVersao{Banco: atual, LeitorMinimo: leitor, EscritorMinimo: escritor, Binario: s.ultima})
 	}
 	return nil
+}
+
+// ConferirEscrita falha com banco_somente_leitura ou versao_do_banco se o banco já não aceita
+// escrita deste orq. O daemon chama a cada ciclo: ele pode ficar muito tempo sem escrever (o
+// cache só grava o que mudou) e, sem a conferência, seguiria vivo depois de outro processo
+// migrar o banco.
+func (s *Store) ConferirEscrita(ctx context.Context) error {
+	inicio := time.Now()
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return ocupado(err, inicio)
+	}
+	defer func() { _ = tx.Rollback() }()
+	return ocupado(s.compativel(ctx, tx, true), inicio)
 }
 
 const recoveryUpgrade = "rode `orq upgrade`: ele atualiza o orq do go install e o do plugin do Herdr, reinicia o daemon e confere que todos ficaram na mesma versão"
@@ -229,17 +254,13 @@ func erroVersaoDoBanco(atual, ultima, leitor int) error {
 	return &output.Error{Code: "versao_do_banco", Cause: cause, Recovery: recoveryUpgrade, Exit: output.ExitConflict}
 }
 
-func (s *Store) erroSomenteLeitura() error {
-	e := s.somenteLeitura
+func erroSomenteLeitura(e EstadoVersao) error {
 	return &output.Error{Code: "banco_somente_leitura", Cause: fmt.Sprintf("o banco está na versão %d e só aceita escrita de orq que tenha a migration %d ou mais nova; este chega à %d e só lê", e.Banco, e.EscritorMinimo, e.Binario), Recovery: recoveryUpgrade, Exit: output.ExitConflict}
 }
 
 // Versoes devolve a versão do banco aberto e o que ele exige.
 func (s *Store) Versoes(ctx context.Context) (EstadoVersao, error) {
-	if s.somenteLeitura != nil {
-		return *s.somenteLeitura, nil
-	}
-	return lerEstado(ctx, s.db, Schema())
+	return lerEstado(ctx, s.db, s.ultima)
 }
 
 func lerEstado(ctx context.Context, q consultador, binario int) (EstadoVersao, error) {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/output"
 )
 
 // Daemon descreve o daemon em execução, lido da trava e de /proc; nil sem daemon. A versão sai
@@ -60,16 +61,83 @@ func argsDoDaemon(pid string) []string {
 	return out
 }
 
-// ehDaemon confere que o pid da trava é mesmo um `orq daemon`, para não mandar sinal a um pid
-// reaproveitado.
-func ehDaemon(pid string) bool {
-	b, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+// confirmarDaemon confere que o pid da trava é o daemon do orq deste diretório de estado, antes
+// de qualquer sinal: processo do mesmo usuário, executável chamado orq, `daemon` como
+// subcomando, ORQ_STATE_DIR (quando definido) igual ao alvo e dono da flock de daemon.lock
+// segundo /proc/locks. Na dúvida, recusa: um pid reaproveitado ou um arquivo de trava adulterado
+// não pode levar um SIGTERM a outro programa.
+func (a Ambiente) confirmarDaemon(pid string) error {
+	recusa := func(motivo string) error {
+		return &output.Error{
+			Code:     "daemon_alheio",
+			Cause:    fmt.Sprintf("o pid %q da trava de %s não é o daemon do orq deste diretório de estado: %s", pid, a.Dir, motivo),
+			Recovery: "nada foi sinalizado; confira com `ps` quem é esse processo e, se o daemon do orq morreu, apague o daemon.lock órfão e rode `orq upgrade` de novo",
+			Exit:     output.ExitConflict,
+		}
+	}
+	n, err := strconv.Atoi(pid)
+	if err != nil || n <= 1 {
+		return recusa("pid inválido")
+	}
+	raiz := filepath.Join("/proc", pid)
+	st, err := os.Stat(raiz)
+	if err != nil {
+		return recusa("o processo não existe")
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Getuid() {
+		return recusa("pertence a outro usuário")
+	}
+	exe, err := os.Readlink(filepath.Join(raiz, "exe"))
+	if err != nil {
+		return recusa("não consegui ler o executável")
+	}
+	if nome := filepath.Base(strings.TrimSuffix(exe, " (deleted)")); !strings.HasPrefix(nome, "orq") {
+		return recusa("o executável é " + exe)
+	}
+	b, err := os.ReadFile(filepath.Join(raiz, "cmdline"))
+	if err != nil {
+		return recusa("não consegui ler a linha de comando")
+	}
+	args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	if len(args) < 2 || args[1] != "daemon" {
+		return recusa("a linha de comando não é `orq daemon`")
+	}
+	for _, kv := range ambienteDoProcesso(pid) {
+		if v, ok := strings.CutPrefix(kv, "ORQ_STATE_DIR="); ok && filepath.Clean(v) != filepath.Clean(a.Dir) {
+			return recusa("ele usa o diretório de estado " + v)
+		}
+	}
+	if ativo, dono, _ := enriquecer.DaemonAtivo(a.Dir); !ativo || dono != pid {
+		return recusa("a trava não aponta para ele")
+	}
+	if !seguraTrava(n, filepath.Join(a.Dir, enriquecer.ArquivoTravaDaemon)) {
+		return recusa("ele não é o dono da flock de " + enriquecer.ArquivoTravaDaemon)
+	}
+	return nil
+}
+
+// seguraTrava diz se o pid é o dono de uma flock sobre o arquivo, lendo /proc/locks.
+func seguraTrava(pid int, arquivo string) bool {
+	st, err := os.Stat(arquivo)
 	if err != nil {
 		return false
 	}
-	args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
-	for _, a := range args[1:] {
-		if a == "daemon" {
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	b, err := os.ReadFile("/proc/locks")
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(l)
+		// "1: FLOCK  ADVISORY  WRITE 12345 08:01:131 0 EOF"
+		if len(f) < 6 || f[1] != "FLOCK" {
+			continue
+		}
+		partes := strings.Split(f[5], ":")
+		if f[4] == strconv.Itoa(pid) && partes[len(partes)-1] == strconv.FormatUint(sys.Ino, 10) {
 			return true
 		}
 	}
@@ -110,10 +178,10 @@ func copiarExecutavel(origem, destino string) error {
 // Parar manda SIGTERM ao daemon e espera a trava soltar. Não usa SIGKILL: o daemon limpa os
 // tokens de sidebar ao sair, e se ele não sai o upgrade o deixa rodando.
 func (a Ambiente) parar(ctx context.Context, pid string, espera time.Duration) error {
-	n, err := strconv.Atoi(pid)
-	if err != nil || n <= 1 || !ehDaemon(pid) {
-		return fmt.Errorf("o pid %q da trava do daemon não é de um orq daemon", pid)
+	if err := a.confirmarDaemon(pid); err != nil {
+		return err
 	}
+	n, _ := strconv.Atoi(pid)
 	p, err := os.FindProcess(n)
 	if err != nil {
 		return err
@@ -142,17 +210,26 @@ func (a Ambiente) parar(ctx context.Context, pid string, espera time.Duration) e
 // subir roda `<bin> daemon --detach` com o ambiente e os argumentos dados. Devolve o pid.
 func (a Ambiente) subir(ctx context.Context, bin string, env []string, args []string) (string, error) {
 	argv := append([]string{"daemon", "--detach", "--output", "json"}, args...)
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	out, err := rodarEm(ctx, "", append(env, "ORQ_STATE_DIR="+a.Dir), bin, argv...)
 	if err != nil {
-		return "", fmt.Errorf("%s daemon --detach: %w: %s", bin, err, resumo(out))
+		return "", fmt.Errorf("%s daemon --detach: %w: %s", bin, err, causaDe(out))
 	}
 	var r struct{ Estado, PID string }
 	if err := json.NewDecoder(bytes.NewReader([]byte(out))).Decode(&r); err != nil || r.PID == "" {
 		return "", fmt.Errorf("%s daemon --detach: resposta inesperada %s", bin, resumo(out))
 	}
 	return r.PID, nil
+}
+
+// causaDe tira da saída o `cause` do envelope de erro do filho (JSON), quando há; senão resume.
+func causaDe(out string) string {
+	var e struct{ Error struct{ Cause string } }
+	if json.Unmarshal([]byte(out), &e) == nil && e.Error.Cause != "" {
+		return resumo(e.Error.Cause)
+	}
+	return resumo(out)
 }
 
 func resumo(s string) string {

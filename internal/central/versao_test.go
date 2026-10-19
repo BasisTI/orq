@@ -252,3 +252,67 @@ func TestMigracaoConcorrenteRespeitaATrava(t *testing.T) {
 }
 
 func recoveryDe(err error) string { return output.AsError(err).Recovery }
+
+// Um Store aberto antes de outro processo migrar o banco (o daemon fica aberto o tempo todo)
+// confere o mínimo gravado a cada transação, não só ao abrir.
+func TestConexaoAbertaAntesDaMigrationRespeitaOEscritorMinimo(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	antigo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer antigo.Close()
+	if _, err := antigo.RegistrarCoord(ctx, Registro{Nome: "antes"}); err != nil {
+		t.Fatalf("antes da migration: %v", err)
+	}
+	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 4\n-- orq:escritor-minimo 5")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer novo.Close()
+
+	if _, err := antigo.RegistrarCoord(ctx, Registro{Nome: "depois"}); codigo(err) != "banco_somente_leitura" {
+		t.Fatalf("RegistrarCoord pela conexão antiga = %v, quero banco_somente_leitura", err)
+	}
+	if err := antigo.GravarCache(ctx, FonteHerdr, "", map[string]string{"k": "v"}, nil); codigo(err) != "banco_somente_leitura" {
+		t.Fatalf("GravarCache pela conexão antiga = %v, quero banco_somente_leitura", err)
+	}
+	// A leitura continua: o leitor mínimo é 4.
+	if _, err := antigo.Snapshot(ctx, false); err != nil {
+		t.Fatalf("leitura pela conexão antiga: %v", err)
+	}
+	if e := output.AsError(antigo.GravarCache(ctx, FonteHerdr, "", nil, nil)); !strings.Contains(e.Recovery, "orq upgrade") {
+		t.Fatalf("recovery = %q", e.Recovery)
+	}
+	if _, err := novo.RegistrarCoord(ctx, Registro{Nome: "novo"}); err != nil {
+		t.Fatalf("o orq novo escreve: %v", err)
+	}
+}
+
+// Quando a migration sobe o leitor mínimo, a conexão que perdeu a leitura falha com o erro
+// tipado em vez de ler tabelas de um esquema que não conhece.
+func TestConexaoAbertaAntesDaMigrationRespeitaOLeitorMinimo(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	antigo, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer antigo.Close()
+	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 5\n-- orq:escritor-minimo 5")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer novo.Close()
+
+	if _, err := antigo.Snapshot(ctx, false); codigo(err) != "versao_do_banco" {
+		t.Fatalf("leitura pela conexão antiga = %v, quero versao_do_banco", err)
+	}
+	if _, err := antigo.RegistrarCoord(ctx, Registro{Nome: "x"}); codigo(err) != "versao_do_banco" {
+		t.Fatalf("escrita pela conexão antiga = %v, quero versao_do_banco", err)
+	}
+	if e := output.AsError(antigo.GravarCache(ctx, FonteHerdr, "", nil, nil)); !strings.Contains(e.Recovery, "orq upgrade") {
+		t.Fatalf("recovery = %q", e.Recovery)
+	}
+}

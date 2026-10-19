@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -547,5 +549,147 @@ func TestUpgradeListaOsTUIsAbertos(t *testing.T) {
 	got := tuisEm(proc, commitNovo)
 	if len(got) != 1 || got[0].PID != "101" || got[0].Versao != versaoAntiga {
 		t.Fatalf("tuis = %+v", got)
+	}
+}
+
+// A2: o pid da trava só leva SIGTERM se for o daemon do orq deste diretório de estado.
+func TestPararRecusaProcessoQueNaoEODaemon(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("sem python3")
+	}
+	cmd := exec.Command(py, "-c", "import time; time.sleep(60)", "daemon")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	pid := strconv.Itoa(cmd.Process.Pid)
+
+	c := novaCasa(t)
+	// Mesmo com a linha de comando `daemon` e uma trava que cita o pid, não é um orq.
+	escrever(t, filepath.Join(c.estado, enriquecer.ArquivoTravaDaemon), pid+"\n", 0o600)
+	for _, dir := range []string{t.TempDir(), c.estado} {
+		err = Ambiente{Dir: dir}.parar(context.Background(), pid, time.Second)
+		if codigoDe(err) != "daemon_alheio" {
+			t.Fatalf("parar(%s) = %v, quero daemon_alheio", dir, err)
+		}
+	}
+	if err := syscall.Kill(cmd.Process.Pid, 0); err != nil {
+		t.Fatalf("o processo alheio foi sinalizado: %v", err)
+	}
+}
+
+// Um orq daemon de outro diretório de estado também não leva o sinal.
+func TestPararRecusaDaemonDeOutroEstado(t *testing.T) {
+	c := novaCasa(t)
+	pid := c.subirDaemon(c.plugin)
+	outro := t.TempDir()
+	escrever(t, filepath.Join(outro, enriquecer.ArquivoTravaDaemon), pid+"\n", 0o600)
+	if err := (Ambiente{Dir: outro}).parar(context.Background(), pid, time.Second); codigoDe(err) != "daemon_alheio" {
+		t.Fatalf("parar = %v, quero daemon_alheio", err)
+	}
+	if ativo, _, _ := enriquecer.DaemonAtivo(c.estado); !ativo {
+		t.Fatal("o daemon foi sinalizado")
+	}
+	// O do próprio diretório é aceito.
+	if err := c.ambiente().parar(context.Background(), pid, 10*time.Second); err != nil {
+		t.Fatalf("parar o daemon certo: %v", err)
+	}
+}
+
+// A3: o upgrade só anuncia sucesso com o banco aberto. Um daemon novo que sai ao abrir o banco
+// (aqui, de uma versão que nenhum binário conhece) faz o upgrade falhar com o erro do filho e
+// dizer que o daemon ficou parado.
+func TestUpgradeNaoConfirmaDaemonQueNaoAbriuOBanco(t *testing.T) {
+	c := novaCasa(t)
+	c.instalarNovo()
+	c.subirDaemon(c.plugin)
+
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '99'"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	// A trava de início presa por 1 s: o filho tem de esperar por ela antes de abrir o banco, e
+	// a trava de daemon que ele já segura não pode valer como "pronto".
+	f, err := os.OpenFile(filepath.Join(c.estado, "central.db.init.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(time.Second)
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+
+	r, err := c.executar(Opcoes{})
+	if codigoDe(err) != "upgrade_incompleto" || r.OK {
+		t.Fatalf("OK=%v erro=%v", r.OK, err)
+	}
+	e := etapa(r, "daemon")
+	if e.Estado != "falhou" || !strings.Contains(e.Detalhe, "versao_do_banco") || !strings.Contains(e.Detalhe, "PARADO") {
+		t.Fatalf("etapa daemon = %+v", e)
+	}
+	if ativo, _, _ := enriquecer.DaemonAtivo(c.estado); ativo {
+		t.Fatal("sobrou um daemon vivo que não abre o banco")
+	}
+}
+
+// Um daemon já no ar, com o banco migrado por outro processo para além do que ele escreve,
+// registra o erro, solta a trava e sai com 4, em vez de ficar vivo sem escrever.
+func TestDaemonSaiQuandoOBancoPassaAExigirMais(t *testing.T) {
+	for _, tc := range []struct{ nome, leitor, escritor, codigo string }{
+		{"escritor", "4", "99", "banco_somente_leitura"},
+		{"leitor", "99", "99", "versao_do_banco"},
+	} {
+		t.Run(tc.nome, func(t *testing.T) {
+			c := novaCasa(t)
+			var stderr strings.Builder
+			cmd := exec.Command(c.plugin, "daemon", "--tick", "200ms", "--intervalo-remoto", "1h")
+			cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+c.estado, "ORQ_HERDR_BIN=/nao/existe/herdr",
+				"HERDR_SOCKET_PATH="+filepath.Join(c.raiz, "sem.sock"))
+			cmd.Stderr = &stderr
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			saiu := make(chan error, 1)
+			go func() { saiu <- cmd.Wait() }()
+			defer func() { _ = cmd.Process.Kill() }()
+			for i := 0; i < 200; i++ {
+				if ativo, _, _ := enriquecer.DaemonAtivo(c.estado); ativo {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db")+"?_pragma=busy_timeout(5000)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '" + tc.leitor + "' WHERE chave = 'leitor_minimo'; UPDATE banco_meta SET valor = '" + tc.escritor + "' WHERE chave = 'escritor_minimo'"); err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
+			select {
+			case err := <-saiu:
+				ee, ok := err.(*exec.ExitError)
+				if !ok || ee.ExitCode() != 4 {
+					t.Fatalf("saída = %v, quero código 4", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("o daemon continuou vivo com o banco incompatível")
+			}
+			if !strings.Contains(stderr.String(), tc.codigo) || !strings.Contains(stderr.String(), "orq daemon sai por erro") {
+				t.Fatalf("log do daemon: %s", stderr.String())
+			}
+			if ativo, _, _ := enriquecer.DaemonAtivo(c.estado); ativo {
+				t.Fatal("a trava não soltou")
+			}
+		})
 	}
 }
