@@ -398,6 +398,8 @@ func TestUpgradeDaemonQueNaoParaContinuaRodando(t *testing.T) {
 	trava := filepath.Join(c.estado, enriquecer.ArquivoTravaDaemon)
 	// Um "daemon" que segura a trava e ignora o SIGTERM; o "daemon" no argv basta para ehDaemon.
 	cmd := exec.Command("flock", "-x", trava, "sh", "-c", `echo $$ > '`+trava+`'; trap "" TERM; while :; do sleep 0.1; done`, "daemon")
+	// O flock(1) lança o sh como filho: só o grupo de processos alcança os dois.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Skipf("sem flock(1): %v", err)
 	}

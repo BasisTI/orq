@@ -1,6 +1,13 @@
-// Package semdaemon é a rede de segurança dos testes que sobem um `orq daemon`, direta ou
-// indiretamente (upgrade, --detach, subprocesso): no fim da suíte do pacote, procura os daemons
-// ainda vivos que pertencem aos temporários dele, encerra e falha a suíte nomeando o teste.
+// Package semdaemon é a rede de segurança dos testes que sobem um `orq daemon`, ou qualquer
+// processo falso, direta ou indiretamente (upgrade, --detach, subprocesso): no fim da suíte do
+// pacote, procura os processos ainda vivos presos aos temporários dele, encerra e falha a suíte
+// nomeando o teste.
+//
+// A raiz é privada: Main cria, a cada execução, um diretório novo (os.MkdirTemp) e o põe no
+// TMPDIR, nunca varre o TMPDIR herdado. Tudo o que está sob ela foi criado por esta execução,
+// então qualquer processo do mesmo UID preso a ela (pela linha de comando, pelo executável ou
+// pelo ORQ_STATE_DIR) é alvo legítimo, seja ou não um orq. Processo de outro UID nunca é
+// sinalizado.
 //
 // Só os testes importam este pacote. Ele varre /proc, então só funciona em Linux; em outro
 // sistema a varredura não acha nada.
@@ -29,12 +36,8 @@ type Vazado struct {
 // só enxergue o que este pacote subiu e não o de outro pacote rodando em paralelo. Devolve o
 // código de saída para o os.Exit do TestMain: 1 se a suíte passou mas deixou daemon vivo.
 func Main(m *testing.M) int {
-	raiz, err := os.MkdirTemp("", "orq-teste-")
+	raiz, err := novaRaiz()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "semdaemon:", err)
-		return 1
-	}
-	if raiz, err = filepath.EvalSymlinks(raiz); err != nil {
 		fmt.Fprintln(os.Stderr, "semdaemon:", err)
 		return 1
 	}
@@ -51,6 +54,17 @@ func Main(m *testing.M) int {
 	return code
 }
 
+const prefixoRaiz = "orq-teste-"
+
+// novaRaiz cria o diretório privado desta execução, sempre novo, com o caminho real (sem links).
+func novaRaiz() (string, error) {
+	raiz, err := os.MkdirTemp("", prefixoRaiz)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(raiz)
+}
+
 // Relatorio descreve os daemons vazados, um por linha, com o teste que os deixou.
 func Relatorio(vazados []Vazado) string {
 	var b strings.Builder
@@ -61,8 +75,13 @@ func Relatorio(vazados []Vazado) string {
 	return b.String()
 }
 
-// Procurar acha os processos `orq daemon` vivos cujo executável ou ORQ_STATE_DIR estão sob raiz.
+// Procurar acha os processos do mesmo UID vivos cuja linha de comando, executável ou
+// ORQ_STATE_DIR estão sob raiz. Recusa (panic) uma raiz que não seja a privada de novaRaiz,
+// para que um TMPDIR herdado nunca vire alvo.
 func Procurar(raiz string) []Vazado {
+	if !strings.HasPrefix(filepath.Base(raiz), prefixoRaiz) {
+		panic("semdaemon: a raiz não é privada: " + raiz)
+	}
 	entradas, _ := os.ReadDir("/proc")
 	var out []Vazado
 	for _, e := range entradas {
@@ -95,30 +114,43 @@ func Encerrar(raiz string) []Vazado {
 	return vazados
 }
 
-// daemonSob diz se o pid é um `<exe> daemon ...` preso a raiz, e por qual caminho.
+// daemonSob diz se o pid é um processo do mesmo UID preso a raiz, e por qual caminho.
 func daemonSob(pid int, raiz string) (string, bool) {
 	dir := filepath.Join("/proc", strconv.Itoa(pid))
-	b, err := os.ReadFile(filepath.Join(dir, "cmdline"))
+	st, err := os.Stat(dir)
 	if err != nil {
 		return "", false
 	}
-	args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
-	if len(args) < 2 || args[1] != "daemon" {
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Getuid() {
 		return "", false
 	}
 	if exe, err := os.Readlink(filepath.Join(dir, "exe")); err == nil && sob(raiz, strings.TrimSuffix(exe, " (deleted)")) {
 		return strings.TrimSuffix(exe, " (deleted)"), true
 	}
-	env, err := os.ReadFile(filepath.Join(dir, "environ"))
-	if err != nil {
-		return "", false
+	if b, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
+		// Casa o caminho dentro de qualquer argumento, inclusive o texto de um `sh -c`.
+		if cmd := strings.ReplaceAll(strings.TrimRight(string(b), "\x00"), "\x00", " "); strings.Contains(cmd, raiz+string(filepath.Separator)) {
+			return emTorno(cmd, raiz), true
+		}
 	}
-	for _, kv := range strings.Split(string(env), "\x00") {
-		if v, ok := strings.CutPrefix(kv, "ORQ_STATE_DIR="); ok && sob(raiz, v) {
-			return v, true
+	if env, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
+		for _, kv := range strings.Split(string(env), "\x00") {
+			if v, ok := strings.CutPrefix(kv, "ORQ_STATE_DIR="); ok && sob(raiz, v) {
+				return v, true
+			}
 		}
 	}
 	return "", false
+}
+
+// emTorno devolve do texto o caminho que começa na raiz, até o próximo espaço ou aspa.
+func emTorno(texto, raiz string) string {
+	i := strings.Index(texto, raiz)
+	fim := strings.IndexAny(texto[i:], " '\"")
+	if fim < 0 {
+		return texto[i:]
+	}
+	return texto[i : i+fim]
 }
 
 func sob(raiz, caminho string) bool {
