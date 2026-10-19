@@ -671,6 +671,7 @@ func TestDaemonSaiQuandoOBancoPassaAExigirMais(t *testing.T) {
 				}
 				time.Sleep(25 * time.Millisecond)
 			}
+			esperarBanco(t, c.estado)
 			alterarBanco(t, c.estado, "UPDATE banco_meta SET valor = '"+tc.leitor+"' WHERE chave = 'leitor_minimo'",
 				"UPDATE banco_meta SET valor = '"+tc.escritor+"' WHERE chave = 'escritor_minimo'", "PRAGMA user_version = 99")
 			select {
@@ -765,6 +766,24 @@ func TestTravaNaLinhaConfereODispositivo(t *testing.T) {
 // alterarBanco aplica comandos ao banco de um diretório de estado por fora da Store, enquanto um
 // daemon de teste pode estar escrevendo nele: a conexão espera a trava (busy_timeout) e toma a de
 // escrita de uma vez (_txlock=immediate), numa transação só.
+// esperarBanco espera o daemon criar o banco: ele pega a trava antes de abrir e migrar o
+// central.db, então a trava ativa não basta para alterar o banco.
+func esperarBanco(t *testing.T, dir string) {
+	t.Helper()
+	for i := 0; i < 400; i++ {
+		if db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "central.db")+"?mode=ro&_pragma=busy_timeout(5000)"); err == nil {
+			var n int
+			err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'banco_meta'").Scan(&n)
+			db.Close()
+			if err == nil && n == 1 {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("o daemon não criou o banco")
+}
+
 func alterarBanco(t *testing.T, dir string, comandos ...string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "central.db")+"?_pragma=busy_timeout(15000)&_txlock=immediate")
