@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -158,6 +159,8 @@ type Item struct {
 	Nome    string `json:"nome"`
 	Estado  string `json:"estado"` // ok, aviso, erro
 	Detalhe string `json:"detalhe"`
+	// Origem, nos binários, diz de onde veio o caminho: variavel, orq.env, HERDR_BIN_PATH ou diretorio.
+	Origem string `json:"origem,omitempty"`
 }
 
 // Doctor é a saída de orq plugin doctor.
@@ -169,23 +172,27 @@ type Doctor struct {
 func (a *App) doctor(ctx context.Context, config string) Doctor {
 	d := Doctor{OK: true, Itens: []Item{}}
 	add := func(nome, estado, detalhe string) {
-		d.Itens = append(d.Itens, Item{nome, estado, detalhe})
+		d.Itens = append(d.Itens, Item{Nome: nome, Estado: estado, Detalhe: detalhe})
 		if estado == "erro" {
 			d.OK = false
 		}
 	}
-	f := enriquecer.Ferramentas{Env: a.Env, Timeout: 10 * time.Second}
-	for _, n := range []string{"herdr", "glab", "gh", "taiga"} {
-		p, err := f.Caminho(n)
+	a.doctorAmbiente(add)
+	f := enriquecer.Ferramentas{Env: a.Env, OrigemVar: a.origemVar, Timeout: 10 * time.Second}
+	binarios := []string{"herdr", "glab", "gh", "taiga"}
+	for _, n := range binarios {
+		r, err := f.Resolver(n)
 		switch {
 		case err == nil:
-			add("binario "+n, "ok", p)
+			add("binario "+n, "ok", r.Caminho)
+			d.Itens[len(d.Itens)-1].Origem = r.Origem
 		case n == "herdr":
 			add("binario "+n, "erro", err.Error())
 		default:
 			add("binario "+n, "aviso", err.Error())
 		}
 	}
+	a.doctorMesmoCaminho(add, binarios)
 	dir, err := central.DirPadrao(a.Env)
 	if err != nil {
 		add("estado", "erro", err.Error())
@@ -287,10 +294,72 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 	return d
 }
 
+// origemVar diz "orq.env" para uma variável que só o arquivo fornece, "" para a do processo.
+func (a *App) origemVar(k string) string {
+	if a.envProcesso != nil && a.envProcesso(k) == "" && a.arquivoEnv[k] != "" {
+		return enriquecer.OrigemOrqEnv
+	}
+	return ""
+}
+
+// doctorAmbiente mostra o orq.env que os comandos leem.
+func (a *App) doctorAmbiente(add func(nome, estado, detalhe string)) {
+	dir := DirConfigPlugin(a.Env)
+	if dir == "" {
+		add("orq.env", "aviso", "sem HERDR_PLUGIN_CONFIG_DIR, XDG_CONFIG_HOME nem HOME: o arquivo não é lido")
+		return
+	}
+	arq := filepath.Join(dir, ArquivoAmbientePlugin)
+	if _, err := os.Stat(arq); err != nil {
+		add("orq.env", "ok", arq+" não existe (opcional)")
+		return
+	}
+	add("orq.env", "ok", fmt.Sprintf("%s: %d chaves ORQ_ lidas", arq, len(a.arquivoEnv)))
+}
+
+// doctorMesmoCaminho compara o caminho que o daemon resolve com o do shell atual. O daemon
+// nasce do plugin, com o ambiente do servidor do Herdr: só o orq.env fornece ORQ_*, e uma
+// ORQ_*_BIN exportada no shell não chega a ele. O shell vê o ambiente do processo mais o orq.env.
+func (a *App) doctorMesmoCaminho(add func(nome, estado, detalhe string), nomes []string) {
+	daemon := enriquecer.Ferramentas{Timeout: 10 * time.Second, Env: func(k string) string {
+		if strings.HasPrefix(k, "ORQ_") {
+			return a.arquivoEnv[k]
+		}
+		if a.envProcesso != nil {
+			return a.envProcesso(k)
+		}
+		return a.Env(k)
+	}}
+	shell := enriquecer.Ferramentas{Env: a.Env}
+	var difere []string
+	for _, n := range nomes {
+		rd, errD := daemon.Resolver(n)
+		rs, errS := shell.Resolver(n)
+		switch {
+		case errD != nil && errS != nil:
+		case errD != nil:
+			difere = append(difere, fmt.Sprintf("%s: daemon não acha, shell usa %s", n, rs.Caminho))
+		case errS != nil:
+			difere = append(difere, fmt.Sprintf("%s: daemon usa %s, shell não acha", n, rd.Caminho))
+		case rd.Caminho != rs.Caminho:
+			difere = append(difere, fmt.Sprintf("%s: daemon usa %s, shell usa %s", n, rd.Caminho, rs.Caminho))
+		}
+	}
+	if len(difere) == 0 {
+		add("daemon e shell", "ok", "resolvem o mesmo caminho em "+strings.Join(nomes, ", "))
+		return
+	}
+	add("daemon e shell", "aviso", strings.Join(difere, "; ")+": ponha a variável ORQ_<NOME>_BIN no orq.env")
+}
+
 func textoDoctor(w io.Writer, d Doctor) error {
 	for _, it := range d.Itens {
 		marca := map[string]string{"ok": "ok   ", "aviso": "aviso", "erro": "ERRO "}[it.Estado]
-		if _, err := fmt.Fprintf(w, "%s  %-20s %s\n", marca, it.Nome, q(it.Detalhe)); err != nil {
+		detalhe := q(it.Detalhe)
+		if it.Origem != "" {
+			detalhe += " (" + it.Origem + ")"
+		}
+		if _, err := fmt.Fprintf(w, "%s  %-20s %s\n", marca, it.Nome, detalhe); err != nil {
 			return err
 		}
 	}

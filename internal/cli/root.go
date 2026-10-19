@@ -31,6 +31,11 @@ type App struct {
 	Env    func(string) string
 	OutTTY bool
 
+	// envProcesso e arquivoEnv são o que compõe Env: o ambiente do processo e as chaves do
+	// orq.env. Só o doctor os separa; nil quando a App não nasceu de Main.
+	envProcesso func(string) string
+	arquivoEnv  map[string]string
+
 	ran       bool
 	output    string
 	flagCoord string
@@ -76,7 +81,8 @@ func (a *App) root() *cobra.Command {
 
 // Main roda a CLI e devolve o código de saída.
 func Main(args []string, in io.Reader, out, errOut io.Writer, env func(string) string, outTTY bool) int {
-	a := &App{In: in, Out: out, Err: errOut, Env: comAmbientePlugin(env), OutTTY: outTTY}
+	comArquivo, arquivo := ambientePlugin(env)
+	a := &App{In: in, Out: out, Err: errOut, Env: comArquivo, OutTTY: outTTY, envProcesso: env, arquivoEnv: arquivo}
 	return a.Run(args)
 }
 

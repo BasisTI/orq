@@ -12,7 +12,10 @@ if [ -z "$go_bin" ]; then
 	go_bin=$(command -v go 2>/dev/null || true)
 fi
 if [ -z "$go_bin" ]; then
+	usuario=${USER:-$(id -un 2>/dev/null || true)}
 	for c in /usr/local/go/bin/go "$HOME/go/bin/go" "$HOME/.local/go/bin/go" "$HOME/sdk/go/bin/go" \
+		"$HOME/.nix-profile/bin/go" "/etc/profiles/per-user/$usuario/bin/go" \
+		/nix/var/nix/profiles/default/bin/go /run/current-system/sw/bin/go \
 		/home/linuxbrew/.linuxbrew/bin/go /opt/homebrew/bin/go /usr/lib/go/bin/go /usr/bin/go; do
 		if [ -x "$c" ]; then
 			go_bin=$c
@@ -21,7 +24,7 @@ if [ -z "$go_bin" ]; then
 	done
 fi
 if [ -z "$go_bin" ]; then
-	echo "orq: go não encontrado (PATH, /usr/local/go/bin, ~/go/bin, /home/linuxbrew/.linuxbrew/bin…); instale Go 1.27+ ou defina ORQ_GO" >&2
+	echo "orq: go não encontrado (PATH, /usr/local/go/bin, ~/go/bin, ~/.nix-profile/bin, /home/linuxbrew/.linuxbrew/bin…); instale Go 1.27+ ou defina ORQ_GO" >&2
 	exit 1
 fi
 

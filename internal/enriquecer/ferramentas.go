@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +48,12 @@ var VariavelBin = map[string]string{
 type Ferramentas struct {
 	// Env é o ambiente usado para resolver os caminhos (os testes trocam).
 	Env func(string) string
+	// OrigemVar diz de onde veio uma variável do Env: "orq.env" quando ela só existe no arquivo,
+	// vazio quando é do processo. Só serve a Resolver; nil trata tudo como do processo.
+	OrigemVar func(string) string
+	// Raiz substitui "/" nos diretórios do Nix (/etc/profiles, /nix, /run); vazio é "/". Os
+	// testes trocam.
+	Raiz string
 	// Timeout de cada chamada; zero usa 30 s.
 	Timeout time.Duration
 }
@@ -63,44 +71,99 @@ func (f *Falha) Error() string { return f.Codigo + ": " + f.Mensagem }
 
 func (f *Falha) cache() *central.Erro { return &central.Erro{Codigo: f.Codigo, Mensagem: f.Mensagem} }
 
+// Origens possíveis de um caminho resolvido.
+const (
+	OrigemVariavel  = "variavel"       // ORQ_<NOME>_BIN no ambiente do processo
+	OrigemOrqEnv    = "orq.env"        // ORQ_<NOME>_BIN vinda do orq.env
+	OrigemHerdrBin  = "HERDR_BIN_PATH" // só o herdr
+	OrigemDiretorio = "diretorio"      // um dos diretórios de instalação conhecidos
+)
+
+// Resolucao é um binário achado e de onde veio o caminho.
+type Resolucao struct {
+	Caminho string `json:"caminho"`
+	Origem  string `json:"origem"`
+}
+
 // Caminho resolve o binário: a variável ORQ_<NOME>_BIN, depois $HERDR_BIN_PATH (só o herdr) e,
-// por fim, os diretórios de instalação conhecidos. O PATH do processo não entra: num pane ou
-// numa ação de plugin ele não tem ~/.local/bin.
+// por fim, os diretórios de instalação conhecidos (veja Diretorios). O PATH do processo não
+// entra: num pane ou numa ação de plugin ele não tem ~/.local/bin.
 func (f Ferramentas) Caminho(nome string) (string, error) {
+	r, err := f.Resolver(nome)
+	return r.Caminho, err
+}
+
+// Resolver é Caminho com a origem do caminho.
+func (f Ferramentas) Resolver(nome string) (Resolucao, error) {
 	env := f.env()
 	variavel := VariavelBin[nome]
 	if v := env(variavel); v != "" {
 		if !filepath.IsAbs(v) {
-			return "", &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s=%q não é caminho absoluto", variavel, v)}
+			return Resolucao{}, &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s=%q não é caminho absoluto", variavel, v)}
 		}
 		if !executavel(v) {
-			return "", &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s aponta %s, que não existe ou não é executável", variavel, v)}
+			return Resolucao{}, &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s aponta %s, que não existe ou não é executável", variavel, v)}
 		}
-		return v, nil
+		origem := OrigemVariavel
+		if f.OrigemVar != nil && f.OrigemVar(variavel) != "" {
+			origem = f.OrigemVar(variavel)
+		}
+		return Resolucao{v, origem}, nil
 	}
 	if nome == "herdr" {
 		if v := env("HERDR_BIN_PATH"); v != "" && filepath.IsAbs(v) && executavel(v) {
-			return v, nil
+			return Resolucao{v, OrigemHerdrBin}, nil
 		}
 	}
-	var dirs []string
-	if home := env("HOME"); home != "" {
-		dirs = append(dirs, filepath.Join(home, ".local", "bin"), filepath.Join(home, "go", "bin"), filepath.Join(home, "bin"))
+	dirs := f.Diretorios(nome)
+	for _, d := range dirs {
+		if p := filepath.Join(d, nome); executavel(p) {
+			return Resolucao{p, OrigemDiretorio}, nil
+		}
 	}
+	return Resolucao{}, &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s não encontrado em %s; defina %s com o caminho absoluto", nome, strings.Join(dirs, ", "), variavel)}
+}
+
+// Diretorios devolve, em ordem, os diretórios em que a ferramenta é procurada depois das
+// variáveis: ~/.local/bin, ~/go/bin e ~/bin; os do Nix (~/.nix-profile/bin,
+// /etc/profiles/per-user/$USER/bin, /nix/var/nix/profiles/default/bin e
+// /run/current-system/sw/bin); linuxbrew, homebrew, /usr/local/bin, /usr/bin e /bin; e, para o
+// go, os lugares que scripts/build-plugin.sh também procura.
+func (f Ferramentas) Diretorios(nome string) []string {
+	env := f.env()
+	home := env("HOME")
+	var dirs []string
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".local", "bin"), filepath.Join(home, "go", "bin"), filepath.Join(home, "bin"))
+		dirs = append(dirs, filepath.Join(home, ".nix-profile", "bin"))
+	}
+	raiz := f.Raiz
+	if raiz == "" {
+		raiz = "/"
+	}
+	if u := f.usuario(); u != "" {
+		dirs = append(dirs, filepath.Join(raiz, "etc", "profiles", "per-user", u, "bin"))
+	}
+	dirs = append(dirs, filepath.Join(raiz, "nix", "var", "nix", "profiles", "default", "bin"), filepath.Join(raiz, "run", "current-system", "sw", "bin"))
 	dirs = append(dirs, "/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
 	if nome == "go" {
-		// Os mesmos lugares que scripts/build-plugin.sh procura.
 		dirs = append(dirs, "/usr/local/go/bin", "/usr/lib/go/bin")
-		if home := env("HOME"); home != "" {
+		if home != "" {
 			dirs = append(dirs, filepath.Join(home, ".local", "go", "bin"), filepath.Join(home, "sdk", "go", "bin"))
 		}
 	}
-	for _, d := range dirs {
-		if p := filepath.Join(d, nome); executavel(p) {
-			return p, nil
-		}
+	return dirs
+}
+
+// usuario é o nome do usuário para /etc/profiles/per-user: $USER ou, sem ele, o do uid.
+func (f Ferramentas) usuario() string {
+	if u := f.env()("USER"); u != "" {
+		return u
 	}
-	return "", &Falha{Codigo: ErrBinarioAusente, Mensagem: fmt.Sprintf("%s não encontrado em %s; defina %s com o caminho absoluto", nome, strings.Join(dirs, ", "), variavel)}
+	if u, err := user.LookupId(strconv.Itoa(os.Getuid())); err == nil {
+		return u.Username
+	}
+	return ""
 }
 
 // Rodar chama a ferramenta e devolve o stdout. Saída diferente de zero, binário ausente e tempo
