@@ -527,3 +527,25 @@ func TestResultadoSerializaEmJSON(t *testing.T) {
 		t.Fatalf("%s %v", b, err)
 	}
 }
+
+// Um `orq tui` aberto com o binário antigo é listado para ser reaberto; o do binário novo, não.
+func TestUpgradeListaOsTUIsAbertos(t *testing.T) {
+	antigo, novo := binarios(t)
+	proc := t.TempDir()
+	tui := func(pid, exe string, args ...string) {
+		if err := os.MkdirAll(filepath.Join(proc, pid), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		escrever(t, filepath.Join(proc, pid, "cmdline"), strings.Join(append([]string{"/x/orq"}, args...), "\x00")+"\x00", 0o644)
+		if err := os.Symlink(exe, filepath.Join(proc, pid, "exe")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tui("101", antigo, "tui", "--todos")
+	tui("102", novo, "tui", "--coord", "a")
+	tui("103", antigo, "daemon", "--tick", "5s") // não é tui
+	got := tuisEm(proc, commitNovo)
+	if len(got) != 1 || got[0].PID != "101" || got[0].Versao != versaoAntiga {
+		t.Fatalf("tuis = %+v", got)
+	}
+}

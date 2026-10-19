@@ -233,10 +233,12 @@ func (a Ambiente) atraso(b *Binario, r *Resultado) string {
 	m := fmt.Sprintf("está em %s (versão %s) e a referência é %s", abrev(b.Commit), b.Versao, abrev(r.Referencia))
 	if r.Banco != nil {
 		schema := b.Schema
-		if schema == 0 {
-			m += "; é anterior ao leitor mínimo e só abre banco até a sua própria versão"
+		if schema == 0 && r.Banco.Banco > 3 {
+			m += fmt.Sprintf("; é anterior ao leitor mínimo: NÃO abre o banco (versão %d)", r.Banco.Banco)
+		} else if schema == 0 {
+			m += fmt.Sprintf("; é anterior ao leitor mínimo: ainda abre o banco (versão %d), mas não abrirá o da próxima migration", r.Banco.Banco)
 		} else if !r.Banco.PodeLer(schema) {
-			m += fmt.Sprintf("; NÃO abre o banco (versão %d, exige orq com migrations até a %d, este chega à %d)", r.Banco.Banco, r.Banco.LeitorMinimo, schema)
+			m += fmt.Sprintf("; NÃO abre o banco (versão %d, exige orq com a migration %d ou mais nova, este chega à %d)", r.Banco.Banco, r.Banco.LeitorMinimo, schema)
 		} else if !r.Banco.PodeEscrever(schema) {
 			m += "; abre o banco só para leitura"
 		}
@@ -317,9 +319,11 @@ func (a Ambiente) reiniciarDaemon(ctx context.Context, r *Resultado, o Opcoes, b
 	// Candidatos: os binários que ficaram na versão nova, o do plugin primeiro (é o que o
 	// startup do Herdr usa), e por último o que rodava antes.
 	var candidatos []string
+	vistos := map[*Binario]bool{}
 	for _, rot := range []string{RotuloPlugin, RotuloGoInstall, RotuloPATH} {
 		for _, b := range bs {
-			if b.tem(rot) && b.Erro == "" && MesmoCommit(b.Commit, r.Referencia) {
+			if b.tem(rot) && !vistos[b] && b.Erro == "" && MesmoCommit(b.Commit, r.Referencia) {
+				vistos[b] = true
 				candidatos = append(candidatos, b.Caminho)
 			}
 		}

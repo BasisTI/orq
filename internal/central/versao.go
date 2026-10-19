@@ -224,14 +224,14 @@ const recoveryUpgrade = "rode `orq upgrade`: ele atualiza o orq do go install e 
 func erroVersaoDoBanco(atual, ultima, leitor int) error {
 	cause := fmt.Sprintf("o banco está na versão %d, mais nova que este orq (%d)", atual, ultima)
 	if leitor > 0 {
-		cause = fmt.Sprintf("o banco está na versão %d e só abre em orq com as migrations até a %d; este chega à %d", atual, leitor, ultima)
+		cause = fmt.Sprintf("o banco está na versão %d e só abre em orq que tenha a migration %d ou mais nova; este chega à %d", atual, leitor, ultima)
 	}
 	return &output.Error{Code: "versao_do_banco", Cause: cause, Recovery: recoveryUpgrade, Exit: output.ExitConflict}
 }
 
 func (s *Store) erroSomenteLeitura() error {
 	e := s.somenteLeitura
-	return &output.Error{Code: "banco_somente_leitura", Cause: fmt.Sprintf("o banco está na versão %d e só aceita escrita de orq com as migrations até a %d; este chega à %d e só lê", e.Banco, e.EscritorMinimo, e.Binario), Recovery: recoveryUpgrade, Exit: output.ExitConflict}
+	return &output.Error{Code: "banco_somente_leitura", Cause: fmt.Sprintf("o banco está na versão %d e só aceita escrita de orq que tenha a migration %d ou mais nova; este chega à %d e só lê", e.Banco, e.EscritorMinimo, e.Binario), Recovery: recoveryUpgrade, Exit: output.ExitConflict}
 }
 
 // Versoes devolve a versão do banco aberto e o que ele exige.
