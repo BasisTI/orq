@@ -31,6 +31,14 @@ type No struct {
 type Pane struct {
 	Rotulo string   `json:"rotulo"`
 	Argv   []string `json:"argv,omitempty"` // processo em primeiro plano; vazio é o shell
+	// Status é o agent_status do agente do pane (idle, done, working, blocked); vazio, sem agente.
+	// Nome é o nome do agente. Prompts são os textos que herdr agent prompt entregou.
+	Status  string   `json:"status,omitempty"`
+	Nome    string   `json:"nome,omitempty"`
+	Prompts []string `json:"prompts,omitempty"`
+	// Fixo: o prompt não muda o status (o agente fica parado), para os testes que não podem
+	// mexer no estado enquanto um daemon de verdade o lê.
+	Fixo bool `json:"fixo,omitempty"`
 }
 
 type Estado struct {
@@ -48,7 +56,12 @@ func (e *Estado) Salvar(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "estado.json"), b, 0o644)
+	// Atômico: um teste lê o estado enquanto o daemon chama o herdr falso.
+	tmp := filepath.Join(dir, ".estado.json.tmp")
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "estado.json"))
 }
 
 func Ler(dir string) (*Estado, error) {
@@ -401,6 +414,34 @@ func Main(args []string, dir string) int {
 	case "pane run":
 		if !e.TUINaoSobe {
 			e.Panes[rest[0]].Argv = desaspar(rest[1])
+		}
+		return res(map[string]any{})
+	case "agent get", "agent prompt":
+		alvo := rest[0]
+		var id string
+		for pid, p := range e.Panes {
+			if p.Status != "" && (pid == alvo || p.Nome == alvo) {
+				id = pid
+			}
+		}
+		if id == "" {
+			// Como o herdr de verdade: o erro em JSON vai para o stderr, com saída 1.
+			b, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "agent_not_found", "message": "agent target " + alvo + " not found"}})
+			fmt.Fprintln(os.Stderr, string(b))
+			return 1
+		}
+		p := e.Panes[id]
+		if args[1] == "get" {
+			return res(map[string]any{"type": "agent_info", "agent": map[string]any{"pane_id": id, "name": p.Nome, "agent_status": p.Status}})
+		}
+		if p.Status == "blocked" {
+			b, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "agent_blocked", "message": "agent is blocked"}})
+			fmt.Fprintln(os.Stderr, string(b))
+			return 1
+		}
+		p.Prompts = append(p.Prompts, rest[1])
+		if !p.Fixo {
+			p.Status = "working"
 		}
 		return res(map[string]any{})
 	case "pane process-info":

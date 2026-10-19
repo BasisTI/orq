@@ -56,6 +56,8 @@ Sem diretiva, vale o número da própria migration (só abre quem a tem, como an
 
 **Daemon.** O daemon fica aberto o tempo todo e confere o banco a cada ciclo. Se outro processo migrar o banco para além do que ele escreve (`banco_somente_leitura`) ou lê (`versao_do_banco`), ele registra `orq daemon sai por erro (<código>)` no log, solta a trava e sai com exit 4, em vez de ficar vivo sem escrever; `orq upgrade` sobe o daemon da versão nova.
 
+**Depois do merge da #15 (migration 0005), rode `orq upgrade`.** A 0005 declara `leitor-minimo 4` e `escritor-minimo 5`: o `orq` 4 (inclusive o daemon do plugin) ainda lê o banco, mas não escreve. Um daemon 4 diante do banco 5 sai com `banco_somente_leitura` (exit 4), e o `--detach` dele falha com `daemon_nao_subiu`; sem o `upgrade`, o daemon não importa as pendências nem avisa ninguém.
+
 Antes de aplicar uma migration, o `orq` consulta `version` dos outros binários conhecidos (`PATH`, `go install`, plugin e o daemon em execução) e avisa no stderr os que deixam de abrir o banco, ou passam a abri-lo só para leitura, depois dela.
 
 ## Estado
@@ -94,13 +96,16 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). |
 | `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. |
-| `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre a pendência e imprime o id (`TG-312#P2`). |
-| `orq pend resolver <ref>#P<n> [--resposta "…"]` | Resolve a pendência. |
-| `orq pend list [--abertas] [--coord X] [--onda N]` | Lista as pendências. |
+| `orq pend importar <arquivo>` | Importa o arquivo de pendência (veja [Pendências com contexto](#pendências-com-contexto-e-resposta-pela-web)), como o daemon faz a cada 5 s; para quando o daemon está parado. |
+| `orq pend ver <ref>#P<n>` | A pendência inteira: detalhe, opções, resposta e quem a deu, histórico e origem. Aceita `projeto/312#P2`. |
+| `orq pend responder <ref>#P<n> [--opcao N] ["texto"]` | A resposta da pessoa pelo chat, igual à da web, com `respondida_por = chat`. Só o coordenador usa. |
+| `orq pend resolver <ref>#P<n> [--resposta "…"]` | Resolve a pendência. Sem `--resposta`, vale a que a pessoa registrou (o texto dela ou `opção N (título)`). |
+| `orq pend list [--abertas\|--respondidas\|--resolvidas] [--coord X] [--onda N] [--projeto P]` | Lista as pendências. `--abertas` inclui as respondidas que ainda não foram resolvidas. |
+| `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre uma pendência só com o título, sem detalhe (o caminho antigo; o normal é o arquivo) e imprime o id (`TG-312#P2`). |
 | `orq diario [--us <ref>] [--onda N] [--coord X] [--limite 50]` | Eventos gravados, do mais antigo ao mais novo (toda escrita gera um). |
 | `orq snapshot [--incluir-encerradas] [--json]` | Estado consolidado em JSON versionado (`--json` é aceito, mas a saída já é sempre JSON); contrato em [`docs/snapshot.md`](docs/snapshot.md). |
 | `orq atualizar [--fonte herdr\|mr\|taiga] [--forcar]` | Consulta as fontes uma vez (todas, sem `--fonte`; repetível ou `mr,taiga`), grava o cache e, com o Herdr entre elas, confere os tokens de sidebar. Cada chave respeita o TTL; `--forcar` ignora o TTL e a suspensão por autenticação. |
-| `orq daemon [--tick 5s] [--intervalo-remoto 15s] [--detach]` | Mantém o cache e os tokens vivos, em primeiro plano, até SIGTERM/SIGINT. Um por máquina. `--detach` sobe o daemon noutro processo (sessão própria, log em `daemon.log` no diretório de estado), espera ele abrir o banco e sai (se o filho sai antes, falha com o erro dele); com um daemon já no ar, só diz o pid dele. |
+| `orq daemon [--tick 5s] [--intervalo-remoto 15s] [--detach] [--web unix:<caminho>\|127.0.0.1:<porta>] [--web-url URL] [--web-cabecalho H]` | Mantém o cache e os tokens vivos, em primeiro plano, até SIGTERM/SIGINT. Um por máquina. Importa as pendências e avisa o coordenador; com `--web`, serve a página das pendências. `--detach` sobe o daemon noutro processo (sessão própria, log em `daemon.log` no diretório de estado), espera ele abrir o banco e sai (se o filho sai antes, falha com o erro dele); com um daemon já no ar, só diz o pid dele. |
 | `orq tui [--coord X \| --todos] [--intervalo 2s]` | A Central no terminal (veja "TUI"). |
 | `orq central abrir [--nome Central] [--sem-foco]` | Cria ou reaproveita o workspace Central com um pane `orq tui --coord X` por coordenador com onda aberta. |
 | `orq focar [<pane>\|<url>]` | `herdr agent focus` no pane, dado pelo id ou por `https://orq.local/pane/<id>`; sem argumento, lê `$HERDR_PLUGIN_CLICKED_URL` (a ação `focar-pane`). |
@@ -140,6 +145,81 @@ Os nomes `orq` e `orq_mrs` são do orq; `mrs_prontas`, `story` e `fase` são da 
 
 Só pane e workspace que existem recebem token. No Herdr o token é por nome, não por fonte, então a propriedade vem do próprio orq: ele registra um token só depois de publicá-lo com sucesso, e o token continua sendo dele enquanto o Herdr mostrar o último valor que ele publicou. Um token ausente é (re)publicado. Um valor de outro produtor no mesmo nome não é adotado, sobrescrito nem limpo; vira aviso (`avisos` em `orq atualizar`, uma linha no log do daemon). O que deixou de valer só é limpo (`--clear-token`) se ainda tem o valor do orq; na saída, o daemon relê o Herdr antes de limpar.
 
+### Pendências com contexto e resposta pela web
+
+Uma pendência é uma pergunta à pessoa: dúvida, autorização ou decisão. O worker (ou o coordenador) não a registra com um resumo de uma linha: ele grava um **arquivo**, e o daemon o importa.
+
+**Onde.** O worker grava em `<pasta da rodada>/pendencias/<slug>.md` (por exemplo `~/tmp/orquestrador/orq/TG-15/implementacao/r1/pendencias/decisao-yaml.md`); o coordenador, em `<ORQ_TRABALHO_DIR>/<projeto>/TG-<ref>/pendencias/<slug>.md`. O projeto e a US saem do caminho, não do conteúdo, e a US precisa estar numa onda aberta. O slug tem minúsculas, dígitos, `-` e `_` (até 64).
+
+**Formato.** Frontmatter em YAML e o detalhe em markdown:
+
+```markdown
+---
+tipo: decisao            # duvida | autorizacao | decisao
+titulo: Qual biblioteca de YAML?     # uma linha
+autor: tg-15_executor
+opcoes:
+  - id: 1
+    titulo: yaml.v3
+    descricao: estável, sem manutenção
+  - id: 2
+    titulo: go.yaml.in/yaml/v3
+    descricao: o fork mantido
+    recomendada: true
+---
+## Contexto
+## Pergunta
+## Recomendação           (obrigatória em decisão)
+## O que fica bloqueado
+## Evidências             (caminhos, URLs de MR/pipeline, SHAs)
+```
+
+- `decisao` pede 2 a 10 opções e no máximo uma `recomendada`; `autorizacao` não traz opções (a Central cria `1 Autorizo` e `2 Não autorizo`); `duvida` aceita opções (2 ou mais) ou nenhuma. Campo desconhecido no frontmatter é recusado.
+- Contexto, Pergunta, O que fica bloqueado e Evidências são obrigatórias e não podem ficar vazias; o texto do comentário entre parênteses no título da seção é ignorado. O detalhe (o markdown) tem no máximo 64 KiB; o arquivo todo, no máximo 96 KiB.
+
+**Importação.** O worker grava `.<slug>.md.tmp` e faz `rename` para `<slug>.md`: arquivo oculto ou terminado em `.tmp` é ignorado. A cada tick do daemon (5 s) ele procura `<ORQ_TRABALHO_DIR>/*/TG-*/pendencias/*.md` e `<ORQ_TRABALHO_DIR>/*/TG-*/*/*/pendencias/*.md`. Um symlink que sai do `ORQ_TRABALHO_DIR` é recusado (`symlink_fora_da_raiz`). Resultado, ao lado do arquivo:
+
+- válido: a Central numera e grava a pendência e cria `<slug>.registrada.json` com `{"id","chave","url"}` (`TG-15#P1`, `orq/15#P1` e a página, se `ORQ_WEB_URL`/`--web-url` está definido; senão só o caminho `/p/orq/15/1`);
+- inválido: cria `<slug>.erro.txt` com o motivo e a linha (`linha 12: seção ## Pergunta ausente`). O erro some quando a importação der certo. Pendência de US fora de onda aberta também vira erro.
+- idempotente por `slug` + US: o mesmo arquivo de novo não cria outra pendência. Se o arquivo **mudar** depois do registro, a pendência não muda: o diário ganha um `pend.arquivo_alterado` (uma vez por conteúdo), e o TUI e a página avisam. Editar uma pendência registrada está fora do escopo: abra outra.
+
+`orq pend importar <arquivo>` roda o mesmo código, para quando o daemon está parado (sai com `pendencia_invalida`, exit 2, e cria o `.erro.txt`, se o arquivo não vale).
+
+**Estados.** Derivados das colunas: *aberta* (`aberta = 1`, sem resposta), *respondida* (`aberta = 1`, com `respondida_em`) e *resolvida* (`aberta = 0`). A respondida continua contando como aberta para encerrar a onda. A resposta pode ser trocada até a pendência ser resolvida: cada troca é um `pend.responder` no diário e zera o aviso ao coordenador. As pendências antigas (abertas por `pend add`) aparecem só com o título e a marca `sem detalhe`.
+
+**Avisos.** O daemon avisa o coordenador da US pelo `herdr agent prompt` (a única escrita dele no Herdr além dos tokens), por uma interface (`Avisador`, com a implementação do Herdr e uma nula):
+
+- ao importar: `[orq] <projeto> TG-<ref> pendência P<n> aberta: <título> — <url>`;
+- quando a pessoa responde: `[orq] <projeto> TG-<ref> pendência P<n> respondida: opção <id> (<título da opção>) — leia com orq pend ver <chave>`. O texto livre da pessoa **não** vai no prompt: o coordenador o lê com `orq pend ver`.
+
+Só com o coordenador `idle` ou `done` (`herdr agent get`); senão, tenta no ciclo seguinte. No máximo um aviso por coordenador por ciclo, e `avisada_em` (ou `abertura_avisada_em`) evita o duplicado; a troca de resposta gera um aviso novo. Se o pane do coordenador não tem mais agente (`agent_not_found`), o daemon grava `pend.aviso_falhou` (uma vez), o TUI mostra `[respondida, sem coordenador]` e o aviso sai quando um coordenador reaparecer no pane. A resposta pelo chat (`orq pend responder`) já nasce avisada: quem a grava é o coordenador. Sem o `herdr` (ou com o Avisador nulo), o aviso fica devido e nada é marcado.
+
+**Servidor web.** `orq daemon --web unix:<caminho>` (`--web unix:` usa `$XDG_RUNTIME_DIR/orq/web.sock`, modo 0600, pasta 0700) ou `--web 127.0.0.1:<porta>` para uso local; qualquer outro endereço é recusado. Sem `--web`, o daemon não abre servidor. A web abre antes da prontidão do `--detach`, depois do banco e do limpador; socket que não abre (`web_nao_abriu`, exit 4) é falha de partida. `ORQ_WEB`, `ORQ_WEB_URL` e `ORQ_WEB_CABECALHO` (no ambiente ou no `orq.env` do plugin) são o padrão de `--web`, `--web-url` e `--web-cabecalho`; `--detach` repassa as três ao filho. `ORQ_WEB_URL` também vale para `orq pend importar`, `orq pend ver` e para o link do TUI: use o mesmo valor em todos.
+
+| Rota | Conteúdo |
+|---|---|
+| `GET /` | abertas e respondidas, filtros `?coord=&projeto=&onda=`; recarrega a cada 30 s |
+| `GET /p/<projeto>/<ref>/<n>` | o detalhe renderizado, as opções como botões de rádio (a recomendada com selo, nenhuma marcada), o campo de texto, o histórico de respostas, o estado e os links da US no Taiga e das MRs; sem recarga automática |
+| `POST /p/<projeto>/<ref>/<n>/responder` | grava e redireciona (post/redirect/get) |
+| `GET /historico?pagina=N` | as resolvidas, 20 por página |
+| `GET /saude` | `ok` se o banco responde e aceita escrita deste `orq` |
+| `GET /estilo.css` | o CSS embutido (a CSP só aceita `style-src 'self'`) |
+
+As páginas são renderizadas no servidor (`html/template`), tema claro, pensadas para a largura de um celular; os formulários são POST e não pedem JS. O CSS e os modelos vão embutidos no binário; a web não serve arquivo do disco nem o JSON do `snapshot`.
+
+**Segurança.**
+
+- *Quem responde.* Atrás do Caddy, no socket Unix, o usuário autenticado chega no cabeçalho `X-Orq-User` (`--web-cabecalho` troca o nome) e vira `respondida_por`. No socket Unix, **requisição sem o cabeçalho é recusada** (401; só `/saude` passa), porque quer dizer que não passou pela autenticação. Em TCP o cabeçalho é ignorado (qualquer processo local o forjaria) e `respondida_por = local`; o `Host` precisa ser `127.0.0.1`, `localhost` ou `[::1]` com a porta certa (421 senão). O chat grava `chat`.
+- *Origem.* `http.CrossOriginProtection`: POST de outra origem é recusado (403). O formulário só aceita `application/x-www-form-urlencoded`.
+- *Conteúdo.* O markdown vai pelo goldmark sem `WithUnsafe`: HTML bruto sai escapado (visível, nunca ativo), e só links `http`, `https`, `mailto`, âncora e caminho relativo sobrevivem (`javascript:`, `data:` e `//host` viram `#`); imagem perde o endereço. Título, opções e respostas são escapados pelo `html/template`.
+- *Cabeçalhos.* `Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+- *Limites.* Corpo do POST até 16 KiB (413), resposta até 8 KiB (413), caracteres de controle recusados (400; a quebra de linha e a tabulação passam).
+- *Log.* Só método, rota (o padrão, `/p/{projeto}/{ref}/{n}`, sem o caminho nem a query) e status.
+
+**Caddy, relay e credencial** (operação, depois do merge e com a autorização de quem opera) estão fora do orq. O que o orq espera: o Caddy autentica, encaminha para o socket (`reverse_proxy unix//run/user/<uid>/orq/web.sock`) e põe o usuário no cabeçalho (`header_up X-Orq-User {http.auth.user.id}`), sem repassar um `X-Orq-User` vindo de fora; ele preserva `Host` e `Origin` do cliente (o `CrossOriginProtection` compara os dois).
+
+**Resposta de quem.** O coordenador só trata como resposta da pessoa o que tem `respondida_por` igual ao usuário da web, `local`, ou `chat` gravado por ele mesmo a partir de uma fala da pessoa. Worker e revisor nunca rodam `orq pend responder` nem `orq pend resolver`.
+
 ### TUI
 
 `orq tui` desenha a Central a partir do mesmo snapshot de `orq snapshot`, relido a cada `--intervalo` (2 s); quem consulta as fontes é o daemon, o TUI só lê o cache. Com `--coord X`, as ondas abertas de um coordenador (é o que roda nos panes do workspace Central); com `--todos`, um bloco por coordenador com o total de pendências abertas (o popup do plugin); sem nenhum dos dois, o coordenador corrente ou, sem ele, todos.
@@ -167,6 +247,7 @@ Só pane e workspace que existem recebem token. No Herdr o token é por nome, n�
 ```
 
 - Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas, e o selo `concluída`, em verde, quando a onda está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)); na 2ª linha, o título da onda, em negrito e numa cor fixa por projeto. O projeto é o `projeto_padrao` do coordenador, quando está entre os das US da onda, ou o primeiro projeto da onda (a ordem da 1ª linha). A cor vem do tom do projeto, gravado na Central (`projeto_tom`) na ordem de chegada: o primeiro projeto que aparece (`orq coord registrar --projeto` ou `orq onda criar`) fica com o tom 0, o seguinte com o 1, e assim por diante, para sempre, e o `orq diario` registra cada atribuição (`projeto.tom`, com o projeto e o índice no `detalhe`). Exceção: o preenchimento da migration, para os projetos que já existiam, não gera eventos, e a ordem dele é reconstruída do estado atual (registro do coordenador e onda atual da US), não a primeira chegada histórica absoluta. A paleta tem 8 tons (azul, amarelo, magenta, verde, laranja, ciano, lilás e ardósia, com versão para o tema claro e para o escuro, sem vermelho); passado o oitavo projeto, os tons se repetem (o 9º volta ao azul). O snapshot traz os índices em `projetos`; projeto sem índice (snapshot antigo) usa o cinza. Limite: o projeto é o board do Taiga, então coordenadores de chaves diferentes no mesmo board (argocd-apps e convey, ambos `infra-2025`) têm a mesma cor. Coordenador sem onda aberta é uma linha discreta.
+- O título da pendência leva as marcas `[respondida]`, `[respondida, sem coordenador]`, `[sem detalhe]` (pendência antiga) e `[arquivo alterado]`. Com `ORQ_WEB_URL` definido, a pendência selecionada mostra o link da página dela na linha de status (OSC 8).
 - Tabela das US: agente | US | título | status | MRs, com fundo alternado. A 1ª coluna é o status Herdr do pane da US, não o da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu (a legenda vai no rodapé). A US com o pane `blocked` sobe para o topo, com fundo de destaque e título em negrito; a US Done sai esmaecida.
 - `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`!412…`); num largo as colunas não passam do conteúdo.
 - Status com cor (Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde) e link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples em qualquer linha da US, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`); a seleção é o fundo da linha. No popup, focar fecha o popup.
@@ -214,6 +295,8 @@ cat > "$(herdr plugin config-dir orq)/orq.env" <<'X'
 ORQ_STATE_DIR=/caminho/do/estado
 ORQ_CENTRAL_NOME=Central
 # ORQ_LIMPEZA_AUTOMATICA=0   # desliga a limpeza do daemon no merge
+# ORQ_WEB=unix:              # liga a web de pendências no socket padrão (veja "Pendências com contexto")
+# ORQ_WEB_URL=https://pend.exemplo.com.br
 X
 ```
 

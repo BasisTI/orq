@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/herdrfalso/falsotest"
 	"github.com/BasisTI/orq/internal/semdaemon"
 	_ "modernc.org/sqlite"
 )
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 	if binFalsoDir != "" {
 		os.RemoveAll(binFalsoDir)
 	}
+	falsotest.Limpar()
 	os.Exit(code)
 }
 
@@ -79,7 +81,8 @@ func ok(t *testing.T, env map[string]string, args ...string) string {
 }
 
 func ambiente(t *testing.T) map[string]string {
-	return map[string]string{"ORQ_STATE_DIR": t.TempDir(), "HERDR_PANE_ID": "wB:p1"}
+	// ORQ_TRABALHO_DIR temporário: o daemon de um teste nunca olha a pasta de trabalho real.
+	return map[string]string{"ORQ_STATE_DIR": t.TempDir(), "HERDR_PANE_ID": "wB:p1", "ORQ_TRABALHO_DIR": t.TempDir()}
 }
 
 func TestErroJSONTipado(t *testing.T) {

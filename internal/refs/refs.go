@@ -144,3 +144,13 @@ func ParseMR(raw string) (MR, error) {
 		IaC:         strings.HasPrefix(strings.ToLower(pp), "basis/iac/"),
 	}, nil
 }
+
+// RotaPendencia é o caminho da página de uma pendência no servidor web do daemon.
+func RotaPendencia(projeto string, ref, numero int) string {
+	return "/p/" + url.PathEscape(projeto) + "/" + strconv.Itoa(ref) + "/" + strconv.Itoa(numero)
+}
+
+// URLPendencia é a URL da página da pendência; sem base (ORQ_WEB_URL), só o caminho.
+func URLPendencia(base, projeto string, ref, numero int) string {
+	return strings.TrimRight(base, "/") + RotaPendencia(projeto, ref, numero)
+}

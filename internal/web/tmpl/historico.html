@@ -1,0 +1,10 @@
+{{define "historico"}}{{template "topo" .}}
+<h1>Histórico</h1>
+<p class="nota">Pendências resolvidas, da mais recente para a mais antiga.</p>
+{{if .Itens}}{{template "lista" .Itens}}{{else}}<p class="vazio">Nenhuma pendência resolvida.</p>{{end}}
+<nav class="paginas">
+{{if .Anterior}}<a href="{{.Anterior}}">← mais recentes</a>{{end}}
+<span>página {{.Pagina}} de {{.Paginas}}</span>
+{{if .Proxima}}<a href="{{.Proxima}}">mais antigas →</a>{{end}}
+</nav>
+{{template "rodape" .}}{{end}}

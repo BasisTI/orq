@@ -33,6 +33,9 @@ type Daemon struct {
 	// Limpeza, se não nulo, roda a cada IntervaloRemoto: a limpeza automática dos recursos da US
 	// no merge. Falha dela vai para o log e não derruba o laço.
 	Limpeza interface{ Ciclo(context.Context) error }
+	// Pendencias, se não nulo, roda a cada Tick: importa os arquivos de pendência novos e avisa
+	// o coordenador do que a pessoa respondeu. Falha dele vai para o log e não derruba o laço.
+	Pendencias interface{ Ciclo(context.Context) error }
 
 	mu      sync.Mutex
 	ultimos map[string]string
@@ -69,6 +72,13 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 			d.limpeza(ctx)
 		}()
 	}
+	if d.Pendencias != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.pendencias(ctx, tick)
+		}()
+	}
 	if d.Socket != "" {
 		wg.Add(1)
 		go func() {
@@ -76,7 +86,7 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 			d.assinatura(ctx, panes, sinalizar)
 		}()
 	}
-	d.logf("início", "orq daemon no ar (tick %s, socket %s, limpeza automática %s)", tick, valorOu(d.Socket, "desligado"), map[bool]string{true: "ligada", false: "desligada"}[d.Limpeza != nil])
+	d.logf("início", "orq daemon no ar (tick %s, socket %s, limpeza automática %s, pendências %s)", tick, valorOu(d.Socket, "desligado"), map[bool]string{true: "ligada", false: "desligada"}[d.Limpeza != nil], map[bool]string{true: "ligadas", false: "desligadas"}[d.Pendencias != nil])
 	t := time.NewTicker(tick)
 	defer t.Stop()
 	var assinados []string
@@ -262,6 +272,25 @@ func (d *Daemon) limpeza(ctx context.Context) {
 			d.logf("limpeza", "limpeza automática: %v", err)
 		} else if err == nil {
 			d.logf("limpeza", "")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// pendencias chama o ciclo das pendências a cada tick, depois de um primeiro logo ao subir. Fica
+// fora do laço do Herdr: um herdr lento não atrasa a importação, nem o contrário.
+func (d *Daemon) pendencias(ctx context.Context, tick time.Duration) {
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for {
+		if err := d.Pendencias.Ciclo(ctx); err != nil && ctx.Err() == nil {
+			d.logf("pendencias", "pendências: %v", err)
+		} else if err == nil {
+			d.logf("pendencias", "")
 		}
 		select {
 		case <-ctx.Done():

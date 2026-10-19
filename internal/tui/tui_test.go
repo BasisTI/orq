@@ -72,7 +72,7 @@ func snapshot() central.Snapshot {
 			mr(gl+"29", "basis/sgo-cli", 29, "mesclada", false),
 			mr(gl+"31", "basis/sgo-cli", 31, "fechada", false)),
 	}}
-	p := central.Pendencia{ID: "TG-313#P1", US: "sgo-cli/313", Numero: 1, Tipo: "autorizacao", Texto: "instalar binário e aplicar config pessoal", PaneOrigem: ptr("wB:p4"), Aberta: true, AbertaEm: agora.Add(-12 * time.Minute).Format(time.RFC3339), OndaID: 1, Coordenador: "convey"}
+	p := central.Pendencia{ID: "TG-313#P1", US: "sgo-cli/313", Numero: 1, Tipo: "autorizacao", Texto: "instalar binário e aplicar config pessoal", PaneOrigem: ptr("wB:p4"), Aberta: true, Estado: "aberta", TemDetalhe: true, AbertaEm: agora.Add(-12 * time.Minute).Format(time.RFC3339), OndaID: 1, Coordenador: "convey"}
 	onda.US[1].Pendencias = []central.Pendencia{p}
 	return central.Snapshot{
 		Versao: 1,
@@ -811,5 +811,60 @@ func TestCorDoTituloPorProjeto(t *testing.T) {
 	sem := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora}).Linhas
 	if len(sem) != len(com)-1 || sem[0].Texto != com[0].Texto || sem[1].Texto != com[2].Texto {
 		t.Errorf("faixa sem título: %d linhas contra %d", len(sem), len(com))
+	}
+}
+
+func TestPendenciaMarcasELinkDaPagina(t *testing.T) {
+	s := snapshot()
+	p := &s.PendenciasAbertas[0]
+	p.Estado, p.RespondidaEm, p.SemCoordenador, p.TemDetalhe, p.ArquivoAlterado = "respondida", ptr("2026-10-11T14:00:00Z"), true, false, true
+	tela := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 140, Agora: agora, URLWeb: "https://pend.exemplo/"})
+	achou := false
+	for _, l := range planas(tela) {
+		if strings.Contains(l, "[respondida, sem coordenador] [sem detalhe] [arquivo alterado] instalar binário") {
+			achou = true
+		}
+	}
+	if !achou {
+		t.Fatalf("sem as marcas:\n%s", strings.Join(planas(tela), "\n"))
+	}
+	if got := tela.Links["pend:convey/TG-313#P1"]; got != "https://pend.exemplo/p/sgo-cli/313/1" {
+		t.Fatalf("links = %v", tela.Links)
+	}
+	// Sem URLWeb, nenhum link.
+	if tela := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 140, Agora: agora}); len(tela.Links) != 0 {
+		t.Fatalf("links sem URLWeb = %v", tela.Links)
+	}
+	// Respondida com coordenador: só [respondida].
+	p.SemCoordenador, p.TemDetalhe, p.ArquivoAlterado = false, true, false
+	tela = cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 140, Agora: agora})
+	if txt := strings.Join(planas(tela), "\n"); !strings.Contains(txt, "[respondida] instalar") || strings.Contains(txt, "sem coordenador") {
+		t.Fatalf("respondida:\n%s", txt)
+	}
+}
+
+// A pendência selecionada mostra, na linha de status, o link da página dela.
+func TestStatusMostraOLinkDaPendenciaSelecionada(t *testing.T) {
+	m := Novo(context.Background(), Config{
+		Carregar: func(context.Context) (central.Snapshot, error) { return snapshot(), nil },
+		Focar:    func(context.Context, string) error { return nil },
+		Opcoes:   Opcoes{Coord: "convey", URLWeb: "https://pend.exemplo"},
+		Estilos:  cores,
+		Agora:    func() time.Time { return agora },
+	})
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m.Update(m.carregar())
+	if strings.Contains(ansi.Strip(m.status()), "pend.exemplo") {
+		t.Fatalf("link sem seleção: %q", ansi.Strip(m.status()))
+	}
+	for range 6 {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		if strings.HasPrefix(m.tela.Linhas[m.sel].Item, "pend:") {
+			break
+		}
+	}
+	st := m.status()
+	if !strings.Contains(ansi.Strip(st), "página https://pend.exemplo/p/sgo-cli/313/1") || !strings.Contains(st, "\x1b]8;;https://pend.exemplo/p/sgo-cli/313/1") {
+		t.Fatalf("status = %q", st)
 	}
 }

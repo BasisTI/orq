@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2/table"
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/output"
+	"github.com/BasisTI/orq/internal/refs"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -32,8 +33,13 @@ type Opcoes struct {
 	Agora   time.Time // relógio de "há 12 min"
 	// Selecao é o Item da linha selecionada: as linhas físicas dele saem com o fundo de seleção.
 	Selecao string
+	// URLWeb é a URL pública da web de pendências (ORQ_WEB_URL); com ela, a pendência
+	// selecionada mostra o link da página dela. Vazia, nenhum link.
+	URLWeb string
 	// tons é o índice de tom de cada projeto, do snapshot; Desenhar o preenche.
 	tons map[string]int
+	// links é a página de cada pendência (Item → URL); Desenhar o preenche.
+	links map[string]string
 }
 
 // Linha é uma linha física da tela. Pane, quando não vazio, é o pane que Enter ou o clique
@@ -51,6 +57,8 @@ type Tela struct {
 	Linhas  []Linha
 	Rodape  string
 	Legenda []string
+	// Links é a página web de cada pendência, pelo Item da linha dela.
+	Links map[string]string
 }
 
 // Estilos desenha com o lipgloss: as cores saem em truecolor e o programa do bubbletea as
@@ -336,6 +344,8 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 		o.Largura = 80
 	}
 	var t Tela
+	o.links = map[string]string{}
+	t.Links = o.links
 	o.tons = make(map[string]int, len(s.Projetos))
 	for _, pt := range s.Projetos {
 		o.tons[pt.Projeto] = pt.Indice
@@ -452,12 +462,32 @@ func colunasPend(ps []central.Pendencia, largura int, agora time.Time) colsPend 
 	for _, p := range ps {
 		l.id = max(l.id, ansi.StringWidth(limpar(p.ID)))
 		l.tipo = max(l.tipo, ansi.StringWidth(rotulo(rotuloTipo, p.Tipo)))
-		l.texto = max(l.texto, ansi.StringWidth(limpar(p.Texto)))
+		l.texto = max(l.texto, ansi.StringWidth(textoPend(p)))
 		l.idade = max(l.idade, ansi.StringWidth(desde(p.AbertaEm, agora)))
 	}
 	// O texto tem teto: mais longo, quebra em 2 linhas em vez de esticar a tabela.
 	l.texto = max(min(l.texto, textoMaximo, largura-molduraTabela-l.id-l.tipo-l.idade-l.ir), 1)
 	return l
+}
+
+// textoPend é o título da pendência com as marcas do que a pessoa precisa saber: respondida (e
+// sem coordenador para saber), antiga sem detalhe, arquivo que mudou depois do registro.
+func textoPend(p central.Pendencia) string {
+	var marcas []string
+	if p.Estado == central.EstadoRespondida {
+		if p.SemCoordenador {
+			marcas = append(marcas, "[respondida, sem coordenador]")
+		} else {
+			marcas = append(marcas, "[respondida]")
+		}
+	}
+	if !p.TemDetalhe {
+		marcas = append(marcas, "[sem detalhe]")
+	}
+	if p.ArquivoAlterado {
+		marcas = append(marcas, "[arquivo alterado]")
+	}
+	return strings.TrimSpace(strings.Join(marcas, " ") + " " + limpar(p.Texto))
 }
 
 func tituloTexto(u central.US) string {
@@ -741,8 +771,12 @@ func (e Estilos) tabelaPend(ps []central.Pendencia, l colsPend, o Opcoes) []Linh
 		if p.PaneOrigem != nil {
 			pane = *p.PaneOrigem
 		}
-		texto := duasLinhas(limpar(p.Texto), l.texto)
+		texto := duasLinhas(textoPend(p), l.texto)
 		item := "pend:" + p.Coordenador + "/" + p.ID
+		if o.URLWeb != "" {
+			u := p.RefUS()
+			o.links[item] = refs.URLPendencia(o.URLWeb, u.Projeto, u.Ref, p.Numero)
+		}
 		ir := ""
 		if pane != "" {
 			ir = linkPane(pane, "↗")

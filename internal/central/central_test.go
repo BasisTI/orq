@@ -730,7 +730,7 @@ func TestSnapshot(t *testing.T) {
 		{"onda", ondaJ, "autorizacao_ate,coordenador,criada_em,encerrada_em,id,ordem,titulo,us"},
 		{"us", usJ, "atualizado_em,chave,depende_de,herdr,id,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status,taiga"},
 		{"taiga", usJ["taiga"], "atualizado_em,erro,status,titulo,url"},
-		{"pendencia", pendJ, "aberta,aberta_em,coordenador,id,numero,onda_id,pane_origem,resolvida_em,resposta,texto,tipo,us"},
+		{"pendencia", pendJ, "aberta,aberta_em,arquivo,arquivo_alterado,autor,avisada_em,chave,coordenador,estado,id,numero,onda_id,opcoes,pane_origem,resolvida_em,respondida_em,respondida_por,resposta,resposta_opcao,sem_coordenador,slug,tem_detalhe,texto,tipo,us"},
 	}
 	for _, c := range contrato {
 		if got := strings.Join(chaves(c.v), ","); got != c.want {

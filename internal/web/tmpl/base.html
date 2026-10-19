@@ -1,0 +1,35 @@
+{{define "topo"}}<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+{{if .Recarregar}}<meta http-equiv="refresh" content="30">{{end}}
+<title>{{.Titulo}} · orq</title>
+<link rel="stylesheet" href="/estilo.css">
+</head>
+<body>
+<header class="barra">
+<a class="marca" href="/">orq · pendências</a>
+<nav><a href="/">Abertas</a><a href="/historico">Histórico</a></nav>
+</header>
+<main>
+{{end}}
+
+{{define "rodape"}}</main>
+<footer>{{if .Usuario}}Você é <strong>{{.Usuario}}</strong>.{{end}}</footer>
+</body>
+</html>
+{{end}}
+
+{{define "selo"}}<span class="selo selo-{{.}}">{{.}}</span>{{end}}
+
+{{define "lista"}}
+{{range .}}
+<a class="cartao" href="{{.Href}}">
+<div class="linha1"><strong>{{.P.ID}}</strong> <span class="selo selo-tipo">{{.P.Tipo}}</span> {{if eq .P.Estado "respondida"}}<span class="selo selo-respondida">respondida</span>{{end}}{{if not .P.TemDetalhe}} <span class="selo selo-aviso">sem detalhe</span>{{end}}{{if .P.SemCoordenador}} <span class="selo selo-aviso">sem coordenador</span>{{end}}</div>
+<div class="titulo">{{.P.Texto}}</div>
+<div class="meta">{{.P.US}} · {{.P.Coordenador}} · onda {{.P.OndaID}} · {{.Quando}}</div>
+</a>
+{{end}}
+{{end}}

@@ -76,7 +76,12 @@ func bancoV3(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, q := range []string{"DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
+	for _, q := range []string{
+		"DROP INDEX pendencia_slug", "ALTER TABLE pendencia DROP COLUMN detalhe", "ALTER TABLE pendencia DROP COLUMN opcoes", "ALTER TABLE pendencia DROP COLUMN slug",
+		"ALTER TABLE pendencia DROP COLUMN arquivo", "ALTER TABLE pendencia DROP COLUMN arquivo_hash", "ALTER TABLE pendencia DROP COLUMN arquivo_alterado", "ALTER TABLE pendencia DROP COLUMN autor",
+		"ALTER TABLE pendencia DROP COLUMN resposta_opcao", "ALTER TABLE pendencia DROP COLUMN respondida_em", "ALTER TABLE pendencia DROP COLUMN respondida_por", "ALTER TABLE pendencia DROP COLUMN avisada_em",
+		"ALTER TABLE pendencia DROP COLUMN abertura_avisada_em", "ALTER TABLE pendencia DROP COLUMN aviso_falhou_em",
+		"DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +116,7 @@ func TestAvisaAntesDeMigrarQuemNaoAbreOBanco(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d: %s", r.code, r.err)
 	}
-	for _, quer := range []string{"aviso: ao migrar o banco da versão 3 para a 4", "deixa de abrir o banco (versao_do_banco)", "0.3.0-1-gaaaaaaa", "orq upgrade"} {
+	for _, quer := range []string{"aviso: ao migrar o banco da versão 3 para a 5", "deixa de abrir o banco (versao_do_banco)", "0.3.0-1-gaaaaaaa", "orq upgrade"} {
 		if !strings.Contains(r.err, quer) {
 			t.Errorf("stderr sem %q:\n%s", quer, r.err)
 		}
@@ -122,10 +127,20 @@ func TestAvisaAntesDeMigrarQuemNaoAbreOBanco(t *testing.T) {
 	}
 }
 
-func TestNaoAvisaDeQuemAindaAbreOBanco(t *testing.T) {
-	env := ambienteSemFerramentas(t, outroOrq(t, `{"versao":"0.4.0","commit":"cccccccccccc","schema":4}`))
+func TestNaoAvisaDeQuemAindaAbreEEscreveNoBanco(t *testing.T) {
+	env := ambienteSemFerramentas(t, outroOrq(t, `{"versao":"0.5.0","commit":"cccccccccccc","schema":5}`))
 	bancoV3(t, env["ORQ_STATE_DIR"])
 	if r := rodar(t, env, "coord", "list"); r.code != 0 || r.err != "" {
+		t.Fatalf("exit %d, stderr %q", r.code, r.err)
+	}
+}
+
+// A 0005 (US #15) sobe o escritor mínimo para 5: o orq 4 ainda lê o banco, mas só lê.
+func TestAvisaDeQuemPassaASoLerOBanco(t *testing.T) {
+	env := ambienteSemFerramentas(t, outroOrq(t, `{"versao":"0.4.0","commit":"cccccccccccc","schema":4}`))
+	bancoV3(t, env["ORQ_STATE_DIR"])
+	r := rodar(t, env, "coord", "list")
+	if r.code != 0 || !strings.Contains(r.err, "passa a abrir o banco só para leitura") || strings.Contains(r.err, "deixa de abrir") {
 		t.Fatalf("exit %d, stderr %q", r.code, r.err)
 	}
 }
