@@ -131,13 +131,7 @@ func seguraTrava(pid int, arquivo string) bool {
 		return false
 	}
 	for _, l := range strings.Split(string(b), "\n") {
-		f := strings.Fields(l)
-		// "1: FLOCK  ADVISORY  WRITE 12345 08:01:131 0 EOF"
-		if len(f) < 6 || f[1] != "FLOCK" {
-			continue
-		}
-		partes := strings.Split(f[5], ":")
-		if f[4] == strconv.Itoa(pid) && partes[len(partes)-1] == strconv.FormatUint(sys.Ino, 10) {
+		if travaNaLinha(l, pid, uint64(sys.Dev), sys.Ino) {
 			return true
 		}
 	}
@@ -241,4 +235,27 @@ func resumo(s string) string {
 		return "sem saída"
 	}
 	return t
+}
+
+// travaNaLinha diz se uma linha de /proc/locks é a flock do pid sobre o arquivo de dispositivo
+// dev (st_dev) e inode ino: "1: FLOCK  ADVISORY  WRITE 12345 fc:00:131 0 EOF". Compara
+// major:minor (em hexadecimal) e inode, porque o mesmo inode existe em outros sistemas de arquivos.
+func travaNaLinha(l string, pid int, dev, ino uint64) bool {
+	f := strings.Fields(l)
+	if len(f) < 6 || f[1] != "FLOCK" || f[4] != strconv.Itoa(pid) {
+		return false
+	}
+	partes := strings.Split(f[5], ":")
+	if len(partes) != 3 {
+		return false
+	}
+	maior, err1 := strconv.ParseUint(partes[0], 16, 64)
+	menor, err2 := strconv.ParseUint(partes[1], 16, 64)
+	if err1 != nil || err2 != nil || partes[2] != strconv.FormatUint(ino, 10) {
+		return false
+	}
+	// st_dev no Linux: major em dev[8..19] e dev[32..], minor em dev[0..7] e dev[12..31].
+	dmaior := (dev>>8)&0xfff | (dev>>32)&^uint64(0xfff)
+	dmenor := dev&0xff | (dev>>12)&^uint64(0xff)
+	return maior == dmaior && menor == dmenor
 }

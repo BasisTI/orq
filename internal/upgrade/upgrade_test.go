@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
 	_ "modernc.org/sqlite"
@@ -619,14 +620,19 @@ func TestUpgradeNaoConfirmaDaemonQueNaoAbriuOBanco(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
+	var liberou sync.WaitGroup
+	liberou.Add(1)
 	go func() {
+		defer liberou.Done()
 		time.Sleep(time.Second)
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
 	}()
+	// A goroutine usa o descritor: só fecha o arquivo depois que ela termina.
+	defer func() { liberou.Wait(); f.Close() }()
 
 	r, err := c.executar(Opcoes{})
 	if codigoDe(err) != "upgrade_incompleto" || r.OK {
@@ -691,5 +697,82 @@ func TestDaemonSaiQuandoOBancoPassaAExigirMais(t *testing.T) {
 				t.Fatal("a trava não soltou")
 			}
 		})
+	}
+}
+
+// D2: um daemon que não pode escrever no banco (escritor mínimo acima do dele) não se declara
+// pronto: o --detach falha com a causa, em vez de devolver 0 e deixar o daemon sair depois.
+func TestDetachFalhaQuandoODaemonNaoPodeEscrever(t *testing.T) {
+	c := novaCasa(t)
+	s, err := central.Open(context.Background(), c.estado)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '99' WHERE chave = 'escritor_minimo'"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	cmd := exec.Command(c.plugin, "daemon", "--detach", "--output", "json")
+	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+c.estado, "ORQ_HERDR_BIN=/nao/existe/herdr", "HERDR_SOCKET_PATH="+filepath.Join(c.raiz, "sem.sock"))
+	out, err := cmd.CombinedOutput()
+	ee, ok := err.(*exec.ExitError)
+	if !ok || ee.ExitCode() != 4 {
+		t.Fatalf("daemon --detach = %v (%s), quero exit 4", err, out)
+	}
+	if !strings.Contains(string(out), "daemon_nao_subiu") || !strings.Contains(string(out), "banco_somente_leitura") {
+		t.Fatalf("saída = %s", out)
+	}
+	if ativo, _, _ := enriquecer.DaemonAtivo(c.estado); ativo {
+		t.Fatal("sobrou um daemon")
+	}
+}
+
+// O descritor de prontidão do --detach não vaza para os subprocessos que o daemon lança.
+func TestDaemonNaoPassaOPipeDeProntidaoAosSubprocessos(t *testing.T) {
+	c := novaCasa(t)
+	saida := filepath.Join(c.raiz, "fd3.txt")
+	escrever(t, filepath.Join(c.raiz, "herdr-fd"), "#!/bin/sh\nif [ -L /proc/$$/fd/3 ]; then echo aberto > '"+saida+"'; else echo fechado > '"+saida+"'; fi\nexit 1\n", 0o755)
+	cmd := exec.Command(c.plugin, "daemon", "--detach", "--output", "json", "--tick", "100ms", "--intervalo-remoto", "1h")
+	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+c.estado, "ORQ_HERDR_BIN="+filepath.Join(c.raiz, "herdr-fd"),
+		"ORQ_GLAB_BIN=/nao/existe/glab", "ORQ_GH_BIN=/nao/existe/gh", "ORQ_TAIGA_BIN=/nao/existe/taiga",
+		"HERDR_SOCKET_PATH="+filepath.Join(c.raiz, "sem.sock"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("subir: %v: %s", err, out)
+	}
+	t.Cleanup(c.pararDaemon)
+	var b []byte
+	for i := 0; i < 100 && len(b) == 0; i++ {
+		b, _ = os.ReadFile(saida)
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(string(b)); got != "fechado" {
+		t.Fatalf("o subprocesso viu o fd 3: %q", got)
+	}
+}
+
+func TestTravaNaLinhaConfereODispositivo(t *testing.T) {
+	// dev_t de 252:0 (fc:00) e de 8:1.
+	fc := uint64(252) << 8
+	sda := uint64(8)<<8 | 1
+	const l = "3: FLOCK  ADVISORY  WRITE 4242 fc:00:131 0 EOF"
+	if !travaNaLinha(l, 4242, fc, 131) {
+		t.Error("recusou a linha certa")
+	}
+	for nome, ok := range map[string]bool{
+		"outro dispositivo": travaNaLinha(l, 4242, sda, 131),
+		"outro inode":       travaNaLinha(l, 4242, fc, 132),
+		"outro pid":         travaNaLinha(l, 4243, fc, 131),
+		"POSIX":             travaNaLinha(strings.Replace(l, "FLOCK ", "POSIX ", 1), 4242, fc, 131),
+		"lixo":              travaNaLinha("3: FLOCK ADVISORY WRITE 4242 xx:yy:131", 4242, fc, 131),
+	} {
+		if ok {
+			t.Errorf("aceitou: %s", nome)
+		}
 	}
 }

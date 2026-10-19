@@ -156,6 +156,13 @@ rode orq upgrade para subir um daemon da versão nova.`,
 					return err
 				})
 			}
+			var pronto *os.File
+			if prontoFD > 0 {
+				// Primeiro de tudo: o descritor do --detach não pode vazar para o herdr, o go e o
+				// resto dos subprocessos que o daemon lança.
+				syscall.CloseOnExec(prontoFD)
+				pronto = os.NewFile(uintptr(prontoFD), "pronto")
+			}
 			soltar, err := enriquecer.TravarDaemon(dir)
 			if err != nil {
 				return err
@@ -167,12 +174,10 @@ rode orq upgrade para subir um daemon da versão nova.`,
 			if err != nil {
 				return err
 			}
-			if prontoFD > 0 {
-				// Banco aberto e compatível: avisa o --detach que subiu.
-				if f := os.NewFile(uintptr(prontoFD), "pronto"); f != nil {
-					_, _ = f.Write([]byte{1})
-					_ = f.Close()
-				}
+			// Só pronto quando o daemon já pode escrever: um banco que este orq só lê (ou não lê)
+			// faria o primeiro ciclo sair logo.
+			if err := e.St.ConferirEscrita(ctx); err != nil {
+				return err
 			}
 			d := &enriquecer.Daemon{E: e, Socket: enriquecer.CaminhoSocket(a.Env), Tick: tick, IntervaloRemoto: remoto, Log: a.Err}
 			if limpeza.LigadaPeloAmbiente(a.Env) {
@@ -183,6 +188,10 @@ rode orq upgrade para subir um daemon da versão nova.`,
 				d.Limpeza = &limpeza.Auto{L: l, Log: func(format string, args ...any) {
 					fmt.Fprintf(a.Err, "%s limpeza: %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 				}}
+			}
+			if pronto != nil {
+				_, _ = pronto.Write([]byte{1})
+				_ = pronto.Close()
 			}
 			return d.Rodar(ctx)
 		},
