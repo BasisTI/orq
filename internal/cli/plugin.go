@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,10 +75,12 @@ Mesmo backup e mesmo check de configurar.`,
 	doctor := &cobra.Command{
 		Use:   "doctor [--config <arquivo>]",
 		Short: "Diagnóstico: binários, daemon, plugin no Herdr, sidebar, teclas e banco",
-		Long: `Confere, sem mudar nada: os binários que o orq chama (herdr, glab, gh, taiga), o daemon
+		Long: `Confere, sem mudar nada: os binários que o orq chama (herdr, glab, gh, taiga, git, docker e go, com a
+origem do caminho e a comparação com o que o daemon em execução usa, lido de /proc), as raízes
+ORQ_STATE_DIR, ORQ_TRABALHO_DIR, ORQ_TMP_DIR e ORQ_LIMPEZA_AUTOMATICA, o daemon
 (trava daemon.lock no diretório de estado), o plugin orq registrado e habilitado no Herdr, as
 linhas da sidebar e as teclas no config.toml e o banco. "ok" é falso quando falta algo de que
-a Central precisa; glab, gh e taiga ausentes são só avisos.`,
+a Central precisa; as demais ferramentas ausentes são só avisos.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := caminho()
@@ -158,6 +161,8 @@ type Item struct {
 	Nome    string `json:"nome"`
 	Estado  string `json:"estado"` // ok, aviso, erro
 	Detalhe string `json:"detalhe"`
+	// Origem, nos binários, diz de onde veio o caminho: variavel, orq.env, HERDR_BIN_PATH ou diretorio.
+	Origem string `json:"origem,omitempty"`
 }
 
 // Doctor é a saída de orq plugin doctor.
@@ -169,17 +174,20 @@ type Doctor struct {
 func (a *App) doctor(ctx context.Context, config string) Doctor {
 	d := Doctor{OK: true, Itens: []Item{}}
 	add := func(nome, estado, detalhe string) {
-		d.Itens = append(d.Itens, Item{nome, estado, detalhe})
+		d.Itens = append(d.Itens, Item{Nome: nome, Estado: estado, Detalhe: detalhe})
 		if estado == "erro" {
 			d.OK = false
 		}
 	}
-	f := enriquecer.Ferramentas{Env: a.Env, Timeout: 10 * time.Second}
-	for _, n := range []string{"herdr", "glab", "gh", "taiga"} {
-		p, err := f.Caminho(n)
+	a.doctorAmbiente(add)
+	f := enriquecer.Ferramentas{Env: a.Env, OrigemVar: a.origemVar, Timeout: 10 * time.Second}
+	binarios := ferramentasDoctor
+	for _, n := range binarios {
+		r, err := f.Resolver(n)
 		switch {
 		case err == nil:
-			add("binario "+n, "ok", p)
+			add("binario "+n, "ok", r.Caminho)
+			d.Itens[len(d.Itens)-1].Origem = r.Origem
 		case n == "herdr":
 			add("binario "+n, "erro", err.Error())
 		default:
@@ -197,6 +205,9 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 		} else {
 			add("daemon", "erro", "nenhum orq daemon com o estado "+dir+": o plugin o sobe no início do servidor do Herdr; à mão, orq daemon --detach")
 		}
+	}
+	if err == nil {
+		a.doctorDaemonEShell(add, dir)
 	}
 	var pl struct {
 		Plugins []struct {
@@ -287,10 +298,37 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 	return d
 }
 
+// origemVar diz "orq.env" para uma variável que só o arquivo fornece, "" para a do processo.
+func (a *App) origemVar(k string) string {
+	if a.envProcesso != nil && a.envProcesso(k) == "" && a.arquivoEnv[k] != "" {
+		return enriquecer.OrigemOrqEnv
+	}
+	return ""
+}
+
+// doctorAmbiente mostra o orq.env que os comandos leem.
+func (a *App) doctorAmbiente(add func(nome, estado, detalhe string)) {
+	dir := DirConfigPlugin(a.Env)
+	if dir == "" {
+		add("orq.env", "aviso", "sem HERDR_PLUGIN_CONFIG_DIR, XDG_CONFIG_HOME nem HOME: o arquivo não é lido")
+		return
+	}
+	arq := filepath.Join(dir, ArquivoAmbientePlugin)
+	if _, err := os.Stat(arq); err != nil {
+		add("orq.env", "ok", arq+" não existe (opcional)")
+		return
+	}
+	add("orq.env", "ok", fmt.Sprintf("%s: %d chaves ORQ_ lidas", arq, len(a.arquivoEnv)))
+}
+
 func textoDoctor(w io.Writer, d Doctor) error {
 	for _, it := range d.Itens {
 		marca := map[string]string{"ok": "ok   ", "aviso": "aviso", "erro": "ERRO "}[it.Estado]
-		if _, err := fmt.Fprintf(w, "%s  %-20s %s\n", marca, it.Nome, q(it.Detalhe)); err != nil {
+		detalhe := q(it.Detalhe)
+		if it.Origem != "" {
+			detalhe += " (" + it.Origem + ")"
+		}
+		if _, err := fmt.Fprintf(w, "%s  %-20s %s\n", marca, it.Nome, detalhe); err != nil {
 			return err
 		}
 	}
