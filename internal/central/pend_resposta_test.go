@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/BasisTI/orq/internal/refs"
 )
@@ -391,5 +392,68 @@ func TestListarResolvidasPaginadas(t *testing.T) {
 	total, _ := s.ContarPendencias(ctx, FiltroPendencias{Resolvidas: true})
 	if len(p1) != 2 || len(p2) != 1 || total != 3 || p1[0].Texto != "c" || p2[0].Texto != "a" {
 		t.Fatalf("p1 %v p2 %v total %d", p1, p2, total)
+	}
+}
+
+// Regressão da revisão r1: a resposta troca no mesmo segundo do aviso lido antes. O aviso confirma
+// a versão da resposta, não um horário, então o aviso da resposta nova continua devido.
+func TestTrocaNoMesmoSegundoNaoPerdeOAviso(t *testing.T) {
+	s, co := storeComOnda(t)
+	ctx := context.Background()
+	s.Now = func() time.Time { return time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC) }
+	if _, err := s.RegistrarPendencia(ctx, novaDecisao("race")); err != nil {
+		t.Fatal(err)
+	}
+	p := refs.Pend{US: refs.US{Projeto: "proj", Ref: 312}, Numero: 1}
+	if _, err := s.ResponderPendencia(ctx, &co, p, Resposta{Opcao: inteiro(1), Por: "cedric"}); err != nil {
+		t.Fatal(err)
+	}
+	av, err := s.AvisosPendentes(ctx)
+	if err != nil || len(av) != 1 {
+		t.Fatalf("avisos = %+v, %v", av, err)
+	}
+	var velho Aviso
+	for _, a := range av {
+		if a.Tipo == AvisoResposta {
+			velho = a
+		}
+	}
+	if _, err := s.ResponderPendencia(ctx, &co, p, Resposta{Opcao: inteiro(2), Por: "cedric"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarcarAvisada(ctx, velho); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.VerPendencia(ctx, nil, p)
+	if got.AvisadaEm != nil || got.RespostaVersao != velho.Pendencia.RespostaVersao+1 {
+		t.Fatalf("a resposta 2 ficou avisada pelo aviso da 1: %+v", got)
+	}
+	restantes, _ := s.AvisosPendentes(ctx)
+	achou := false
+	for _, a := range restantes {
+		if a.Tipo == AvisoResposta && a.Opcao != nil && a.Opcao.ID == 2 {
+			achou = true
+		}
+	}
+	if !achou {
+		t.Fatalf("o aviso da resposta 2 sumiu: %+v", restantes)
+	}
+	// Falha de aviso do velho também não marca a resposta nova.
+	if err := s.RegistrarFalhaAviso(ctx, velho, "agent_not_found"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.VerPendencia(ctx, nil, p); got.SemCoordenador {
+		t.Fatalf("o aviso falho do velho marcou a resposta nova: %+v", got)
+	}
+	// O aviso certo confirma.
+	for _, a := range restantes {
+		if a.Tipo == AvisoResposta {
+			if err := s.MarcarAvisada(ctx, a); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got, _ = s.VerPendencia(ctx, nil, p); got.AvisadaEm == nil {
+		t.Fatalf("o aviso certo não confirmou: %+v", got)
 	}
 }

@@ -263,7 +263,7 @@ func desfazer0005(t *testing.T, s *Store) {
 	if _, err := s.db.Exec("DROP INDEX pendencia_slug"); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"detalhe", "opcoes", "slug", "arquivo", "arquivo_hash", "arquivo_alterado", "autor", "resposta_opcao", "respondida_em", "respondida_por", "avisada_em", "abertura_avisada_em", "aviso_falhou_em"} {
+	for _, c := range []string{"detalhe", "opcoes", "slug", "arquivo", "arquivo_hash", "arquivo_alterado", "autor", "resposta_opcao", "respondida_em", "respondida_por", "avisada_em", "abertura_avisada_em", "aviso_falhou_em", "resposta_versao"} {
 		if _, err := s.db.Exec("ALTER TABLE pendencia DROP COLUMN " + c); err != nil {
 			t.Fatal(err)
 		}

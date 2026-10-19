@@ -361,3 +361,20 @@ func TestDaemonCicloCompletoDaPendencia(t *testing.T) {
 		t.Fatalf("socket ficou: %v", err)
 	}
 }
+
+// Regressão da revisão r1: pend ver mostra a resposta inteira (a listagem é que abrevia, com …).
+func TestPendVerMostraARespostaInteira(t *testing.T) {
+	env, pasta := pendEnv(t)
+	escrever(t, filepath.Join(pasta, "d.md"), arquivoDecisao)
+	ok(t, env, "pend", "importar", filepath.Join(pasta, "d.md"))
+	texto := "Resposta curta no começo. " + strings.Repeat("contexto ", 12) + "NÃO EXECUTE SEM BACKUP"
+	ok(t, env, "pend", "responder", "TG-15#P1", "--opcao", "2", texto)
+	ver := ok(t, env, "--output", "text", "pend", "ver", "orq/15#P1")
+	if !strings.Contains(ver, "NÃO EXECUTE SEM BACKUP") || !strings.Contains(ver, "opção 2 (go.yaml.in/yaml/v3)") {
+		t.Fatalf("pend ver truncou a resposta:\n%s", ver)
+	}
+	lista := ok(t, env, "--output", "text", "pend", "list", "--respondidas")
+	if strings.Contains(lista, "NÃO EXECUTE") || !strings.Contains(lista, "…") {
+		t.Fatalf("a listagem devia abreviar com reticências:\n%s", lista)
+	}
+}

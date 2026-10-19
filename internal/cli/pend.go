@@ -285,8 +285,13 @@ func textoPendVer(w io.Writer, v PendVer) error {
 		}
 	}
 	if p.RespondidaEm != nil {
-		fmt.Fprintf(w, "\nresposta de %s em %s: %s\n", q(ouStr(p.RespondidaPor, "?")), *p.RespondidaEm, q(respostaCurta(p)))
-		if p.Resposta != nil && strings.Contains(*p.Resposta, "\n") {
+		escolha := textoOpcaoEscolhida(p)
+		if escolha == "" {
+			escolha = "só texto"
+		}
+		fmt.Fprintf(w, "\nresposta de %s em %s: %s\n", q(ouStr(p.RespondidaPor, "?")), *p.RespondidaEm, q(escolha))
+		// Aqui a resposta vai inteira; só a listagem a abrevia.
+		if p.Resposta != nil && *p.Resposta != "" {
 			for _, l := range strings.Split(*p.Resposta, "\n") {
 				fmt.Fprintf(w, "  | %s\n", q(l))
 			}

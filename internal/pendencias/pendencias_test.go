@@ -391,8 +391,8 @@ func TestVarrerIgnoraTmpEOcultoESymlinkParaFora(t *testing.T) {
 	if err := os.Symlink(fora, filepath.Join(a.raiz, worker, "link.md")); err != nil {
 		t.Fatal(err)
 	}
-	// Symlink para dentro da raiz é aceito.
-	if err := os.Symlink(filepath.Join(a.raiz, worker, "bom.md"), filepath.Join(a.raiz, worker, "atalho.md")); err != nil {
+	// Symlink relativo para dentro da raiz é aceito (o os.Root recusa os de destino absoluto).
+	if err := os.Symlink("bom.md", filepath.Join(a.raiz, worker, "atalho.md")); err != nil {
 		t.Fatal(err)
 	}
 	// Pasta que é symlink para fora: nem lê, nem escreve do outro lado.
@@ -544,5 +544,58 @@ func TestImportarNaoSegueTmpPlantadoNemTravaEmFIFO(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("o importador travou num FIFO")
+	}
+}
+
+// Regressão da revisão r1: a pasta pendencias/ vira symlink para fora da raiz entre a leitura do
+// arquivo e a escrita do resultado. Nada pode ser escrito fora.
+func TestDiretorioTrocadoDuranteRegistroNaoEscreveFora(t *testing.T) {
+	a := novoAmbiente(t)
+	p := a.grava("orq/TG-15/revisao/r1/pendencias/troca.md", duvida)
+	dir := filepath.Dir(p)
+	outro := t.TempDir()
+	mudou := false
+	a.st.Now = func() time.Time {
+		if !mudou {
+			mudou = true
+			if err := os.Rename(dir, dir+"-antes"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outro, dir); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return time.Now()
+	}
+	r, err := a.imp.Importar(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entradas, _ := os.ReadDir(outro)
+	if len(entradas) != 0 {
+		t.Fatalf("escreveu fora da raiz: %v (estado %s)", entradas, r.Estado)
+	}
+	if r.Estado != EstadoErro {
+		t.Fatalf("estado = %s, queria erro", r.Estado)
+	}
+}
+
+// O mesmo, com o erro: a pasta vira link logo depois de o arquivo ser recusado.
+func TestDiretorioTrocadoNaoRecebeErroTxt(t *testing.T) {
+	a := novoAmbiente(t)
+	p := a.grava("orq/TG-15/revisao/r1/pendencias/ruim.md", "sem frontmatter")
+	dir := filepath.Dir(p)
+	outro := t.TempDir()
+	if err := os.Rename(dir, dir+"-antes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outro, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.imp.Importar(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if entradas, _ := os.ReadDir(outro); len(entradas) != 0 {
+		t.Fatalf("escreveu fora da raiz: %v", entradas)
 	}
 }

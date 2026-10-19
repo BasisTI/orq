@@ -145,6 +145,19 @@ func textoPendencia(w io.Writer, p central.Pendencia, recuo string) error {
 	return err
 }
 
+// textoOpcaoEscolhida é "opção N (título)" da resposta, ou vazio se ela não escolheu opção.
+func textoOpcaoEscolhida(p central.Pendencia) string {
+	if p.RespostaOpcao == nil {
+		return ""
+	}
+	for _, o := range p.Opcoes {
+		if o.ID == *p.RespostaOpcao {
+			return fmt.Sprintf("opção %d (%s)", o.ID, o.Titulo)
+		}
+	}
+	return fmt.Sprintf("opção %d", *p.RespostaOpcao)
+}
+
 // respostaCurta resume a resposta da pessoa numa linha: a opção e o começo do texto.
 func respostaCurta(p central.Pendencia) string {
 	var partes []string

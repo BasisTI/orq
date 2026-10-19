@@ -64,8 +64,11 @@ var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 type local struct {
 	us   refs.US
 	slug string
-	dir  string
-	path string
+	dir  string // caminho absoluto da pasta, para as mensagens
+	path string // caminho absoluto do arquivo, para as mensagens
+	// rel e dirRel são os mesmos caminhos relativos à raiz: é por eles, e só por eles, que o
+	// importador lê e escreve (os.Root).
+	rel, dirRel string
 }
 
 func (i *Importador) logf(f string, a ...any) {
@@ -117,37 +120,44 @@ func (i *Importador) localDe(arquivo string) (local, error) {
 			return local{}, usoImport("pasta oculta no caminho", "")
 		}
 	}
-	return local{us: refs.US{Projeto: projeto, Ref: ref}, slug: slug, dir: filepath.Dir(arquivo), path: arquivo}, nil
+	return local{us: refs.US{Projeto: projeto, Ref: ref}, slug: slug, dir: filepath.Dir(arquivo), path: arquivo, rel: rel, dirRel: filepath.Dir(rel)}, nil
 }
 
 func usoImport(cause, recovery string) error {
 	return &output.Error{Code: "uso", Cause: cause, Recovery: recovery, Exit: output.ExitUsage}
 }
 
-// dentroDaRaiz confere, depois de resolver os symlinks, que p fica dentro da raiz também resolvida.
-func (i *Importador) dentroDaRaiz(p string) (string, error) {
-	raiz, err := filepath.EvalSymlinks(i.Raiz)
-	if err != nil {
-		return "", err
-	}
-	real, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(raiz, real)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", &output.Error{Code: "symlink_fora_da_raiz", Cause: fmt.Sprintf("%s resolve para %s, fora de ORQ_TRABALHO_DIR", p, real), Recovery: "o orq não segue symlink para fora da pasta de trabalho", Exit: output.ExitConflict}
-	}
-	return real, nil
+// errFora é o erro de um caminho que sai da raiz (symlink para fora, ou um ".." que o os.Root recusa).
+func errFora(caminho string) error {
+	return &output.Error{Code: "symlink_fora_da_raiz", Cause: fmt.Sprintf("%s resolve para fora de ORQ_TRABALHO_DIR", caminho), Recovery: "o orq não segue symlink para fora da pasta de trabalho", Exit: output.ExitConflict}
 }
 
-// lerArquivo lê o arquivo (já resolvido) com o limite de tamanho; só arquivo regular.
-func lerArquivo(real string) ([]byte, error) {
-	// Um FIFO plantado como x.md travaria o daemon no open: confere o tipo antes e abre sem bloquear.
-	if st, err := os.Lstat(real); err == nil && !st.Mode().IsRegular() {
+// foraDaRaiz diz se err é a recusa do os.Root a um caminho que escapa da raiz.
+func foraDaRaiz(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "path escapes from parent")
+}
+
+// abrirRaiz abre ORQ_TRABALHO_DIR. Toda leitura e escrita da importação passa por ela: o os.Root
+// resolve cada componente com openat e recusa o que sai da raiz, também quando uma pasta vira
+// symlink depois de conferida (conferir antes e usar depois não basta). Raiz que não existe devolve
+// (nil, nil): não há o que importar.
+func (i *Importador) abrirRaiz() (*os.Root, error) {
+	r, err := os.OpenRoot(i.Raiz)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return r, err
+}
+
+// lerArquivo lê o arquivo, só regular e com o limite de tamanho. Um FIFO plantado como x.md
+// travaria o daemon no open: o tipo é conferido antes, e a abertura não bloqueia.
+func lerArquivo(raiz *os.Root, rel string) ([]byte, error) {
+	if st, err := raiz.Stat(rel); err != nil {
+		return nil, err
+	} else if !st.Mode().IsRegular() {
 		return nil, &ErroArquivo{Problemas: []Problema{{Motivo: "não é um arquivo regular"}}}
 	}
-	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	f, err := raiz.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -159,11 +169,7 @@ func lerArquivo(real string) ([]byte, error) {
 	if !st.Mode().IsRegular() {
 		return nil, &ErroArquivo{Problemas: []Problema{{Motivo: "não é um arquivo regular"}}}
 	}
-	b, err := io.ReadAll(io.LimitReader(f, LimiteArquivo+1))
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
+	return io.ReadAll(io.LimitReader(f, LimiteArquivo+1))
 }
 
 // Importar importa um arquivo: cria a pendência (ou reconhece a que já existe), grava
@@ -174,29 +180,35 @@ func (i *Importador) Importar(ctx context.Context, arquivo string) (Resultado, e
 	if err != nil {
 		return Resultado{Arquivo: arquivo}, err
 	}
-	return i.processar(ctx, l, nil)
+	raiz, err := i.abrirRaiz()
+	if err != nil {
+		return Resultado{Arquivo: arquivo}, err
+	}
+	if raiz == nil {
+		return Resultado{Arquivo: arquivo}, naoExiste(arquivo)
+	}
+	defer raiz.Close()
+	return i.processar(ctx, raiz, l, nil)
 }
 
-func (i *Importador) processar(ctx context.Context, l local, conhecidas map[central.ChaveSlug]central.Importada) (Resultado, error) {
+func naoExiste(arquivo string) error {
+	return &output.Error{Code: "nao_encontrado", Cause: arquivo + " não existe", Exit: output.ExitNotFound}
+}
+
+func (i *Importador) processar(ctx context.Context, raiz *os.Root, l local, conhecidas map[central.ChaveSlug]central.Importada) (Resultado, error) {
 	r := Resultado{Arquivo: l.path}
-	real, err := i.dentroDaRaiz(l.path)
-	if err != nil {
-		e := output.AsError(err)
-		if e.Code != "symlink_fora_da_raiz" {
-			return r, err
-		}
-		// Só escreve ao lado do arquivo se a pasta também está dentro da raiz.
-		if _, err := i.dentroDaRaiz(l.dir); err == nil {
-			i.gravarErro(l, []string{e.Cause})
-		}
-		r.Estado, r.Erro = EstadoErro, e.Cause
-		return r, nil
-	}
-	conteudo, err := lerArquivo(real)
+	conteudo, err := lerArquivo(raiz, l.rel)
 	if err != nil {
 		var ea *ErroArquivo
-		if errors.As(err, &ea) {
-			return i.recusar(l, r, ea), nil
+		switch {
+		case foraDaRaiz(err):
+			e := errFora(l.path)
+			// Só escreve ao lado do arquivo se a pasta também fica dentro da raiz: o os.Root recusa o resto.
+			i.gravarErro(raiz, l, []string{output.AsError(e).Cause})
+			r.Estado, r.Erro = EstadoErro, output.AsError(e).Cause
+			return r, nil
+		case errors.As(err, &ea):
+			return i.recusar(raiz, l, r, ea), nil
 		}
 		return r, err
 	}
@@ -217,13 +229,13 @@ func (i *Importador) processar(ctx context.Context, l local, conhecidas map[cent
 				i.logf("pendência %s: o arquivo %s mudou depois do registro; a pendência não muda", refs.PendID(l.us.Ref, reg.Numero), l.path)
 			}
 		}
-		return i.concluir(l, r, l.us, reg.Numero, EstadoJaRegistrada)
+		return i.concluir(raiz, l, r, l.us, reg.Numero, EstadoJaRegistrada)
 	}
 	a, err := Ler(conteudo)
 	if err != nil {
 		var ea *ErroArquivo
 		if errors.As(err, &ea) {
-			return i.recusar(l, r, ea), nil
+			return i.recusar(raiz, l, r, ea), nil
 		}
 		return r, err
 	}
@@ -231,7 +243,7 @@ func (i *Importador) processar(ctx context.Context, l local, conhecidas map[cent
 		Opcoes: a.Opcoes, Slug: l.slug, Arquivo: l.path, Hash: hash})
 	if err != nil {
 		if e := output.AsError(err); problemaDoArquivo(e) {
-			return i.recusar(l, r, &ErroArquivo{Problemas: []Problema{{Motivo: e.Cause + recoveryDe(e)}}}), nil
+			return i.recusar(raiz, l, r, &ErroArquivo{Problemas: []Problema{{Motivo: e.Cause + recoveryDe(e)}}}), nil
 		}
 		return r, err
 	}
@@ -240,7 +252,7 @@ func (i *Importador) processar(ctx context.Context, l local, conhecidas map[cent
 		estado = EstadoJaRegistrada
 	}
 	r.Alterado = res.Alterada
-	return i.concluir(l, r, l.us, res.Pendencia.Numero, estado)
+	return i.concluir(raiz, l, r, l.us, res.Pendencia.Numero, estado)
 }
 
 // problemaDoArquivo separa o que é culpa do arquivo (US que não existe, onda encerrada, opção
@@ -257,35 +269,35 @@ func recoveryDe(e *output.Error) string {
 }
 
 // recusar grava o .erro.txt e devolve o resultado de erro.
-func (i *Importador) recusar(l local, r Resultado, e *ErroArquivo) Resultado {
+func (i *Importador) recusar(raiz *os.Root, l local, r Resultado, e *ErroArquivo) Resultado {
 	linhas := make([]string, len(e.Problemas))
 	for k, p := range e.Problemas {
 		linhas[k] = p.String()
 	}
-	i.gravarErro(l, linhas)
+	i.gravarErro(raiz, l, linhas)
 	r.Estado, r.Erro = EstadoErro, e.Error()
 	return r
 }
 
-func (i *Importador) caminhoErro(l local) string {
-	return filepath.Join(l.dir, l.slug+".erro.txt")
-}
+func (l local) relErro() string { return filepath.Join(l.dirRel, l.slug+".erro.txt") }
 
-func (i *Importador) gravarErro(l local, linhas []string) {
+func (i *Importador) gravarErro(raiz *os.Root, l local, linhas []string) {
 	texto := "Pendência não registrada: " + filepath.Base(l.path) + "\n" + strings.Join(linhas, "\n") + "\n"
-	p := i.caminhoErro(l)
-	if b, ok := lerSeRegular(p); ok && string(b) == texto {
+	if b, ok := lerSeRegular(raiz, l.relErro()); ok && string(b) == texto {
 		return
 	}
-	if err := escreverAtomico(p, []byte(texto)); err != nil {
-		i.logf("não gravei %s: %v", p, err)
+	if err := escreverAtomico(raiz, l.relErro(), []byte(texto)); err != nil {
+		if !foraDaRaiz(err) {
+			i.logf("não gravei %s: %v", l.relErro(), err)
+		}
 		return
 	}
 	i.logf("pendência %s recusada: %s", l.path, strings.Join(linhas, "; "))
 }
 
-// concluir grava o .registrada.json (se faltar ou estiver diferente) e apaga o .erro.txt.
-func (i *Importador) concluir(l local, r Resultado, u refs.US, numero int, estado string) (Resultado, error) {
+// concluir grava o .registrada.json (se faltar ou estiver diferente) e apaga o .erro.txt. Se a
+// pasta saiu da raiz no meio do caminho, o resultado vira erro e nada é escrito fora.
+func (i *Importador) concluir(raiz *os.Root, l local, r Resultado, u refs.US, numero int, estado string) (Resultado, error) {
 	reg := Registrada{ID: refs.PendID(u.Ref, numero), Chave: u.Chave() + "#P" + strconv.Itoa(numero), URL: refs.URLPendencia(i.BaseURL, u.Projeto, u.Ref, numero)}
 	r.Estado, r.ID, r.Chave, r.URL = estado, reg.ID, reg.Chave, reg.URL
 	b, err := json.MarshalIndent(reg, "", "  ")
@@ -293,9 +305,13 @@ func (i *Importador) concluir(l local, r Resultado, u refs.US, numero int, estad
 		return r, err
 	}
 	b = append(b, '\n')
-	p := filepath.Join(l.dir, l.slug+".registrada.json")
-	if atual, ok := lerSeRegular(p); !ok || string(atual) != string(b) {
-		if err := escreverAtomico(p, b); err != nil {
+	p := filepath.Join(l.dirRel, l.slug+".registrada.json")
+	if atual, ok := lerSeRegular(raiz, p); !ok || string(atual) != string(b) {
+		if err := escreverAtomico(raiz, p, b); err != nil {
+			if foraDaRaiz(err) {
+				r.Estado, r.Erro = EstadoErro, errFora(l.dir).(*output.Error).Cause
+				return r, nil
+			}
 			return r, fmt.Errorf("gravar %s: %w", p, err)
 		}
 		if estado == EstadoJaRegistrada {
@@ -303,42 +319,49 @@ func (i *Importador) concluir(l local, r Resultado, u refs.US, numero int, estad
 		}
 		i.logf("pendência %s registrada para %s", reg.ID, l.path)
 	}
-	if err := os.Remove(i.caminhoErro(l)); err != nil && !os.IsNotExist(err) {
-		i.logf("não removi %s: %v", i.caminhoErro(l), err)
+	if err := raiz.Remove(l.relErro()); err != nil && !os.IsNotExist(err) && !foraDaRaiz(err) {
+		i.logf("não removi %s: %v", l.relErro(), err)
 	}
 	return r, nil
 }
 
-// lerSeRegular lê p só se for arquivo regular: um FIFO no lugar do .erro.txt não trava o daemon.
-func lerSeRegular(p string) ([]byte, bool) {
-	if st, err := os.Lstat(p); err != nil || !st.Mode().IsRegular() {
+// lerSeRegular lê rel só se for arquivo regular: um FIFO no lugar do .erro.txt não trava o daemon.
+func lerSeRegular(raiz *os.Root, rel string) ([]byte, bool) {
+	if st, err := raiz.Lstat(rel); err != nil || !st.Mode().IsRegular() {
 		return nil, false
 	}
-	b, err := os.ReadFile(p)
+	f, err := raiz.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, LimiteArquivo))
 	return b, err == nil
 }
 
-// escreverAtomico grava num arquivo oculto .tmp e renomeia: quem lê nunca vê o meio.
-func escreverAtomico(p string, b []byte) error {
-	tmp := filepath.Join(filepath.Dir(p), "."+filepath.Base(p)+".tmp")
-	// A pasta é de quem escreve o arquivo de pendência (um worker): um .tmp que já exista, ou que
-	// seja um link para outro lugar, não pode redirecionar a escrita do daemon.
-	_ = os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+// escreverAtomico grava num arquivo oculto .tmp e renomeia: quem lê nunca vê o meio. A pasta é de
+// quem escreve o arquivo de pendência (um worker): um .tmp que já exista, ou um link, não redireciona
+// a escrita do daemon, e uma pasta trocada por symlink para fora da raiz é recusada pelo os.Root.
+func escreverAtomico(raiz *os.Root, rel string, b []byte) error {
+	tmp := filepath.Join(filepath.Dir(rel), "."+filepath.Base(rel)+".tmp")
+	if err := raiz.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	f, err := raiz.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
 	if _, err := f.Write(b); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = raiz.Remove(tmp)
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = raiz.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, p); err != nil {
-		_ = os.Remove(tmp)
+	if err := raiz.Rename(tmp, rel); err != nil {
+		_ = raiz.Remove(tmp)
 		return err
 	}
 	return nil
@@ -348,6 +371,7 @@ func escreverAtomico(p string, b []byte) error {
 // falhou (registrada, erro, ou arquivo alterado); o resto é silêncio. Falha de um arquivo não
 // interrompe os outros; o primeiro erro de banco ou de disco volta no fim.
 func (i *Importador) Varrer(ctx context.Context) ([]Resultado, error) {
+	// A busca só lista nomes; o que ela acha é lido e escrito pelo os.Root, que recusa o que sai da raiz.
 	var arquivos []string
 	for _, padrao := range []string{"*/TG-*/pendencias/*.md", "*/TG-*/*/*/pendencias/*.md"} {
 		achados, err := filepath.Glob(filepath.Join(globEscapado(i.Raiz), padrao))
@@ -360,6 +384,11 @@ func (i *Importador) Varrer(ctx context.Context) ([]Resultado, error) {
 	if len(arquivos) == 0 {
 		return nil, nil
 	}
+	raiz, err := i.abrirRaiz()
+	if err != nil || raiz == nil {
+		return nil, err
+	}
+	defer raiz.Close()
 	conhecidas, err := i.St.PendenciasImportadas(ctx)
 	if err != nil {
 		return nil, err
@@ -377,7 +406,7 @@ func (i *Importador) Varrer(ctx context.Context) ([]Resultado, error) {
 		if err != nil {
 			continue // fora do formato: não é nosso
 		}
-		r, err := i.processar(ctx, l, conhecidas)
+		r, err := i.processar(ctx, raiz, l, conhecidas)
 		if err != nil {
 			if primeiro == nil {
 				primeiro = fmt.Errorf("%s: %w", a, err)

@@ -18,7 +18,7 @@
 - Versão 1, US #3: o esqueleto.
 - Ainda versão 1, US #4: os campos `herdr` (coordenador e US), `taiga` (US), `atualizado_em` e `erro` (MR) e `fontes` (raiz) entraram, e `MR.estado` passou a ser preenchido. Tudo aditivo: `estado` já estava declarado como `draft|aberta|pronta|mesclada|fechada`, e quem lia a versão 1 continua lendo.
 - Ainda versão 1, US #10: o campo `projetos` (raiz) entrou, com o índice de tom de cada projeto. Aditivo.
-- Ainda versão 1, US #15: a `Pendencia` ganhou `chave`, `estado`, `tem_detalhe`, `opcoes`, `slug`, `arquivo`, `autor`, `resposta_opcao`, `respondida_em`, `respondida_por`, `avisada_em`, `arquivo_alterado` e `sem_coordenador`. Aditivo: o sentido dos campos antigos não mudou, e `aberta` continua `true` na pendência respondida (ela só fecha em `orq pend resolver`). O `detalhe` (até 64 KiB por pendência) não vai no snapshot: `orq pend ver` o traz.
+- Ainda versão 1, US #15: a `Pendencia` ganhou `chave`, `estado`, `tem_detalhe`, `opcoes`, `slug`, `arquivo`, `autor`, `resposta_opcao`, `respondida_em`, `respondida_por`, `avisada_em`, `resposta_versao`, `arquivo_alterado` e `sem_coordenador`. Aditivo: o sentido dos campos antigos não mudou, e `aberta` continua `true` na pendência respondida (ela só fecha em `orq pend resolver`). O `detalhe` (até 64 KiB por pendência) não vai no snapshot: `orq pend ver` o traz.
 
 ## Estado vivo (US #4)
 
@@ -157,6 +157,7 @@ Pendencia {
   "respondida_em": data|null,
   "respondida_por": string|null,           # usuário da web, "local" (web em TCP) ou "chat"
   "avisada_em": data|null,                 # quando o coordenador recebeu o aviso da resposta
+  "resposta_versao": int,                  # sobe a cada troca de resposta; o aviso confirma esta versão
   "arquivo_alterado": bool,                # o arquivo mudou depois do registro; a pendência não mudou
   "sem_coordenador": bool                  # respondida, e o aviso falhou porque o coordenador sumiu
 }

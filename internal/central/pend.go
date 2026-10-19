@@ -46,6 +46,8 @@ type Pendencia struct {
 	RespondidaEm  *string `json:"respondida_em"`
 	RespondidaPor *string `json:"respondida_por"`
 	AvisadaEm     *string `json:"avisada_em"`
+	// RespostaVersao sobe a cada troca de resposta; o aviso confirma a versão que entregou.
+	RespostaVersao int `json:"resposta_versao"`
 	// ArquivoAlterado: o arquivo mudou depois do registro; a pendência não muda com ele.
 	ArquivoAlterado bool `json:"arquivo_alterado"`
 	// SemCoordenador: respondida e o aviso ao coordenador falhou porque ele não existe mais.
@@ -303,7 +305,7 @@ func carregarPendenciasSQL(ctx context.Context, q querier, comDetalhe bool, clau
 		detalhe = "p.detalhe"
 	}
 	rows, err := q.QueryContext(ctx, `SELECT p.projeto, p.ref, p.numero, p.tipo, p.texto, p.pane_origem, p.aberta, p.resposta, p.aberta_em, p.resolvida_em, us.onda_id, onda.coordenador,
-		p.detalhe IS NOT NULL, `+detalhe+`, p.opcoes, p.slug, p.arquivo, p.autor, p.resposta_opcao, p.respondida_em, p.respondida_por, p.avisada_em, p.arquivo_alterado IS NOT NULL, p.aviso_falhou_em IS NOT NULL
+		p.detalhe IS NOT NULL, `+detalhe+`, p.opcoes, p.slug, p.arquivo, p.autor, p.resposta_opcao, p.respondida_em, p.respondida_por, p.avisada_em, p.resposta_versao, p.arquivo_alterado IS NOT NULL, p.aviso_falhou_em IS NOT NULL
 		FROM pendencia p JOIN us ON us.projeto = p.projeto AND us.ref = p.ref JOIN onda ON onda.id = us.onda_id `+clause, args...)
 	if err != nil {
 		return nil, err
@@ -316,7 +318,7 @@ func carregarPendenciasSQL(ctx context.Context, q querier, comDetalhe bool, clau
 		var opcoes *string
 		var falhou bool
 		if err := rows.Scan(&u.Projeto, &u.Ref, &p.Numero, &p.Tipo, &p.Texto, &p.PaneOrigem, &p.Aberta, &p.Resposta, &p.AbertaEm, &p.ResolvidaEm, &p.OndaID, &p.Coordenador,
-			&p.TemDetalhe, &p.Detalhe, &opcoes, &p.Slug, &p.Arquivo, &p.Autor, &p.RespostaOpcao, &p.RespondidaEm, &p.RespondidaPor, &p.AvisadaEm, &p.ArquivoAlterado, &falhou); err != nil {
+			&p.TemDetalhe, &p.Detalhe, &opcoes, &p.Slug, &p.Arquivo, &p.Autor, &p.RespostaOpcao, &p.RespondidaEm, &p.RespondidaPor, &p.AvisadaEm, &p.RespostaVersao, &p.ArquivoAlterado, &falhou); err != nil {
 			return nil, err
 		}
 		p.ID, p.US = refs.PendID(u.Ref, p.Numero), u.Chave()

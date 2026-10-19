@@ -80,7 +80,7 @@ func bancoV3(t *testing.T, dir string) {
 		"DROP INDEX pendencia_slug", "ALTER TABLE pendencia DROP COLUMN detalhe", "ALTER TABLE pendencia DROP COLUMN opcoes", "ALTER TABLE pendencia DROP COLUMN slug",
 		"ALTER TABLE pendencia DROP COLUMN arquivo", "ALTER TABLE pendencia DROP COLUMN arquivo_hash", "ALTER TABLE pendencia DROP COLUMN arquivo_alterado", "ALTER TABLE pendencia DROP COLUMN autor",
 		"ALTER TABLE pendencia DROP COLUMN resposta_opcao", "ALTER TABLE pendencia DROP COLUMN respondida_em", "ALTER TABLE pendencia DROP COLUMN respondida_por", "ALTER TABLE pendencia DROP COLUMN avisada_em",
-		"ALTER TABLE pendencia DROP COLUMN abertura_avisada_em", "ALTER TABLE pendencia DROP COLUMN aviso_falhou_em",
+		"ALTER TABLE pendencia DROP COLUMN abertura_avisada_em", "ALTER TABLE pendencia DROP COLUMN aviso_falhou_em", "ALTER TABLE pendencia DROP COLUMN resposta_versao",
 		"DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)

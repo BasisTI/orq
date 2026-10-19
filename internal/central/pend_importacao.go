@@ -219,8 +219,9 @@ func (s *Store) AvisosPendentes(ctx context.Context) ([]Aviso, error) {
 	return avisos, err
 }
 
-// MarcarAvisada grava que o coordenador recebeu o aviso. Resposta trocada depois da leitura do
-// aviso não conta: o aviso novo ainda é devido.
+// MarcarAvisada grava que o coordenador recebeu o aviso. Confirma a versão da resposta que foi
+// avisada (resposta_versao), não um horário: resposta trocada depois da leitura do aviso, mesmo no
+// mesmo segundo, não conta, e o aviso novo ainda é devido.
 func (s *Store) MarcarAvisada(ctx context.Context, a Aviso) error {
 	return s.escrever(ctx, func(tx *sql.Tx) error {
 		var alvo usAlvo
@@ -231,11 +232,11 @@ func (s *Store) MarcarAvisada(ctx context.Context, a Aviso) error {
 		var res sql.Result
 		switch a.Tipo {
 		case AvisoResposta:
-			res, err = tx.ExecContext(ctx, `UPDATE pendencia SET avisada_em = ?, aviso_falhou_em = NULL WHERE projeto = ? AND ref = ? AND numero = ? AND respondida_em = ? AND avisada_em IS NULL`,
-				s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero, *a.Pendencia.RespondidaEm)
+			res, err = tx.ExecContext(ctx, `UPDATE pendencia SET avisada_em = ?, aviso_falhou_em = NULL WHERE projeto = ? AND ref = ? AND numero = ? AND resposta_versao = ? AND respondida_em IS NOT NULL AND avisada_em IS NULL`,
+				s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero, a.Pendencia.RespostaVersao)
 		default:
-			res, err = tx.ExecContext(ctx, `UPDATE pendencia SET abertura_avisada_em = ?, aviso_falhou_em = NULL WHERE projeto = ? AND ref = ? AND numero = ? AND abertura_avisada_em IS NULL`,
-				s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero)
+			res, err = tx.ExecContext(ctx, `UPDATE pendencia SET abertura_avisada_em = ?, aviso_falhou_em = NULL WHERE projeto = ? AND ref = ? AND numero = ? AND resposta_versao = ? AND abertura_avisada_em IS NULL`,
+				s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero, a.Pendencia.RespostaVersao)
 		}
 		if err != nil {
 			return err
@@ -256,8 +257,10 @@ func (s *Store) RegistrarFalhaAviso(ctx context.Context, a Aviso, motivo string)
 		if err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE pendencia SET aviso_falhou_em = ? WHERE projeto = ? AND ref = ? AND numero = ? AND aviso_falhou_em IS NULL`,
-			s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero)
+		// Só marca se a resposta ainda é a do aviso que falhou: trocada nesse meio-tempo, o aviso novo
+		// ainda não foi tentado, e não pode herdar o "sem coordenador" do velho.
+		res, err := tx.ExecContext(ctx, `UPDATE pendencia SET aviso_falhou_em = ? WHERE projeto = ? AND ref = ? AND numero = ? AND resposta_versao = ? AND aviso_falhou_em IS NULL`,
+			s.agora(), alvo.Projeto, alvo.Ref, a.Pendencia.Numero, a.Pendencia.RespostaVersao)
 		if err != nil {
 			return err
 		}

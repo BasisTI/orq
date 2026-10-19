@@ -177,7 +177,7 @@ func (s *Store) ResponderPendencia(ctx context.Context, coord *Coordenador, p re
 		if r.Por == PorChat {
 			avisada = agora
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE pendencia SET resposta = ?, resposta_opcao = ?, respondida_em = ?, respondida_por = ?, avisada_em = ?, aviso_falhou_em = NULL
+		if _, err := tx.ExecContext(ctx, `UPDATE pendencia SET resposta = ?, resposta_opcao = ?, respondida_em = ?, respondida_por = ?, avisada_em = ?, aviso_falhou_em = NULL, resposta_versao = resposta_versao + 1
 			WHERE projeto = ? AND ref = ? AND numero = ?`, nulo(r.Texto), r.Opcao, agora, r.Por, avisada, alvo.Projeto, alvo.Ref, p.Numero); err != nil {
 			return err
 		}
