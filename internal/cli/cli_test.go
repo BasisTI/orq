@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/semdaemon"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,7 +29,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("ORQ_TEST_MAIN") == "1" {
 		os.Exit(Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv, false))
 	}
-	code := m.Run()
+	code := semdaemon.Main(m)
 	if binFalsoDir != "" {
 		os.RemoveAll(binFalsoDir)
 	}

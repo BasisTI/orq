@@ -25,6 +25,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
 - `internal/herdrfalso`: herdr falso dos testes de `orq central abrir` (árvore de splits em JSON, regras do Herdr 0.9.3). Os testes de `internal/cli` o compilam uma vez (`go build`); não entra no binário `orq`.
 - `internal/upgrade`: o `orq upgrade` (go install, plugin, reinício do daemon e conferência de versões). Não abre o banco; o `version` de cada binário traz o commit e o `schema`.
+- `internal/semdaemon`: rede de segurança dos testes (só `_test.go` importam). O `TestMain` de pacote que sobe daemon chama `semdaemon.Main(m)`: raiz de `TMPDIR` própria e, no fim, falha a suíte (nomeando o teste) e encerra qualquer `orq daemon` vivo sob ela. Teste que sobe daemon, direta ou indiretamente, o para no `t.Cleanup`.
 - `internal/refs`: parse de `projeto/312`, `TG-312`, `TG-312#P2` e URL de MR.
 - `internal/output`: envelope de erro `{"error":{"code","cause","recovery"}}` e códigos de saída.
 - `docs/snapshot.md`: contrato do `orq snapshot`.
