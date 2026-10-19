@@ -606,14 +606,7 @@ func TestUpgradeNaoConfirmaDaemonQueNaoAbriuOBanco(t *testing.T) {
 	c.instalarNovo()
 	c.subirDaemon(c.plugin)
 
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '99'"); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
+	alterarBanco(t, c.estado, "UPDATE banco_meta SET valor = '99'", "PRAGMA user_version = 99")
 	// A trava de início presa por 1 s: o filho tem de esperar por ela antes de abrir o banco, e
 	// a trava de daemon que ele já segura não pode valer como "pronto".
 	f, err := os.OpenFile(filepath.Join(c.estado, "central.db.init.lock"), os.O_RDWR|os.O_CREATE, 0o600)
@@ -673,14 +666,8 @@ func TestDaemonSaiQuandoOBancoPassaAExigirMais(t *testing.T) {
 				}
 				time.Sleep(25 * time.Millisecond)
 			}
-			db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db")+"?_pragma=busy_timeout(5000)")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '" + tc.leitor + "' WHERE chave = 'leitor_minimo'; UPDATE banco_meta SET valor = '" + tc.escritor + "' WHERE chave = 'escritor_minimo'"); err != nil {
-				t.Fatal(err)
-			}
-			db.Close()
+			alterarBanco(t, c.estado, "UPDATE banco_meta SET valor = '"+tc.leitor+"' WHERE chave = 'leitor_minimo'",
+				"UPDATE banco_meta SET valor = '"+tc.escritor+"' WHERE chave = 'escritor_minimo'", "PRAGMA user_version = 99")
 			select {
 			case err := <-saiu:
 				ee, ok := err.(*exec.ExitError)
@@ -709,14 +696,7 @@ func TestDetachFalhaQuandoODaemonNaoPodeEscrever(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(c.estado, "central.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("PRAGMA user_version = 99; UPDATE banco_meta SET valor = '99' WHERE chave = 'escritor_minimo'"); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
+	alterarBanco(t, c.estado, "UPDATE banco_meta SET valor = '99' WHERE chave = 'escritor_minimo'", "PRAGMA user_version = 99")
 
 	cmd := exec.Command(c.plugin, "daemon", "--detach", "--output", "json")
 	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+c.estado, "ORQ_HERDR_BIN=/nao/existe/herdr", "HERDR_SOCKET_PATH="+filepath.Join(c.raiz, "sem.sock"))
@@ -774,5 +754,30 @@ func TestTravaNaLinhaConfereODispositivo(t *testing.T) {
 		if ok {
 			t.Errorf("aceitou: %s", nome)
 		}
+	}
+}
+
+// alterarBanco aplica comandos ao banco de um diretório de estado por fora da Store, enquanto um
+// daemon de teste pode estar escrevendo nele: a conexão espera a trava (busy_timeout) e toma a de
+// escrita de uma vez (_txlock=immediate), numa transação só.
+func alterarBanco(t *testing.T, dir string, comandos ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "central.db")+"?_pragma=busy_timeout(15000)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range comandos {
+		if _, err := tx.Exec(c); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("%s: %v", c, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }

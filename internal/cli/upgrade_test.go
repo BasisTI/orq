@@ -71,7 +71,7 @@ func bancoV3(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	st.Close()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, central.Arquivo))
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, central.Arquivo)+"?_pragma=busy_timeout(15000)")
 	if err != nil {
 		t.Fatal(err)
 	}

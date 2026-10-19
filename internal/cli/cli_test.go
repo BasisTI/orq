@@ -479,7 +479,7 @@ func TestDiarioTomIdentificaOProjeto(t *testing.T) {
 func TestBancoMaisNovoApontaOUpgrade(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a")
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db"))
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(env["ORQ_STATE_DIR"], "central.db")+"?_pragma=busy_timeout(15000)")
 	if err != nil {
 		t.Fatal(err)
 	}
