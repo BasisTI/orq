@@ -63,6 +63,8 @@ type mrVista struct {
 	// Pipeline e Aprovacao são sempre preenchidos: "desconhecido" quando o cache não tem o dado.
 	Pipeline, Aprovacao       string
 	PipelineCls, AprovacaoCls string
+	// Situacao é a idade de Pipeline e Aprovacao e a falha da consulta extra, no padrão das fontes.
+	Situacao Frescor
 	Frescor
 }
 
@@ -147,6 +149,7 @@ func (s *Servidor) vistaCoords(snap central.Snapshot) []coordVista {
 					}
 					mv.Pipeline, mv.PipelineCls = rotuloSituacao(m.Pipeline, rotuloPipeline)
 					mv.Aprovacao, mv.AprovacaoCls = rotuloSituacao(m.Aprovacao, rotuloAprovacao)
+					mv.Situacao = s.frescor(central.FonteMR, m.SituacaoEm, m.SituacaoErro)
 					uv.MRs = append(uv.MRs, mv)
 				}
 				for _, p := range u.Pendencias {

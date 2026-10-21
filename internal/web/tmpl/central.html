@@ -26,7 +26,7 @@
 <div class="meta">Taiga: {{if .StatusTaiga}}{{.StatusTaiga}}{{else}}sem status{{end}} · {{template "idade" .Taiga}}</div>
 {{if .Dependencias}}<div class="meta">depende de {{range $i, $d := .Dependencias}}{{if $i}}, {{end}}{{$d}}{{end}}</div>{{end}}
 {{range .MRs}}<div class="mr"><a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a> {{if .Estado}}<span class="selo selo-mr-{{.Estado}}">{{.Estado}}</span>{{else}}<span class="selo selo-aviso">sem estado</span>{{end}} {{template "idade" .Frescor}}
-<div class="situacao"><span>pipeline <span class="selo selo-pipe-{{.PipelineCls}}">{{.Pipeline}}</span></span> <span>aprovação <span class="selo selo-aprov-{{.AprovacaoCls}}">{{.Aprovacao}}</span></span></div></div>
+<div class="situacao"><span>pipeline <span class="selo selo-pipe-{{.PipelineCls}}">{{.Pipeline}}</span></span> <span>aprovação <span class="selo selo-aprov-{{.AprovacaoCls}}">{{.Aprovacao}}</span></span>{{if .Situacao.Erro}} <span class="meta">dos valores lidos {{if .Situacao.Nunca}}(nunca lidos){{else}}{{.Situacao.Idade}}{{end}}</span> <span class="selo selo-erro">consulta extra falhou: {{.Situacao.Erro}}</span>{{end}}</div></div>
 {{end}}
 {{range .Pendencias}}<div class="pend"><a href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span>{{if eq .Estado "respondida"}} <span class="selo selo-respondida">respondida</span>{{else}} <span class="selo selo-aberta">aberta</span>{{end}}</div>
 {{end}}

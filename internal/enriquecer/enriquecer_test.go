@@ -593,10 +593,11 @@ func TestConsultarMRTrazPipelineEAprovacao(t *testing.T) {
 	if err != nil || v.Estado != "aberta" || v.Pipeline != "falhou" || v.Aprovacao != "pendente" {
 		t.Fatalf("gh = %+v, %v", v, err)
 	}
-	// O pr view falha: o estado sai, pipeline e aprovação ficam desconhecidos, sem erro.
+	// O pr view falha: o estado sai, pipeline e aprovação vêm vazios e a falha vai em SituacaoErro
+	// (quem preserva o último valor bom é o Store), sem erro da consulta.
 	c.responder("gh", "gh: boom", true, argsGHView...)
 	v, err = c.e.F.ConsultarMR(context.Background(), urlGH)
-	if err != nil || v.Estado != "aberta" || v.Pipeline != "" || v.Aprovacao != "" {
+	if err != nil || v.Estado != "aberta" || v.Pipeline != "" || v.Aprovacao != "" || v.SituacaoErro == nil {
 		t.Fatalf("pr view falho = %+v, %v", v, err)
 	}
 	// PR mesclado não gasta a chamada a mais.

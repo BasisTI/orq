@@ -125,24 +125,32 @@ func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.Va
 		return central.ValorMR{}, err
 	}
 	// O GitLab traz pipeline e aprovação na própria resposta da MR; o GitHub precisa de uma
-	// consulta a mais (gh pr view), só para PR aberto. Falha dela deixa os dois desconhecidos.
+	// consulta a mais (gh pr view), só para PR aberto. Falha dela não derruba a consulta: o
+	// estado sai novo e SituacaoErro leva a falha, para o Store manter o último pipeline e a
+	// última aprovação bons.
+	var situacaoErro *central.Erro
 	if fj, err := forjaDe(rawURL); err == nil && fj.ferramenta == "gh" && d.Estado != "mesclada" && d.Estado != "fechada" {
-		d.Pipeline, d.Aprovacao = f.situacaoGitHub(ctx, fj)
+		var errSit error
+		d.Pipeline, d.Aprovacao, errSit = f.situacaoGitHub(ctx, fj)
+		if errSit != nil {
+			situacaoErro = comoFalha(errSit).cache()
+		}
 	}
-	return central.ValorMR{Estado: d.Estado, WebURL: d.WebURL, Pipeline: d.Pipeline, Aprovacao: d.Aprovacao}, nil
+	return central.ValorMR{Estado: d.Estado, WebURL: d.WebURL, Pipeline: d.Pipeline, Aprovacao: d.Aprovacao, SituacaoErro: situacaoErro}, nil
 }
 
 // situacaoGitHub lê o pipeline (statusCheckRollup) e a aprovação (reviewDecision) do PR.
-func (f Ferramentas) situacaoGitHub(ctx context.Context, fj forja) (pipeline, aprovacao string) {
+func (f Ferramentas) situacaoGitHub(ctx context.Context, fj forja) (pipeline, aprovacao string, err error) {
 	repo := fj.projeto
 	if fj.host != "github.com" {
 		repo = fj.host + "/" + repo
 	}
 	out, err := f.Rodar(ctx, "gh", "pr", "view", strconv.Itoa(fj.iid), "-R", repo, "--json", "statusCheckRollup,reviewDecision")
 	if err != nil {
-		return "", ""
+		return "", "", err
 	}
-	return ParseSituacaoGitHub(out)
+	pipeline, aprovacao = ParseSituacaoGitHub(out)
+	return pipeline, aprovacao, nil
 }
 
 // ParseSituacaoGitHub converte a saída de `gh pr view --json statusCheckRollup,reviewDecision`.
@@ -171,14 +179,12 @@ func ParseSituacaoGitHub(b []byte) (pipeline, aprovacao string) {
 				v, n = "falhou", 4
 			case "SUCCESS", "NEUTRAL", "SKIPPED":
 			default:
-				switch strings.ToUpper(c.Status) {
-				case "IN_PROGRESS":
+				// Só SUCCESS, NEUTRAL e SKIPPED são sucesso. STALE e qualquer conclusão ou
+				// estado que esta versão não conhece (e COMPLETED sem conclusão) ficam
+				// pendentes: o conservador entre "sucesso" e "falhou".
+				if strings.ToUpper(c.Status) == "IN_PROGRESS" {
 					v, n = "rodando", 3
-				case "COMPLETED":
-				default:
-					v, n = "pendente", 2
-				}
-				if strings.ToUpper(c.State) == "PENDING" || strings.ToUpper(c.State) == "EXPECTED" {
+				} else {
 					v, n = "pendente", 2
 				}
 			}

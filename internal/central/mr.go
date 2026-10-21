@@ -24,6 +24,10 @@ type MR struct {
 	// Pipeline e Aprovacao vêm do último valor bom do cache; nulos até a forja os dar.
 	Pipeline  *string `json:"pipeline"`
 	Aprovacao *string `json:"aprovacao"`
+	// SituacaoEm é quando os dois foram lidos da forja; SituacaoErro, a falha da consulta extra
+	// que não os renovou. Sem falha, valem AtualizadoEm.
+	SituacaoEm   *string `json:"situacao_em"`
+	SituacaoErro *Erro   `json:"situacao_erro"`
 }
 
 // RefCurta é a referência curta da MR: `!32` no GitLab e `repo#29` no GitHub.
@@ -52,6 +56,10 @@ func scanMR(r scanner) (MR, error) {
 			if v.Aprovacao != "" {
 				m.Aprovacao = &v.Aprovacao
 			}
+			if v.SituacaoEm != "" {
+				m.SituacaoEm = &v.SituacaoEm
+			}
+			m.SituacaoErro = v.SituacaoErro
 		}
 	}
 	m.Erro = erroDe(codigo, mensagem, em)

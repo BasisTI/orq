@@ -742,7 +742,7 @@ func TestSnapshot(t *testing.T) {
 	mb, _ := json.Marshal(comMR.Coordenadores[0].Ondas[0].US[0].MRs[0])
 	var mm map[string]any
 	_ = json.Unmarshal(mb, &mm)
-	if got := strings.Join(chaves(mm), ","); got != "adicionada_em,aprovacao,atualizado_em,erro,estado,iac,iid,pipeline,projeto_path,url" {
+	if got := strings.Join(chaves(mm), ","); got != "adicionada_em,aprovacao,atualizado_em,erro,estado,iac,iid,pipeline,projeto_path,situacao_em,situacao_erro,url" {
 		t.Errorf("chaves de mr = %s", got)
 	}
 	todas, _ := s.Snapshot(ctx, true)
