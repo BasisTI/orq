@@ -150,6 +150,11 @@ func (f Ferramentas) situacaoGitHub(ctx context.Context, fj forja) (pipeline, ap
 		return "", "", err
 	}
 	pipeline, aprovacao = ParseSituacaoGitHub(out)
+	// Saída 0 sem dado algum (não é JSON, `{}`, campos nulos) é falha da consulta, não "sem
+	// checks" (`[]` é `sem`) nem "sem exigência" (`""` é `nao_exigida`): ambos têm valor.
+	if pipeline == "" && aprovacao == "" {
+		return "", "", &Falha{Codigo: ErrRespostaInvalida, Mensagem: "gh pr view sem statusCheckRollup nem reviewDecision"}
+	}
 	return pipeline, aprovacao, nil
 }
 

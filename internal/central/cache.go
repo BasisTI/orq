@@ -164,14 +164,18 @@ func (s *Store) GravarMR(ctx context.Context, url string, valor ValorMR, erro *E
 			// A consulta extra falhou: o estado é novo, pipeline e aprovação são os do último
 			// valor bom (se houve), com a falha ao lado.
 			valor.SituacaoErro.Em = s.agora()
-			var ant *string
-			err := tx.QueryRowContext(ctx, `SELECT valor FROM cache WHERE fonte = ? AND chave = ?`, FonteMR, url).Scan(&ant)
+			var ant, antEm *string
+			err := tx.QueryRowContext(ctx, `SELECT valor, valor_em FROM cache WHERE fonte = ? AND chave = ?`, FonteMR, url).Scan(&ant, &antEm)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 			var v ValorMR
 			if ant != nil && json.Unmarshal([]byte(*ant), &v) == nil {
 				valor.Pipeline, valor.Aprovacao, valor.SituacaoEm = v.Pipeline, v.Aprovacao, v.SituacaoEm
+				// Cache de binário anterior não tem situacao_em: os valores são do valor_em da linha.
+				if valor.SituacaoEm == "" && (valor.Pipeline != "" || valor.Aprovacao != "") && antEm != nil {
+					valor.SituacaoEm = *antEm
+				}
 			}
 		} else if valor.Pipeline != "" || valor.Aprovacao != "" {
 			valor.SituacaoEm = s.agora()
