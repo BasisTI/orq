@@ -76,6 +76,7 @@ func TestMigracaoPreencheTons(t *testing.T) {
 	// mid e abc entram na mesma onda: mesmo instante, o nome desempata (abc antes de mid).
 	onda(t, s, a, NovaOnda{Titulo: "o", US: []refs.US{us(t, "mid/3"), us(t, "abc/4")}})
 	// Simula um banco anterior à migration: sem a tabela, na versão 2.
+	desfazer0005(t, s)
 	if _, err := s.db.ExecContext(ctx, "DROP TABLE projeto_tom"); err != nil {
 		t.Fatal(err)
 	}

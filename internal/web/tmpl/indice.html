@@ -1,0 +1,19 @@
+{{define "indice"}}{{template "topo" .}}
+<h1>Pendências</h1>
+<form class="filtros" method="get" action="/">
+<label>Coordenador
+<select name="coord"><option value="">todos</option>{{range .Coords}}<option value="{{.}}"{{if eq . $.Filtro.Coord}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Projeto
+<select name="projeto"><option value="">todos</option>{{range .Projetos}}<option value="{{.}}"{{if eq . $.Filtro.Projeto}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Onda
+<select name="onda"><option value="">todas</option>{{range .Ondas}}<option value="{{.}}"{{if eq (printf "%d" .) $.Filtro.Onda}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<button type="submit">Filtrar</button>
+</form>
+
+<h2>Esperando você <span class="contagem">{{len .Abertas}}</span></h2>
+{{if .Abertas}}{{template "lista" .Abertas}}{{else}}<p class="vazio">Nenhuma pendência esperando resposta.</p>{{end}}
+
+<h2>Respondidas, ainda abertas <span class="contagem">{{len .Respondidas}}</span></h2>
+{{if .Respondidas}}{{template "lista" .Respondidas}}{{else}}<p class="vazio">Nenhuma.</p>{{end}}
+<p class="nota">Esta página recarrega a cada 30 s.</p>
+{{template "rodape" .}}{{end}}

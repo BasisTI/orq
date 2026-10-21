@@ -122,15 +122,63 @@ func textoProxima(w io.Writer, p central.Proxima) error {
 }
 
 func textoPendencia(w io.Writer, p central.Pendencia, recuo string) error {
-	estado := "aberta"
-	if !p.Aberta {
-		estado = "resolvida"
+	estado := p.Estado
+	switch {
+	case !p.Aberta:
 		if p.Resposta != nil {
 			estado += ": " + q(*p.Resposta)
 		}
+	case p.Estado == central.EstadoRespondida:
+		estado += ": " + q(respostaCurta(p))
+		if p.SemCoordenador {
+			estado += ", sem coordenador"
+		}
 	}
-	_, err := fmt.Fprintf(w, "%s%s  %s  %s  %s  (%s)\n", recuo, p.ID, p.Tipo, q(p.Texto), estado, p.US)
+	marcas := ""
+	if !p.TemDetalhe {
+		marcas += "  [sem detalhe]"
+	}
+	if p.ArquivoAlterado {
+		marcas += "  [arquivo alterado depois do registro]"
+	}
+	_, err := fmt.Fprintf(w, "%s%s  %s  %s  (%s)  (%s)%s\n", recuo, p.ID, p.Tipo, q(p.Texto), estado, p.US, marcas)
 	return err
+}
+
+// textoOpcaoEscolhida é "opção N (título)" da resposta, ou vazio se ela não escolheu opção.
+func textoOpcaoEscolhida(p central.Pendencia) string {
+	if p.RespostaOpcao == nil {
+		return ""
+	}
+	for _, o := range p.Opcoes {
+		if o.ID == *p.RespostaOpcao {
+			return fmt.Sprintf("opção %d (%s)", o.ID, o.Titulo)
+		}
+	}
+	return fmt.Sprintf("opção %d", *p.RespostaOpcao)
+}
+
+// respostaCurta resume a resposta da pessoa numa linha: a opção e o começo do texto.
+func respostaCurta(p central.Pendencia) string {
+	var partes []string
+	if p.RespostaOpcao != nil {
+		for _, o := range p.Opcoes {
+			if o.ID == *p.RespostaOpcao {
+				partes = append(partes, fmt.Sprintf("opção %d (%s)", o.ID, o.Titulo))
+			}
+		}
+		if len(partes) == 0 {
+			partes = append(partes, fmt.Sprintf("opção %d", *p.RespostaOpcao))
+		}
+	}
+	if p.Resposta != nil {
+		t := strings.Join(strings.Fields(*p.Resposta), " ")
+		if r := []rune(t); len(r) > 60 {
+			t = string(r[:59]) + "…"
+		}
+		partes = append(partes, `"`+t+`"`)
+	}
+	return strings.Join(partes, " ")
 }
 
 func textoEvento(w io.Writer, e central.Evento) error {

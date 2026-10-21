@@ -1,0 +1,5 @@
+{{define "erro"}}{{template "topo" .}}
+<h1>{{.Titulo}}</h1>
+<p class="aviso erro" role="alert">{{.Mensagem}}</p>
+<p><a href="{{.Voltar}}">← voltar</a></p>
+{{template "rodape" .}}{{end}}

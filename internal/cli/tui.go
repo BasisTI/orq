@@ -41,7 +41,7 @@ https://orq.local/pane/<id>, que o link handler do plugin transforma em foco.`,
 			if err != nil {
 				return err
 			}
-			o := tui.Opcoes{Todos: todos}
+			o := tui.Opcoes{Todos: todos, URLWeb: a.Env("ORQ_WEB_URL")}
 			if !todos {
 				c, err := a.coordOpcional(ctx, st)
 				if err != nil {

@@ -284,6 +284,11 @@ func (m *Modelo) status() string {
 	if m.msg != "" {
 		antes = append(antes, limpar(m.msg))
 	}
+	if m.sel >= 0 && m.sel < len(m.tela.Linhas) {
+		if u := m.tela.Links[m.tela.Linhas[m.sel].Item]; u != "" {
+			antes = append(antes, e.apagado("página ")+link(u, u))
+		}
+	}
 	if m.tela.Rodape != "" {
 		antes = append(antes, m.tela.Rodape)
 	}
