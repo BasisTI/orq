@@ -566,9 +566,9 @@ func TestSelecaoSegueOPane(t *testing.T) {
 	}
 }
 
-func TestDesde(t *testing.T) {
+func TestIdade(t *testing.T) {
 	for d, quer := range map[time.Duration]string{30 * time.Second: "agora", 12 * time.Minute: "há 12 min", 3 * time.Hour: "há 3 h", 72 * time.Hour: "há 3 d"} {
-		if s := desde(agora.Add(-d).Format(time.RFC3339), agora); s != quer {
+		if s := central.Idade(agora.Add(-d).Format(time.RFC3339), agora); s != quer {
 			t.Errorf("%v = %q", d, s)
 		}
 	}

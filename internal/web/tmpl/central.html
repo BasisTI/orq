@@ -1,0 +1,40 @@
+{{define "idade"}}{{if .Nunca}}<span class="idade idade-nunca">sem dado</span>{{else}}<span class="idade{{if .Vencido}} idade-vencida{{end}}">{{.Idade}}{{if .Vencido}} · vencido{{end}}</span>{{end}}{{if .Erro}} <span class="selo selo-erro">falhou: {{.Erro}}</span>{{end}}{{end}}
+
+{{define "central"}}{{template "topo" .}}
+<h1>Central</h1>
+<p class="nota">Somente leitura. Gerada {{.Gerado}}; esta página recarrega a cada 30 s.</p>
+<section class="fontes" aria-label="Idade do cache">
+{{range .Fontes}}<div class="fonte"><strong>{{.Nome}}</strong> {{template "idade" .Frescor}}</div>
+{{end}}
+</section>
+
+{{range .Coords}}
+<section class="coord">
+<h2>{{.Nome}}{{if .Agente}} <span class="selo selo-agente selo-{{.Agente}}">agente {{.Agente}}</span>{{if .AgenteVencido}} <span class="selo selo-vencido">vencido</span>{{end}}{{end}}</h2>
+<p class="meta">pendências: <strong>{{.Abertas}}</strong> abertas · <strong>{{.Respondidas}}</strong> respondidas</p>
+{{range .Ondas}}
+<article class="onda">
+<header>
+<a class="onda-titulo" href="{{.Href}}">{{if .Titulo}}{{.Titulo}}{{else}}onda {{.ID}}{{end}}</a>
+<div class="meta">onda {{.ID}} · até {{.Ate}} · ordem {{.Ordem}} · {{.Feitas}}/{{len .US}} prontas
+{{if .Concluida}} <span class="selo selo-respondida">concluída</span>{{end}}{{if .Encerrada}} <span class="selo selo-resolvida">encerrada</span>{{end}}</div>
+</header>
+{{range .US}}
+<div class="us">
+<div class="linha1"><strong>{{.ID}}</strong> <span class="selo selo-st-{{.Status}}">{{.Status}}</span>{{if .Agente}} <span class="selo selo-agente">agente {{.Agente}}{{if .AgenteVencido}} · vencido{{end}}</span>{{end}}</div>
+{{if .Titulo}}<div class="titulo">{{if .TaigaURL}}<a href="{{.TaigaURL}}" rel="noopener noreferrer">{{.Titulo}}</a>{{else}}{{.Titulo}}{{end}}</div>{{end}}
+<div class="meta">Taiga: {{if .StatusTaiga}}{{.StatusTaiga}}{{else}}sem status{{end}} · {{template "idade" .Taiga}}</div>
+{{if .Dependencias}}<div class="meta">depende de {{range $i, $d := .Dependencias}}{{if $i}}, {{end}}{{$d}}{{end}}</div>{{end}}
+{{range .MRs}}<div class="mr"><a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a> {{if .Estado}}<span class="selo selo-mr-{{.Estado}}">{{.Estado}}</span>{{else}}<span class="selo selo-aviso">sem estado</span>{{end}} {{template "idade" .Frescor}}
+<div class="situacao"><span>pipeline <span class="selo selo-pipe-{{.PipelineCls}}">{{.Pipeline}}</span></span> <span>aprovação <span class="selo selo-aprov-{{.AprovacaoCls}}">{{.Aprovacao}}</span></span></div></div>
+{{end}}
+{{range .Pendencias}}<div class="pend"><a href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span>{{if eq .Estado "respondida"}} <span class="selo selo-respondida">respondida</span>{{else}} <span class="selo selo-aberta">aberta</span>{{end}}</div>
+{{end}}
+</div>
+{{end}}
+</article>
+{{else}}<p class="vazio">Sem ondas abertas.</p>{{end}}
+</section>
+{{else}}<p class="vazio">Nenhum coordenador registrado.</p>{{end}}
+<p class="nota">Estado da MR: <em>pronta</em> = aberta, fora de rascunho e mesclável para a forja (não quer dizer que alguém aprovou: repositório sem exigência de revisão fica pronto sem aprovação); <em>aberta</em> = algo ainda bloqueia o merge. O pipeline e a aprovação de cada MR vêm da forja; <em>desconhecido</em> é dado que a forja não deu ou que ainda não foi consultado.</p>
+{{template "rodape" .}}{{end}}

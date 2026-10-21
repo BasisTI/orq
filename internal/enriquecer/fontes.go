@@ -108,10 +108,14 @@ func forjaDe(rawURL string) (forja, error) {
 // branch de origem, que numa MR mesclada é o head mesclado) e as branches.
 type DetalheMR struct {
 	Estado string
-	WebURL string
-	Head   string
-	Origem string // branch de origem
-	Alvo   string // branch de destino
+	// Pipeline e Aprovacao são a situação separada de cada coisa (central.ValorMR); vazio é
+	// desconhecido: a forja não disse (versão antiga, ou a consulta extra falhou).
+	Pipeline  string
+	Aprovacao string
+	WebURL    string
+	Head      string
+	Origem    string // branch de origem
+	Alvo      string // branch de destino
 }
 
 // ConsultarMR lê a MR na forja (só leitura) e devolve o estado normalizado.
@@ -120,7 +124,125 @@ func (f Ferramentas) ConsultarMR(ctx context.Context, rawURL string) (central.Va
 	if err != nil {
 		return central.ValorMR{}, err
 	}
-	return central.ValorMR{Estado: d.Estado, WebURL: d.WebURL}, nil
+	// O GitLab traz pipeline e aprovação na própria resposta da MR; o GitHub precisa de uma
+	// consulta a mais (gh pr view), só para PR aberto. Falha dela deixa os dois desconhecidos.
+	if fj, err := forjaDe(rawURL); err == nil && fj.ferramenta == "gh" && d.Estado != "mesclada" && d.Estado != "fechada" {
+		d.Pipeline, d.Aprovacao = f.situacaoGitHub(ctx, fj)
+	}
+	return central.ValorMR{Estado: d.Estado, WebURL: d.WebURL, Pipeline: d.Pipeline, Aprovacao: d.Aprovacao}, nil
+}
+
+// situacaoGitHub lê o pipeline (statusCheckRollup) e a aprovação (reviewDecision) do PR.
+func (f Ferramentas) situacaoGitHub(ctx context.Context, fj forja) (pipeline, aprovacao string) {
+	repo := fj.projeto
+	if fj.host != "github.com" {
+		repo = fj.host + "/" + repo
+	}
+	out, err := f.Rodar(ctx, "gh", "pr", "view", strconv.Itoa(fj.iid), "-R", repo, "--json", "statusCheckRollup,reviewDecision")
+	if err != nil {
+		return "", ""
+	}
+	return ParseSituacaoGitHub(out)
+}
+
+// ParseSituacaoGitHub converte a saída de `gh pr view --json statusCheckRollup,reviewDecision`.
+// Pipeline: falhou > rodando > pendente > sucesso, e sem quando não há check. Aprovação:
+// reviewDecision vazio é repositório sem exigência de revisão (nao_exigida). Campo ausente
+// (gh ou forja antiga) deixa o valor vazio, que é desconhecido.
+func ParseSituacaoGitHub(b []byte) (pipeline, aprovacao string) {
+	var r struct {
+		Checks *[]struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			State      string `json:"state"`
+		} `json:"statusCheckRollup"`
+		ReviewDecision *string `json:"reviewDecision"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return "", ""
+	}
+	if r.Checks != nil {
+		pipeline = "sem"
+		rank := 0
+		for _, c := range *r.Checks {
+			v, n := "sucesso", 1
+			switch strings.ToUpper(firstNonEmpty(c.Conclusion, c.State)) {
+			case "FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE":
+				v, n = "falhou", 4
+			case "SUCCESS", "NEUTRAL", "SKIPPED":
+			default:
+				switch strings.ToUpper(c.Status) {
+				case "IN_PROGRESS":
+					v, n = "rodando", 3
+				case "COMPLETED":
+				default:
+					v, n = "pendente", 2
+				}
+				if strings.ToUpper(c.State) == "PENDING" || strings.ToUpper(c.State) == "EXPECTED" {
+					v, n = "pendente", 2
+				}
+			}
+			if n > rank {
+				pipeline, rank = v, n
+			}
+		}
+	}
+	if r.ReviewDecision != nil {
+		switch strings.ToUpper(*r.ReviewDecision) {
+		case "APPROVED":
+			aprovacao = "aprovada"
+		case "CHANGES_REQUESTED", "REVIEW_REQUIRED":
+			aprovacao = "pendente"
+		case "":
+			aprovacao = "nao_exigida"
+		}
+	}
+	return pipeline, aprovacao
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// SituacaoGitLab traduz o head_pipeline.status e o detailed_merge_status da MR do GitLab.
+// pipeline: nulo na resposta é "sem"; ausente (versão antiga) fica vazio. Aprovação: o GitLab só
+// diz que falta (not_approved); mergeable prova que a aprovação não bloqueia (aprovada, ou não
+// exigida); os demais bloqueios mascaram a aprovação, então ficam desconhecidos.
+func SituacaoGitLab(headPipeline json.RawMessage, detailedMergeStatus string) (pipeline, aprovacao string) {
+	if headPipeline != nil {
+		var hp *struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(headPipeline, &hp) == nil {
+			switch {
+			case hp == nil:
+				pipeline = "sem"
+			default:
+				switch hp.Status {
+				case "success":
+					pipeline = "sucesso"
+				case "failed", "canceled", "canceling":
+					pipeline = "falhou"
+				case "running":
+					pipeline = "rodando"
+				case "pending", "created", "waiting_for_resource", "preparing", "scheduled", "manual", "waiting_for_callback":
+					pipeline = "pendente"
+				case "skipped":
+					pipeline = "sem"
+				}
+			}
+		}
+	}
+	switch detailedMergeStatus {
+	case "not_approved":
+		aprovacao = "pendente"
+	case "mergeable":
+		aprovacao = "aprovada"
+	}
+	return pipeline, aprovacao
 }
 
 // ConsultarMRDetalhe é o ConsultarMR com o head e as branches, que a limpeza confere.
@@ -137,21 +259,23 @@ func (f Ferramentas) ConsultarMRDetalhe(ctx context.Context, rawURL string) (Det
 			return DetalheMR{}, classificarForja(err)
 		}
 		var r struct {
-			State               string  `json:"state"`
-			Draft               bool    `json:"draft"`
-			WorkInProgress      bool    `json:"work_in_progress"`
-			DetailedMergeStatus string  `json:"detailed_merge_status"`
-			MergedAt            *string `json:"merged_at"`
-			WebURL              string  `json:"web_url"`
-			SHA                 string  `json:"sha"`
-			SourceBranch        string  `json:"source_branch"`
-			TargetBranch        string  `json:"target_branch"`
+			State               string          `json:"state"`
+			Draft               bool            `json:"draft"`
+			WorkInProgress      bool            `json:"work_in_progress"`
+			DetailedMergeStatus string          `json:"detailed_merge_status"`
+			MergedAt            *string         `json:"merged_at"`
+			WebURL              string          `json:"web_url"`
+			SHA                 string          `json:"sha"`
+			SourceBranch        string          `json:"source_branch"`
+			TargetBranch        string          `json:"target_branch"`
+			HeadPipeline        json.RawMessage `json:"head_pipeline"`
 		}
 		if err := json.Unmarshal(out, &r); err != nil || r.State == "" {
 			return DetalheMR{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "glab api devolveu algo que não é uma MR: " + resumir(out)}
 		}
+		pipe, aprov := SituacaoGitLab(r.HeadPipeline, r.DetailedMergeStatus)
 		return DetalheMR{Estado: NormalizarGitLab(r.State, r.Draft || r.WorkInProgress, r.DetailedMergeStatus, r.MergedAt != nil), WebURL: r.WebURL,
-			Head: r.SHA, Origem: r.SourceBranch, Alvo: r.TargetBranch}, nil
+			Pipeline: pipe, Aprovacao: aprov, Head: r.SHA, Origem: r.SourceBranch, Alvo: r.TargetBranch}, nil
 	}
 	args := []string{"api"}
 	if fj.host != "github.com" {

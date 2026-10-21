@@ -76,40 +76,63 @@ type Evento struct {
 	Detalhe     json.RawMessage `json:"detalhe"`
 }
 
-// FiltroDiario restringe orq diario; Limite 0 traz tudo.
+// FiltroDiario restringe orq diario; Limite 0 traz tudo. Deslocamento pula os eventos mais
+// recentes (a página da web); o resultado continua em ordem cronológica.
 type FiltroDiario struct {
-	US     *refs.US
-	OndaID int64
-	Coord  string
-	Limite int
+	US           *refs.US
+	OndaID       int64
+	Coord        string
+	Limite       int
+	Deslocamento int
+}
+
+// condicoes monta o WHERE do diário.
+func (f FiltroDiario) condicoes(ctx context.Context, tx *sql.Tx, coord *Coordenador) (string, []any, error) {
+	var where []string
+	var args []any
+	if f.US != nil {
+		alvo, err := resolverUS(ctx, tx, *f.US, coord)
+		if err != nil {
+			return "", nil, err
+		}
+		where, args = append(where, "projeto = ? AND ref = ?"), append(args, alvo.Projeto, alvo.Ref)
+	}
+	if f.OndaID != 0 {
+		where, args = append(where, "onda_id = ?"), append(args, f.OndaID)
+	}
+	if f.Coord != "" {
+		where, args = append(where, "coordenador = ?"), append(args, f.Coord)
+	}
+	if len(where) == 0 {
+		return "", args, nil
+	}
+	return " WHERE " + strings.Join(where, " AND "), args, nil
+}
+
+// ContarDiario conta os eventos que o filtro pega, sem Limite nem Deslocamento.
+func (s *Store) ContarDiario(ctx context.Context, coord *Coordenador, f FiltroDiario) (int, error) {
+	var n int
+	err := s.ler(ctx, func(tx *sql.Tx) error {
+		w, args, err := f.condicoes(ctx, tx, coord)
+		if err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM evento`+w, args...).Scan(&n)
+	})
+	return n, err
 }
 
 // Diario devolve os eventos mais recentes, em ordem cronológica.
 func (s *Store) Diario(ctx context.Context, coord *Coordenador, f FiltroDiario) ([]Evento, error) {
 	es := []Evento{}
 	err := s.ler(ctx, func(tx *sql.Tx) error {
-		var where []string
-		var args []any
-		if f.US != nil {
-			alvo, err := resolverUS(ctx, tx, *f.US, coord)
-			if err != nil {
-				return err
-			}
-			where, args = append(where, "projeto = ? AND ref = ?"), append(args, alvo.Projeto, alvo.Ref)
+		w, args, err := f.condicoes(ctx, tx, coord)
+		if err != nil {
+			return err
 		}
-		if f.OndaID != 0 {
-			where, args = append(where, "onda_id = ?"), append(args, f.OndaID)
-		}
-		if f.Coord != "" {
-			where, args = append(where, "coordenador = ?"), append(args, f.Coord)
-		}
-		q := `SELECT id, ts, coordenador, onda_id, projeto, ref, tipo, detalhe FROM evento`
-		if len(where) > 0 {
-			q += " WHERE " + strings.Join(where, " AND ")
-		}
-		q += " ORDER BY id DESC"
+		q := `SELECT id, ts, coordenador, onda_id, projeto, ref, tipo, detalhe FROM evento` + w + " ORDER BY id DESC"
 		if f.Limite > 0 {
-			q, args = q+" LIMIT ?", append(args, f.Limite)
+			q, args = q+" LIMIT ? OFFSET ?", append(args, f.Limite, f.Deslocamento)
 		}
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {

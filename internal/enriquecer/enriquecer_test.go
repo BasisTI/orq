@@ -3,6 +3,7 @@ package enriquecer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -119,8 +120,18 @@ func TestTTLEErroPreservaValorBom(t *testing.T) {
 	if r := c.atualizar(Opcoes{Fontes: []string{"mr"}, Forcar: true}); r.Fontes["mr"].Consultadas != 1 {
 		t.Fatalf("--forcar = %+v", r.Fontes["mr"])
 	}
-	if n := len(c.chamadas("gh")); n != 2 {
-		t.Fatalf("gh chamado %d vezes, queria 2", n)
+	// Cada consulta de PR aberto são duas chamadas: a api e o pr view do pipeline e da aprovação.
+	var api, view int
+	for _, a := range c.chamadas("gh") {
+		switch a[0] {
+		case "api":
+			api++
+		case "pr":
+			view++
+		}
+	}
+	if api != 2 || view != 2 {
+		t.Fatalf("gh: %d api e %d pr view, queria 2 e 2", api, view)
 	}
 	c.responder("gh", "gh: Could not resolve host: api.github.com", true, argsGH...)
 	c.rel.passar(61 * time.Second)
@@ -517,5 +528,103 @@ func TestDaemonChamaALimpezaAutomatica(t *testing.T) {
 	}
 	if l.n.Load() < 3 || !strings.Contains(log.String(), "limpeza automática: docker fora") || !strings.Contains(log.String(), "limpeza automática ligada") {
 		t.Fatalf("ciclos %d, log:\n%s", l.n.Load(), log.String())
+	}
+}
+
+var argsGHView = []string{"pr", "view", "1", "-R", "BasisTI/orq", "--json", "statusCheckRollup,reviewDecision"}
+
+func TestParseSituacaoGitHub(t *testing.T) {
+	casos := []struct {
+		nome, json, pipe, aprov string
+	}{
+		{"tudo verde e aprovado", `{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"},{"state":"SUCCESS"}],"reviewDecision":"APPROVED"}`, "sucesso", "aprovada"},
+		{"falha vence rodando", `{"statusCheckRollup":[{"status":"IN_PROGRESS","conclusion":""},{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":"CHANGES_REQUESTED"}`, "falhou", "pendente"},
+		{"rodando", `{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"IN_PROGRESS","conclusion":""}],"reviewDecision":"REVIEW_REQUIRED"}`, "rodando", "pendente"},
+		{"na fila", `{"statusCheckRollup":[{"status":"QUEUED","conclusion":""}],"reviewDecision":""}`, "pendente", "nao_exigida"},
+		{"status legado pendente", `{"statusCheckRollup":[{"state":"PENDING"}],"reviewDecision":""}`, "pendente", "nao_exigida"},
+		{"neutro e pulado contam como sucesso", `{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"NEUTRAL"},{"status":"COMPLETED","conclusion":"SKIPPED"}],"reviewDecision":""}`, "sucesso", "nao_exigida"},
+		{"sem checks e sem exigência de revisão", `{"statusCheckRollup":[],"reviewDecision":""}`, "sem", "nao_exigida"},
+		{"campos ausentes (forja antiga)", `{}`, "", ""},
+		{"só a revisão", `{"reviewDecision":"APPROVED"}`, "", "aprovada"},
+		{"lixo", `não é json`, "", ""},
+		{"vazio", ``, "", ""},
+	}
+	for _, c := range casos {
+		p, a := ParseSituacaoGitHub([]byte(c.json))
+		if p != c.pipe || a != c.aprov {
+			t.Errorf("%s: pipeline %q aprovação %q, queria %q %q", c.nome, p, a, c.pipe, c.aprov)
+		}
+	}
+}
+
+func TestSituacaoGitLab(t *testing.T) {
+	casos := []struct {
+		nome, hp, det, pipe, aprov string
+	}{
+		{"sucesso e mergeable", `{"status":"success"}`, "mergeable", "sucesso", "aprovada"},
+		{"falhou", `{"status":"failed"}`, "ci_must_pass", "falhou", ""},
+		{"cancelado", `{"status":"canceled"}`, "", "falhou", ""},
+		{"rodando", `{"status":"running"}`, "ci_still_running", "rodando", ""},
+		{"pendente", `{"status":"pending"}`, "not_approved", "pendente", "pendente"},
+		{"manual", `{"status":"manual"}`, "", "pendente", ""},
+		{"sem pipeline (nulo)", `null`, "not_approved", "sem", "pendente"},
+		{"pulado", `{"status":"skipped"}`, "", "sem", ""},
+		{"campo ausente (GitLab antigo)", ``, "", "", ""},
+		{"status novo desconhecido", `{"status":"futuro"}`, "", "", ""},
+	}
+	for _, c := range casos {
+		var raw json.RawMessage
+		if c.hp != "" {
+			raw = json.RawMessage(c.hp)
+		}
+		p, a := SituacaoGitLab(raw, c.det)
+		if p != c.pipe || a != c.aprov {
+			t.Errorf("%s: pipeline %q aprovação %q, queria %q %q", c.nome, p, a, c.pipe, c.aprov)
+		}
+	}
+}
+
+func TestConsultarMRTrazPipelineEAprovacao(t *testing.T) {
+	c := novoCenario(t)
+	open := `{"state":"open","draft":false,"merged":false,"mergeable_state":"blocked","html_url":"` + urlGH + `"}`
+	c.responder("gh", open, false, argsGH...)
+	c.responder("gh", `{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":"REVIEW_REQUIRED"}`, false, argsGHView...)
+	v, err := c.e.F.ConsultarMR(context.Background(), urlGH)
+	if err != nil || v.Estado != "aberta" || v.Pipeline != "falhou" || v.Aprovacao != "pendente" {
+		t.Fatalf("gh = %+v, %v", v, err)
+	}
+	// O pr view falha: o estado sai, pipeline e aprovação ficam desconhecidos, sem erro.
+	c.responder("gh", "gh: boom", true, argsGHView...)
+	v, err = c.e.F.ConsultarMR(context.Background(), urlGH)
+	if err != nil || v.Estado != "aberta" || v.Pipeline != "" || v.Aprovacao != "" {
+		t.Fatalf("pr view falho = %+v, %v", v, err)
+	}
+	// PR mesclado não gasta a chamada a mais.
+	c.responder("gh", `{"state":"closed","merged":true,"html_url":"`+urlGH+`"}`, false, argsGH...)
+	c.chamadas("gh")
+	if _, err = c.e.F.ConsultarMR(context.Background(), urlGH); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range c.chamadas("gh") {
+		if a[0] == "pr" {
+			t.Errorf("pr view em PR mesclado: %v", a)
+		}
+	}
+}
+
+func TestConsultarMRGitLabPipelineEAprovacao(t *testing.T) {
+	c := novoCenario(t)
+	url := "https://gitlab.exemplo.com/grupo/proj/-/merge_requests/7"
+	args := []string{"api", "--hostname", "gitlab.exemplo.com", "projects/grupo%2Fproj/merge_requests/7"}
+	c.responder("glab", `{"state":"opened","draft":false,"detailed_merge_status":"not_approved","web_url":"`+url+`","head_pipeline":{"status":"success"}}`, false, args...)
+	v, err := c.e.F.ConsultarMR(context.Background(), url)
+	if err != nil || v.Estado != "aberta" || v.Pipeline != "sucesso" || v.Aprovacao != "pendente" {
+		t.Fatalf("glab = %+v, %v", v, err)
+	}
+	// GitLab antigo: sem head_pipeline na resposta.
+	c.responder("glab", `{"state":"opened","draft":false,"detailed_merge_status":"mergeable","web_url":"`+url+`"}`, false, args...)
+	v, err = c.e.F.ConsultarMR(context.Background(), url)
+	if err != nil || v.Estado != "pronta" || v.Pipeline != "" || v.Aprovacao != "aprovada" {
+		t.Fatalf("glab antigo = %+v, %v", v, err)
 	}
 }
