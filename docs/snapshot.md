@@ -20,6 +20,7 @@
 - Ainda versão 1, US #10: o campo `projetos` (raiz) entrou, com o índice de tom de cada projeto. Aditivo.
 - Ainda versão 1, US #15: a `Pendencia` ganhou `chave`, `estado`, `tem_detalhe`, `opcoes`, `slug`, `arquivo`, `autor`, `resposta_opcao`, `respondida_em`, `respondida_por`, `avisada_em`, `resposta_versao`, `arquivo_alterado` e `sem_coordenador`. Aditivo: o sentido dos campos antigos não mudou, e `aberta` continua `true` na pendência respondida (ela só fecha em `orq pend resolver`). O `detalhe` (até 64 KiB por pendência) não vai no snapshot: `orq pend ver` o traz.
 
+- Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
 - Ainda versão 1, US #16: a `MR` ganhou `pipeline` e `aprovacao`. Aditivo, sem migration: saem do último valor bom do cache da MR, que ganhou os dois campos opcionais.
 
 ## Estado vivo (US #4)
@@ -34,7 +35,7 @@ O snapshot não consulta nada: ele lê o cache que `orq daemon` (em laço) e `or
 
 Estado da MR: `mesclada`, `fechada`, `draft`, `pronta` (aberta, não draft e mesclável: `detailed_merge_status` `mergeable` no GitLab, `mergeable_state` `clean` ou `has_hooks` no GitHub) ou `aberta` (o resto: conflito, pipeline, revisão obrigatória, ainda não calculado). Mudança de estado gera `mr.estado` no diário.
 
-Pipeline e aprovação da MR vêm da mesma consulta. No GitLab, de `head_pipeline.status` e de `detailed_merge_status` da própria resposta (`not_approved` é `pendente`; `mergeable` é `aprovada`, no sentido de que a aprovação não bloqueia o merge, tendo sido dada ou não exigida; os outros bloqueios escondem a aprovação e ela fica `null`). No GitHub, de uma chamada a mais, `gh pr view <n> -R <repo> --json statusCheckRollup,reviewDecision`, só para PR aberto: o pipeline é o pior dos checks (`falhou` > `rodando` > `pendente` > `sucesso`; sem checks, `sem`) e a aprovação vem de `reviewDecision` (`APPROVED` é `aprovada`; `CHANGES_REQUESTED` e `REVIEW_REQUIRED` são `pendente`; vazio, repositório sem exigência de revisão, é `nao_exigida`). Se essa chamada falha, o estado da MR sai igual e os dois campos ficam `null`; ela não gera erro nem suspensão.
+Pipeline e aprovação da MR vêm da mesma consulta. No GitLab, de `head_pipeline.status` e de `detailed_merge_status` da própria resposta (`not_approved` é `pendente`; `mergeable` é `aprovada`, no sentido de que a aprovação não bloqueia o merge, tendo sido dada ou não exigida; os outros bloqueios escondem a aprovação e ela fica `null`). No GitHub, de uma chamada a mais, `gh pr view <n> -R <repo> --json statusCheckRollup,reviewDecision`, só para PR aberto: o pipeline é o pior dos checks (`falhou` > `rodando` > `pendente` > `sucesso`; sem checks, `sem`) e a aprovação vem de `reviewDecision` (`APPROVED` é `aprovada`; `CHANGES_REQUESTED` e `REVIEW_REQUIRED` são `pendente`; vazio, repositório sem exigência de revisão, é `nao_exigida`). Só `SUCCESS`, `NEUTRAL` e `SKIPPED` contam como `sucesso`: `STALE`, `COMPLETED` sem conclusão e qualquer conclusão ou estado que o orq não conhece ficam `pendente`. Saída com código 0 mas sem dado (não é JSON, `{}`, os dois campos nulos) conta como falha (`resposta_invalida`); `statusCheckRollup: []` (`sem`) e `reviewDecision: ""` (`nao_exigida`) são valores verdadeiros e substituem o anterior. Se essa chamada falha, o estado da MR sai atualizado e pipeline e aprovação mantêm o último valor bom (`null` se nunca houve), com a falha em `situacao_erro` e a idade dos valores em `situacao_em` (num cache do binário anterior, sem esse campo, vale o `valor_em` da linha; a página marca "vencido" passado o prazo da fonte `mr`); ela não vira `erro` da MR nem suspende a ferramenta.
 
 Erro de autenticação de `glab`, `gh` ou `taiga` suspende a ferramenta por 30 min: o orq não tenta login nem define token. Na taiga-cli, é o exit 3 (`auth_*`, `session_*`, `secret_*`, `keyring_*`, `*_secret_*`, `password_file_*`). `orq atualizar --forcar` passa por cima de uma suspensão anterior, mas uma recusa na própria execução interrompe as chamadas seguintes da ferramenta. A suspensão aparece em `fontes.<fonte>.erro`.
 
@@ -137,9 +138,11 @@ MR {
   "erro": Erro|null,                       # última consulta, se falhou
   "pipeline": "sucesso"|"falhou"|"rodando"|"pendente"|"sem"|null,
                                            # do último valor bom; "sem": a MR não tem pipeline nem check;
-                                           # null: a forja não disse (nunca consultada, forja antiga, ou a consulta extra falhou)
+                                           # null: a forja não disse (nunca consultada, forja antiga, ou a consulta extra falhou sem valor anterior)
   "aprovacao": "aprovada"|"pendente"|"nao_exigida"|null
                                            # null: como em pipeline (o consumidor lê como desconhecida)
+  "situacao_em": data|null,                # quando pipeline e aprovação foram lidos da forja (nulo se nunca)
+  "situacao_erro": Erro|null               # a consulta extra do GitHub falhou e pipeline/aprovação são os de situacao_em
 }
 
 Pendencia {

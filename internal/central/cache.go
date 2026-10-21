@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 )
@@ -64,6 +65,11 @@ type ValorMR struct {
 	// ficam vazios quando a forja não os deu: o snapshot os traz como nulos (desconhecidos).
 	Pipeline  string `json:"pipeline,omitempty"`
 	Aprovacao string `json:"aprovacao,omitempty"`
+	// SituacaoEm é quando Pipeline e Aprovacao foram lidos da forja pela última vez.
+	// SituacaoErro é a falha da consulta extra (GitHub) que não conseguiu renová-los: o estado da
+	// MR foi gravado, os dois campos são os de SituacaoEm. GravarMR preenche os dois.
+	SituacaoEm   string `json:"situacao_em,omitempty"`
+	SituacaoErro *Erro  `json:"situacao_erro,omitempty"`
 }
 
 // ValorTaiga é o valor em cache de uma US no Taiga.
@@ -153,6 +159,26 @@ func (s *Store) GravarMR(ctx context.Context, url string, valor ValorMR, erro *E
 	return s.escrever(ctx, func(tx *sql.Tx) error {
 		if erro != nil {
 			return s.gravarCache(ctx, tx, FonteMR, url, nil, erro)
+		}
+		if valor.SituacaoErro != nil {
+			// A consulta extra falhou: o estado é novo, pipeline e aprovação são os do último
+			// valor bom (se houve), com a falha ao lado.
+			valor.SituacaoErro.Em = s.agora()
+			var ant, antEm *string
+			err := tx.QueryRowContext(ctx, `SELECT valor, valor_em FROM cache WHERE fonte = ? AND chave = ?`, FonteMR, url).Scan(&ant, &antEm)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			var v ValorMR
+			if ant != nil && json.Unmarshal([]byte(*ant), &v) == nil {
+				valor.Pipeline, valor.Aprovacao, valor.SituacaoEm = v.Pipeline, v.Aprovacao, v.SituacaoEm
+				// Cache de binário anterior não tem situacao_em: os valores são do valor_em da linha.
+				if valor.SituacaoEm == "" && (valor.Pipeline != "" || valor.Aprovacao != "") && antEm != nil {
+					valor.SituacaoEm = *antEm
+				}
+			}
+		} else if valor.Pipeline != "" || valor.Aprovacao != "" {
+			valor.SituacaoEm = s.agora()
 		}
 		if err := s.gravarCache(ctx, tx, FonteMR, url, valor, nil); err != nil {
 			return err

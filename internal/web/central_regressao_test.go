@@ -258,3 +258,29 @@ func TestDetalheDeTipoDesconhecidoEOmitido(t *testing.T) {
 		}
 	}
 }
+
+// A consulta extra falhou depois de um sucesso: a página mantém pipeline e aprovação, com a
+// falha e a idade dos valores ao lado.
+func TestCentralMostraFalhaDaConsultaExtra(t *testing.T) {
+	c := vazia(t, false)
+	co, _ := c.coord("alfa", "wA:p1", "proj", 7, "")
+	url := "https://github.com/Exemplo/repo/pull/20"
+	_, _, err := c.st.AdicionarMR(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, url)
+	c.ok(err)
+	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta", Pipeline: "sucesso", Aprovacao: "aprovada"}, nil))
+	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
+	_, html := c.get("/central")
+	_, row, ok := strings.Cut(html, `<div class="mr">`)
+	if !ok {
+		t.Fatal("sem MR")
+	}
+	row, _, _ = strings.Cut(row, "</div></div>")
+	for _, quer := range []string{"selo-pipe-sucesso", "selo-aprov-aprovada", "consulta extra falhou: falha_comando"} {
+		if !strings.Contains(row, quer) {
+			t.Errorf("falta %q em %s", quer, row)
+		}
+	}
+	if strings.Contains(row, "desconhecido") {
+		t.Errorf("o último valor bom virou desconhecido: %s", row)
+	}
+}
