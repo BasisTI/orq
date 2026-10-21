@@ -25,7 +25,8 @@
 {{if .Titulo}}<div class="titulo">{{if .TaigaURL}}<a href="{{.TaigaURL}}" rel="noopener noreferrer">{{.Titulo}}</a>{{else}}{{.Titulo}}{{end}}</div>{{end}}
 <div class="meta">Taiga: {{if .StatusTaiga}}{{.StatusTaiga}}{{else}}sem status{{end}} · {{template "idade" .Taiga}}</div>
 {{if .Dependencias}}<div class="meta">depende de {{range $i, $d := .Dependencias}}{{if $i}}, {{end}}{{$d}}{{end}}</div>{{end}}
-{{range .MRs}}<div class="mr"><a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a> {{if .Estado}}<span class="selo selo-mr-{{.Estado}}">{{.Estado}}</span>{{else}}<span class="selo selo-aviso">sem estado</span>{{end}} {{template "idade" .Frescor}}</div>
+{{range .MRs}}<div class="mr"><a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a> {{if .Estado}}<span class="selo selo-mr-{{.Estado}}">{{.Estado}}</span>{{else}}<span class="selo selo-aviso">sem estado</span>{{end}} {{template "idade" .Frescor}}
+<div class="situacao"><span>pipeline <span class="selo selo-pipe-{{.PipelineCls}}">{{.Pipeline}}</span></span> <span>aprovação <span class="selo selo-aprov-{{.AprovacaoCls}}">{{.Aprovacao}}</span></span></div></div>
 {{end}}
 {{range .Pendencias}}<div class="pend"><a href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span>{{if eq .Estado "respondida"}} <span class="selo selo-respondida">respondida</span>{{else}} <span class="selo selo-aberta">aberta</span>{{end}}</div>
 {{end}}
@@ -35,5 +36,5 @@
 {{else}}<p class="vazio">Sem ondas abertas.</p>{{end}}
 </section>
 {{else}}<p class="vazio">Nenhum coordenador registrado.</p>{{end}}
-<p class="nota">Estado da MR: <em>pronta</em> = pipeline e aprovação em dia e sem conflito; <em>aberta</em> = falta pipeline, aprovação ou resolver conflito.</p>
+<p class="nota">Estado da MR: <em>pronta</em> = aberta, fora de rascunho e mesclável para a forja (não quer dizer que alguém aprovou: repositório sem exigência de revisão fica pronto sem aprovação); <em>aberta</em> = algo ainda bloqueia o merge. O pipeline e a aprovação de cada MR vêm da forja; <em>desconhecido</em> é dado que a forja não deu ou que ainda não foi consultado.</p>
 {{template "rodape" .}}{{end}}

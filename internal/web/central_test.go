@@ -242,7 +242,7 @@ func TestOndaDiarioEscapadoEPaginado(t *testing.T) {
 		es = append(es, central.EventoExterno{Tipo: "limpar.removido", Detalhe: map[string]any{"n": i}})
 	}
 	es = append(es, central.EventoExterno{Tipo: "limpar.falhou", Detalhe: map[string]any{
-		"texto": `<script>alert("x")</script><img src=x onerror=alert(1)>`, "pane": "wA:p9", "workspace_id": "wA-ws", "ok": "visível",
+		"motivo": `<script>alert("x")</script><img src=x onerror=alert(1)> wA:p9 (nome-x)`, "pane": "wA:p9", "workspace_id": "wA-ws", "tipo": "worktree", "alvo": "/tmp/visível",
 	}})
 	c.ok(c.st.RegistrarExternos(c.ctx, &co, u, es))
 
@@ -251,8 +251,8 @@ func TestOndaDiarioEscapadoEPaginado(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d: %s", code, html)
 	}
-	contem(t, html, "Onda de alfa", "limpar.falhou", "&lt;script&gt;", "visível", "página 1 de 2", href+"?pagina=2", "mais antigas")
-	naoContem(t, html, "<script>alert", "<img src", "wA:p9", "wA-ws", "mais recentes")
+	contem(t, html, "Onda de alfa", "limpar.falhou", "&lt;script&gt;", "visível", "[pane]", "página 1 de 2", href+"?pagina=2", "mais antigas")
+	naoContem(t, html, "<script>alert", "<img src", "wA:p9", "wA-ws", "nome-x", "mais recentes")
 	// O mais recente vem primeiro.
 	if strings.Index(html, "limpar.falhou") > strings.Index(html, "limpar.removido") {
 		t.Error("o evento mais recente não está no topo")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,9 @@ type pendLink struct {
 type mrVista struct {
 	URL, Rotulo string
 	Estado      string // vazio: o cache ainda não tem estado
+	// Pipeline e Aprovacao são sempre preenchidos: "desconhecido" quando o cache não tem o dado.
+	Pipeline, Aprovacao       string
+	PipelineCls, AprovacaoCls string
 	Frescor
 }
 
@@ -86,6 +90,22 @@ type coordVista struct {
 	AgenteVencido        bool
 	Abertas, Respondidas int
 	Ondas                []ondaVista
+}
+
+var (
+	rotuloPipeline  = map[string]string{"sucesso": "sucesso", "falhou": "falhou", "rodando": "rodando", "pendente": "pendente", "sem": "sem pipeline"}
+	rotuloAprovacao = map[string]string{"aprovada": "aprovada", "pendente": "pendente", "nao_exigida": "não exigida"}
+)
+
+// rotuloSituacao escreve o pipeline ou a aprovação da MR e a classe do selo; valor ausente ou
+// que esta versão não conhece é "desconhecido", dito por extenso.
+func rotuloSituacao(v *string, rotulos map[string]string) (texto, cls string) {
+	if v != nil {
+		if t, ok := rotulos[*v]; ok {
+			return t, *v
+		}
+	}
+	return "desconhecido", "desconhecido"
 }
 
 var rotuloAte = map[string]string{"plano": "plano", "mr-pronta": "MR pronta", "merge": "merge"}
@@ -125,6 +145,8 @@ func (s *Servidor) vistaCoords(snap central.Snapshot) []coordVista {
 					if m.Estado != nil {
 						mv.Estado = *m.Estado
 					}
+					mv.Pipeline, mv.PipelineCls = rotuloSituacao(m.Pipeline, rotuloPipeline)
+					mv.Aprovacao, mv.AprovacaoCls = rotuloSituacao(m.Aprovacao, rotuloAprovacao)
 					uv.MRs = append(uv.MRs, mv)
 				}
 				for _, p := range u.Pendencias {
@@ -231,7 +253,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		if e.US != nil {
 			ev.US = *e.US
 		}
-		ev.Detalhe, ev.Cortado = textoDetalhe(e.Detalhe)
+		ev.Detalhe, ev.Cortado = textoDetalhe(e.Tipo, e.Detalhe)
 		evs = append(evs, ev)
 	}
 	base0 := "/onda/" + strconv.FormatInt(id, 10)
@@ -253,21 +275,98 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	s.pagina(w, http.StatusOK, "onda", d)
 }
 
-// textoDetalhe escreve o detalhe do evento como JSON compacto, sem as chaves que apontam para
-// pane ou workspace do Herdr (a página mostra só o estado do agente) e cortado. O escape do
-// HTML é do template.
-func textoDetalhe(raw json.RawMessage) (string, bool) {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return corte(string(raw))
+// camposDoDiario é a lista do que pode sair, por tipo de evento: só estes campos aparecem na
+// página. Tipo fora da lista não mostra detalhe nenhum, e campo novo num tipo conhecido fica
+// escondido até alguém conferir que ele é seguro e o incluir aqui. Ficam de fora, de propósito,
+// pane_id, workspace_id, pane_origem e pane_liberado_de.
+var camposDoDiario = map[string][]string{
+	"coord.registrar":         {"projeto_padrao"},
+	"projeto.tom":             {"projeto", "indice"},
+	"onda.criar":              {"titulo", "autorizacao_ate", "ordem", "us", "depende_de", "movidas"},
+	"onda.encerrar":           {},
+	"us.status":               {"de", "para", "status", "papel", "rodada", "forcado", "motivo"},
+	"mr.add":                  {"url", "projeto_path", "iid", "iac"},
+	"mr.rm":                   {"url"},
+	"mr.estado":               {"url", "de", "para"},
+	"pend.add":                {"id", "tipo", "texto", "origem", "slug", "arquivo", "autor", "opcoes"},
+	"pend.responder":          {"id", "por", "opcao", "texto", "titulo_opcao", "anterior"},
+	"pend.resolver":           {"id", "resposta"},
+	"pend.arquivo_alterado":   {"id", "slug", "arquivo", "hash_registrado", "hash_atual"},
+	"pend.arquivo_restaurado": {"id", "slug", "arquivo"},
+	"pend.avisada":            {"id", "aviso", "coordenador"},
+	"pend.aviso_falhou":       {"id", "aviso", "coordenador", "motivo"},
+	"limpar.removido":         {"tipo", "alvo", "motivo"},
+	"limpar.preservado":       {"tipo", "alvo", "motivo"},
+	"limpar.falhou":           {"tipo", "alvo", "motivo"},
+	"limpar.recusada":         {"motivo"},
+	"limpar.onda":             {"acao", "motivo"},
+	"recursos.gravar":         {"arquivo", "repos", "panes", "aprovados"},
+	"recursos.reabrir":        {"geracao", "mrs_encerradas"},
+}
+
+const detalheOmitido = "detalhe omitido"
+
+// textoDetalhe escreve o detalhe do evento como JSON compacto, só com os campos da lista do
+// tipo, com os ids de pane do Herdr (e o nome entre parênteses que os acompanha) mascarados nos
+// textos, e cortado. O escape do HTML é do template.
+func textoDetalhe(tipo string, raw json.RawMessage) (string, bool) {
+	campos, ok := camposDoDiario[tipo]
+	if !ok {
+		return detalheOmitido, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return detalheOmitido, false
+	}
+	// O alvo de um recurso do tipo pane é o próprio pane: não há o que mostrar dele.
+	if t, _ := m["tipo"].(string); t == "pane" {
+		delete(m, "alvo")
+	}
+	out := map[string]any{}
+	for _, k := range campos {
+		if v, ok := m[k]; ok {
+			out[k] = mascarar(v)
+		}
+	}
+	if len(out) == 0 {
+		return "", false
 	}
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(semPanes(v)); err != nil {
-		return corte(string(raw))
+	if err := enc.Encode(out); err != nil {
+		return detalheOmitido, false
 	}
 	return corte(strings.TrimSpace(b.String()))
+}
+
+// idHerdr casa o id de pane (w…:p…) ou de tab (w…:t…) do Herdr, com o nome entre parênteses que
+// vem junto no formato "id (nome)" e que o painel de limpeza escreve.
+var idHerdr = regexp.MustCompile(`\bw[0-9A-Za-z_-]*:[pt][0-9A-Za-z_-]+(?:\s*\([^)]*\))?`)
+
+// mascarar troca, em todo texto do valor (inclusive dentro de listas e objetos), o id de pane
+// pelo marcador "[pane]".
+func mascarar(v any) any {
+	switch x := v.(type) {
+	case string:
+		return idHerdr.ReplaceAllString(x, "[pane]")
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			if l := strings.ToLower(k); strings.Contains(l, "pane") || strings.Contains(l, "workspace") {
+				continue
+			}
+			out[k] = mascarar(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = mascarar(e)
+		}
+		return out
+	}
+	return v
 }
 
 func corte(s string) (string, bool) {
@@ -279,25 +378,4 @@ func corte(s string) (string, bool) {
 		i--
 	}
 	return s[:i], true
-}
-
-func semPanes(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(x))
-		for k, e := range x {
-			if l := strings.ToLower(k); strings.Contains(l, "pane") || strings.Contains(l, "workspace") {
-				continue
-			}
-			out[k] = semPanes(e)
-		}
-		return out
-	case []any:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = semPanes(e)
-		}
-		return out
-	}
-	return v
 }

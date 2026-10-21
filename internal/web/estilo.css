@@ -121,3 +121,9 @@ dl.meta dd { margin: 0; overflow-wrap: anywhere; }
 .mr, .pend { margin-top: 4px; overflow-wrap: anywhere; }
 .evento { background: var(--papel); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 14px; margin: 0 0 8px; }
 .evdet { margin: 6px 0 0; padding: 8px; background: var(--fundo); border-radius: 6px; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.situacao { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; font-size: .85rem; color: var(--suave); }
+.selo-pipe-sucesso, .selo-aprov-aprovada { background: var(--ok-fundo); color: var(--ok); }
+.selo-pipe-falhou { background: var(--erro-fundo); color: var(--erro); }
+.selo-pipe-rodando { background: #e5eefc; color: var(--marca-escura); }
+.selo-pipe-pendente, .selo-aprov-pendente { background: var(--aviso-fundo); color: var(--aviso); }
+.selo-pipe-desconhecido, .selo-aprov-desconhecido { background: transparent; border: 1px dashed var(--linha); color: var(--suave); font-style: italic; }

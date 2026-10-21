@@ -3,6 +3,7 @@ package central
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,9 @@ type MR struct {
 	AdicionadaEm string  `json:"adicionada_em"`
 	AtualizadoEm *string `json:"atualizado_em"` // última consulta bem-sucedida à forja
 	Erro         *Erro   `json:"erro"`          // última consulta, se falhou
+	// Pipeline e Aprovacao vêm do último valor bom do cache; nulos até a forja os dar.
+	Pipeline  *string `json:"pipeline"`
+	Aprovacao *string `json:"aprovacao"`
 }
 
 // RefCurta é a referência curta da MR: `!32` no GitLab e `repo#29` no GitHub.
@@ -32,13 +36,24 @@ func (m MR) RefCurta() string {
 }
 
 // colunasMR lê a MR com o cache dela; scanMR casa com a ordem.
-const colunasMR = `SELECT mr.url, mr.projeto_path, mr.iid, mr.iac, mr.estado, mr.adicionada_em, c.valor_em, c.erro_codigo, c.erro_mensagem, c.erro_em
+const colunasMR = `SELECT mr.url, mr.projeto_path, mr.iid, mr.iac, mr.estado, mr.adicionada_em, c.valor_em, c.valor, c.erro_codigo, c.erro_mensagem, c.erro_em
 	FROM mr LEFT JOIN cache c ON c.fonte = 'mr' AND c.chave = mr.url `
 
 func scanMR(r scanner) (MR, error) {
 	var m MR
-	var codigo, mensagem, em *string
-	err := r.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm, &m.AtualizadoEm, &codigo, &mensagem, &em)
+	var codigo, mensagem, em, valor *string
+	err := r.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm, &m.AtualizadoEm, &valor, &codigo, &mensagem, &em)
+	if valor != nil {
+		var v ValorMR
+		if json.Unmarshal([]byte(*valor), &v) == nil {
+			if v.Pipeline != "" {
+				m.Pipeline = &v.Pipeline
+			}
+			if v.Aprovacao != "" {
+				m.Aprovacao = &v.Aprovacao
+			}
+		}
+	}
 	m.Erro = erroDe(codigo, mensagem, em)
 	return m, err
 }

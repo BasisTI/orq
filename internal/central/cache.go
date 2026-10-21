@@ -60,6 +60,10 @@ type WorkspaceHerdr struct {
 type ValorMR struct {
 	Estado string `json:"estado"`
 	WebURL string `json:"web_url,omitempty"`
+	// Pipeline (sucesso|falhou|rodando|pendente|sem) e Aprovacao (aprovada|pendente|nao_exigida)
+	// ficam vazios quando a forja não os deu: o snapshot os traz como nulos (desconhecidos).
+	Pipeline  string `json:"pipeline,omitempty"`
+	Aprovacao string `json:"aprovacao,omitempty"`
 }
 
 // ValorTaiga é o valor em cache de uma US no Taiga.
