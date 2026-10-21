@@ -202,10 +202,27 @@ Só com o coordenador `idle` ou `done` (`herdr agent get`); senão, tenta no cic
 | `GET /p/<projeto>/<ref>/<n>` | o detalhe renderizado, as opções como botões de rádio (a recomendada com selo, nenhuma marcada), o campo de texto, o histórico de respostas, o estado e os links da US no Taiga e das MRs; sem recarga automática |
 | `POST /p/<projeto>/<ref>/<n>/responder` | grava e redireciona (post/redirect/get) |
 | `GET /historico?pagina=N` | as resolvidas, 20 por página |
+| `GET /central` | a Central somente leitura (veja [Central pela web](#central-pela-web)); recarrega a cada 30 s |
+| `GET /onda/<id>?pagina=N` | o diário da onda (`orq diario --onda`), do mais recente ao mais antigo, 25 por página; recarrega a cada 30 s |
 | `GET /saude` | `ok` se o banco responde e aceita escrita deste `orq` |
 | `GET /estilo.css` | o CSS embutido (a CSP só aceita `style-src 'self'`) |
 
 As páginas são renderizadas no servidor (`html/template`), tema claro, pensadas para a largura de um celular; os formulários são POST e não pedem JS. O CSS e os modelos vão embutidos no binário; a web não serve arquivo do disco nem o JSON do `snapshot`.
+
+#### Central pela web
+
+`GET /central` mostra o que o TUI mostra, sem nenhuma ação (não há merge, encerramento de onda, mudança de status nem despacho pela web; só `GET`, `POST` recebe 405). A página é montada pelo mesmo `Store.Snapshot` do `orq snapshot` (só as ondas abertas, como ele), e por coordenador traz:
+
+- *onda:* título (link para `/onda/<id>`), `até`, ordem, progresso e os selos `concluída` (a regra de [Encerrar a onda](#encerrar-a-onda), a mesma do TUI) e `encerrada`;
+- *US:* id, status na Central, título e status no Taiga (do cache, com link), dependências e o estado do agente (`working`, `idle`, `done`, `blocked`…). **Nome, id de pane e workspace do Herdr não aparecem**, nem nos detalhes do diário (chaves com `pane` ou `workspace` são removidas);
+- *MRs:* link para a forja e estado. O snapshot não guarda pipeline nem aprovação à parte; o estado os resume: `pronta` é aberta, não draft, mesclável (pipeline e aprovação em dia, sem conflito) e `aberta` é o resto. MR que o daemon ainda não consultou aparece como `sem estado`;
+- *pendências:* a contagem de abertas e respondidas do coordenador e, em cada US, o link `/p/…` das que ainda esperam.
+
+No topo, a idade do cache de cada fonte (`herdr`, `mr`, `taiga`), na mesma forma do rodapé do TUI (`central.Idade`, usada pelos dois). **Dado vencido aparece como vencido:** a idade passa do prazo da fonte (`central.PrazoVencido`: 3 × o TTL do enriquecedor, ou seja 15 s no Herdr, 3 min nas MRs e 15 min no Taiga) e ganha o selo `vencido` em amarelo, na fonte e em cada MR, US e agente; sem o daemon, a página inteira passa a mostrar `vencido` em vez de fingir que está atual. Fonte sem nenhum valor mostra `sem dado`, e consulta que falhou mostra `falhou: <código>` ao lado do último valor bom.
+
+`GET /onda/<id>` traz o título e o resumo da onda (inclusive encerrada) e o diário dela paginado. O texto dos eventos sai em JSON compacto, cortado em 600 bytes, escapado pelo `html/template`. Onda inexistente ou id mal formado dá 404.
+
+A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos cabeçalhos, a recarga é `<meta http-equiv="refresh" content="30">` (sem JS) e, no socket Unix, requisição sem o cabeçalho do usuário recebe 401.
 
 **Segurança.**
 

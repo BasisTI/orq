@@ -429,7 +429,7 @@ func TestSaude(t *testing.T) {
 
 func TestNaoServeArquivosNemSnapshot(t *testing.T) {
 	f := nova(t, true)
-	for _, p := range []string{"/snapshot", "/central", "/etc/passwd", "/../../etc/passwd", "/tmpl/base.html", "/estilo.css/../web.go", "/p/orq/15/1/../../../../etc/passwd", "/central.db"} {
+	for _, p := range []string{"/snapshot", "/etc/passwd", "/../../etc/passwd", "/tmpl/base.html", "/estilo.css/../web.go", "/p/orq/15/1/../../../../etc/passwd", "/central.db"} {
 		w := f.faz(req{metodo: "GET", caminho: p})
 		if w.Code == 200 && p != "/estilo.css/../web.go" {
 			t.Errorf("GET %s = 200", p)

@@ -463,7 +463,7 @@ func colunasPend(ps []central.Pendencia, largura int, agora time.Time) colsPend 
 		l.id = max(l.id, ansi.StringWidth(limpar(p.ID)))
 		l.tipo = max(l.tipo, ansi.StringWidth(rotulo(rotuloTipo, p.Tipo)))
 		l.texto = max(l.texto, ansi.StringWidth(textoPend(p)))
-		l.idade = max(l.idade, ansi.StringWidth(desde(p.AbertaEm, agora)))
+		l.idade = max(l.idade, ansi.StringWidth(central.Idade(p.AbertaEm, agora)))
 	}
 	// O texto tem teto: mais longo, quebra em 2 linhas em vez de esticar a tabela.
 	l.texto = max(min(l.texto, textoMaximo, largura-molduraTabela-l.id-l.tipo-l.idade-l.ir), 1)
@@ -786,7 +786,7 @@ func (e Estilos) tabelaPend(ps []central.Pendencia, l colsPend, o Opcoes) []Linh
 				e.cor(e.p().amarelo, cortar(limpar(p.ID), l.id)),
 				e.cor(e.corTipo(p.Tipo), cortar(rotulo(rotuloTipo, p.Tipo), l.tipo)),
 				strings.Join(texto, "\n"),
-				e.apagado(cortar(desde(p.AbertaEm, o.Agora), l.idade)),
+				e.apagado(cortar(central.Idade(p.AbertaEm, o.Agora), l.idade)),
 				ir,
 			},
 			altura: len(texto),
@@ -841,25 +841,6 @@ func duasLinhas(s string, w int) []string {
 	return ls
 }
 
-// desde escreve há quanto tempo foi ts (RFC 3339): agora, há 12 min, há 3 h, há 2 d.
-func desde(ts string, agora time.Time) string {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return "?"
-	}
-	d := agora.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "agora"
-	case d < time.Hour:
-		return fmt.Sprintf("há %d min", int(d/time.Minute))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("há %d h", int(d/time.Hour))
-	default:
-		return fmt.Sprintf("há %d d", int(d/(24*time.Hour)))
-	}
-}
-
 // rodape mostra, discreto, a idade de cada fonte e o erro que ela tiver; os valores da tela
 // continuam os últimos bons.
 func (e Estilos) rodape(s central.Snapshot, agora time.Time) string {
@@ -873,7 +854,7 @@ func (e Estilos) rodape(s central.Snapshot, agora time.Time) string {
 		p := f + " "
 		switch {
 		case fo.AtualizadoEm != nil:
-			p += desde(*fo.AtualizadoEm, agora)
+			p += central.Idade(*fo.AtualizadoEm, agora)
 		default:
 			p += "nunca"
 		}

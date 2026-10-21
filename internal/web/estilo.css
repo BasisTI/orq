@@ -96,3 +96,28 @@ dl.meta dd { margin: 0; overflow-wrap: anywhere; }
 .historico li { margin-bottom: 10px; overflow-wrap: anywhere; }
 .paginas { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--suave); }
 .voltar { margin: 0; }
+
+/* Central (somente leitura) */
+.barra nav a[aria-current="page"] { font-weight: 700; }
+.fontes { display: flex; flex-wrap: wrap; gap: 6px 14px; background: var(--papel); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 14px; }
+.fonte { font-size: .85rem; }
+.idade { color: var(--suave); font-size: .85rem; }
+.idade-vencida { color: var(--aviso); background: var(--aviso-fundo); border-radius: 6px; padding: 0 6px; font-weight: 600; }
+.idade-nunca { font-style: italic; }
+.selo-erro, .selo-vencido { background: var(--erro-fundo); color: var(--erro); }
+.selo-agente { background: #eef0f3; color: var(--suave); }
+.selo-working { background: #e5eefc; color: var(--marca-escura); }
+.selo-blocked { background: var(--erro-fundo); color: var(--erro); }
+.selo-mr-pronta, .selo-mr-mesclada { background: var(--ok-fundo); color: var(--ok); }
+.selo-mr-draft, .selo-mr-fechada { background: var(--linha); color: var(--suave); }
+.selo-mr-aberta { background: #e5eefc; color: var(--marca-escura); }
+.selo-st-done { background: var(--ok-fundo); color: var(--ok); }
+.selo-st-exec, .selo-st-rev { background: #e5eefc; color: var(--marca-escura); }
+.coord h2 { overflow-wrap: anywhere; }
+.onda { background: var(--papel); border: 1px solid var(--linha); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+.onda-titulo { font-weight: 700; overflow-wrap: anywhere; }
+.us { border-top: 1px solid var(--linha); margin-top: 10px; padding-top: 10px; }
+.us .titulo { margin: 2px 0; overflow-wrap: anywhere; }
+.mr, .pend { margin-top: 4px; overflow-wrap: anywhere; }
+.evento { background: var(--papel); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 14px; margin: 0 0 8px; }
+.evdet { margin: 6px 0 0; padding: 8px; background: var(--fundo); border-radius: 6px; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }

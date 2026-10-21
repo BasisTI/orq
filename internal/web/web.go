@@ -30,8 +30,8 @@ const (
 	csp             = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'"
 )
 
-// Servidor atende as páginas. Não serve arquivo do disco e não expõe o snapshot: só desenha o
-// que a Central guarda das pendências.
+// Servidor atende as páginas. Não serve arquivo do disco e não expõe o snapshot em JSON: só
+// desenha, em HTML escapado, as pendências e a Central (somente leitura).
 type Servidor struct {
 	St *central.Store
 	// Unix: a requisição veio do socket Unix, atrás do Caddy; o usuário vem do cabeçalho
@@ -75,6 +75,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /p/{projeto}/{ref}/{n}", s.detalhe)
 	mux.HandleFunc("POST /p/{projeto}/{ref}/{n}/responder", s.responder)
 	mux.HandleFunc("GET /historico", s.historico)
+	mux.HandleFunc("GET /central", s.central)
+	mux.HandleFunc("GET /onda/{id}", s.onda)
 	mux.HandleFunc("GET /saude", s.saude)
 	mux.HandleFunc("GET /estilo.css", s.estilo)
 	// O mux grava o padrão no Request que recebe; os de fora são cópias (WithContext), então a
@@ -184,6 +186,8 @@ type base struct {
 	Titulo     string
 	Usuario    string
 	Recarregar bool
+	// Ativa marca o link da barra: "central"; vazio nas pendências.
+	Ativa string
 }
 
 func (s *Servidor) pagina(w http.ResponseWriter, status int, nome string, dados any) {
