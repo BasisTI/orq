@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-22T00:00:00Z",
+  "title": "Design System: orq Central web v2",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Azul Basis", "canonical": "#0A2E5C", "tonalRamp": ["#041429", "#071F40", "#0A2E5C", "#2B4F82", "#5C7BA6", "#93A9C6", "#C7D3E3", "#EEF3FA"] },
+      "navy": { "role": "primary", "displayName": "Navy de cabeçalho", "canonical": "#071A2E", "tonalRamp": ["#030D17", "#071A2E", "#12304F", "#2A4A6B", "#566F8B", "#8798AD", "#BAC4D0", "#E4E9EF"] },
+      "laranja": { "role": "secondary", "displayName": "Laranja de marca", "canonical": "#F68B1F", "tonalRamp": ["#5C3200", "#8A4A00", "#B35A00", "#D97A0A", "#F68B1F", "#F9AB59", "#FBCB97", "#FEEBD6"] },
+      "warning": { "role": "tertiary", "displayName": "Âmbar-escuro", "canonical": "#8F5A00", "tonalRamp": ["#2E1C00", "#5F3C00", "#7A4D00", "#8F5A00", "#B7791F", "#D9A64D", "#EFD39B", "#FBEFD6"] },
+      "base-200": { "role": "neutral", "displayName": "Fundo frio", "canonical": "#EDF1F5", "tonalRamp": ["#1B2A38", "#2B3A48", "#5B6B7A", "#66768A", "#98A5B3", "#D3DAE2", "#E8EDF2", "#EDF1F5"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Título (Inter Tight)", "purpose": "Títulos de página, de onda e de bloco; identificadores como #61 e TG-78." },
+      "body": { "displayName": "Corpo (Carlito)", "purpose": "Todo o resto; html a 106,25% porque Carlito tem olho pequeno." },
+      "label": { "displayName": "Selo", "purpose": "Selos de estado, 0.8rem em 700, sempre com texto." }
+    },
+    "shadows": [
+      { "name": "toast", "value": "0 6px 20px rgba(0,0,0,.25)", "purpose": "Única sombra: o toast flutuante. Superfícies em repouso são planas." }
+    ],
+    "motion": [
+      { "name": "chevron", "value": "rotate 180ms ease-out", "purpose": "Gira 90° ao abrir accordion." },
+      { "name": "agente-pulsa", "value": "1.6s ease-in-out infinite", "purpose": "Ponto do agente trabalhando." },
+      { "name": "confirma", "value": "2.2s ease-out 1", "purpose": "Pendência recém-respondida pisca verde uma vez." },
+      { "name": "sobe", "value": "200ms ease-out", "purpose": "Entrada do toast. Tudo desliga em prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "linha-larga", "value": "760px" },
+      { "name": "abas-fim", "value": "900px" },
+      { "name": "pagina-larga", "value": "1024px" },
+      { "name": "coluna-lateral", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Cabeçalho",
+      "kind": "nav",
+      "refersTo": "cabecalho",
+      "description": "Faixa navy com ícone do orq, 'orq' em texto e subtítulo.",
+      "html": "<header class=\"ds-cab\"><span class=\"ds-marca-nome\">orq</span><span class=\"ds-marca-sub\">Central</span></header>",
+      "css": ".ds-cab{background:#071A2E;color:#fff;height:3.5rem;display:flex;align-items:center;gap:.75rem;padding:0 16px}.ds-marca-nome{font-family:'Inter Tight',system-ui,sans-serif;font-weight:700;font-size:1.4rem;letter-spacing:-.02em}.ds-marca-sub{color:rgba(255,255,255,.72);font-size:.95rem;padding-left:.75rem;border-left:1px solid rgba(255,255,255,.25)}"
+    },
+    {
+      "name": "Abas",
+      "kind": "nav",
+      "refersTo": "aba-ativa",
+      "description": "Abas roláveis; a ativa por aria-current, com sublinhado laranja e contagem.",
+      "html": "<ul class=\"ds-abas\"><li><a href=\"#\" aria-current=\"page\">Todos <span class=\"ds-n\">9</span></a></li><li><a href=\"#\">Pendências <span class=\"ds-n ds-n-aviso\">3</span></a></li></ul>",
+      "css": ".ds-abas{display:flex;list-style:none;background:#fff;border-bottom:1px solid #D3DAE2;font-family:Carlito,Calibri,sans-serif}.ds-abas a{display:flex;align-items:center;gap:.45rem;min-height:3rem;padding:0 .85rem;color:#1B2A38;text-decoration:none;font-weight:700}.ds-abas a:hover{background:#EDF1F5}.ds-abas a[aria-current=page]{color:#071A2E;box-shadow:inset 0 -3px 0 #F68B1F}.ds-abas a:focus-visible{outline:2px solid #B35A00;outline-offset:2px}.ds-n{font-weight:400;background:#EDF1F5;border-radius:9999px;padding:0 .5rem;font-size:.85rem;color:rgba(27,42,56,.7)}.ds-n-aviso{background:#8F5A00;color:#fff;font-weight:700}"
+    },
+    {
+      "name": "Selos",
+      "kind": "chip",
+      "refersTo": "selo",
+      "description": "Estado sempre com texto; tracejado para desconhecido.",
+      "html": "<span class=\"ds-selo ds-selo-erro\">1 pipeline falhou</span> <span class=\"ds-selo ds-selo-info\">MR pronta</span> <span class=\"ds-selo ds-selo-forte\">2 esperam você</span> <span class=\"ds-selo ds-selo-aviso\">vencido</span> <span class=\"ds-selo ds-selo-trac\">desconhecido</span>",
+      "css": ".ds-selo{display:inline-flex;align-items:center;gap:.3rem;min-height:1.5rem;padding:.2rem .55rem;border-radius:.25rem;font:700 .8rem/1.2 Carlito,Calibri,sans-serif;white-space:nowrap;background:#E8EDF2;color:#2B3A48;border:1px solid transparent}.ds-selo-erro{background:#FBE6E3;color:#9C1F18}.ds-selo-info{background:#E0EEF6;color:#0A5E88}.ds-selo-aviso{background:#FBEFD6;color:#7A4D00}.ds-selo-forte{background:#8F5A00;color:#fff}.ds-selo-trac{background:transparent;color:#3F4E5C;border:1px dashed #5B6B7A}"
+    },
+    {
+      "name": "Barra de onda",
+      "kind": "card",
+      "refersTo": "onda",
+      "description": "Accordion fechado que carrega o estado inteiro: título, coordenador, limite, progresso e sinais.",
+      "html": "<div class=\"ds-onda\"><span class=\"ds-onda-id\">#61</span> <b class=\"ds-onda-nome\">Migrar o catálogo para o novo esquema</b><div class=\"ds-onda-meta\">até merge · estrita · 3/5</div></div>",
+      "css": ".ds-onda{background:#fff;border:1px solid #D3DAE2;border-radius:.5rem;padding:.85rem .9rem;font-family:Carlito,Calibri,sans-serif;color:#1B2A38}.ds-onda:hover{background:#F5F7FA}.ds-onda-id{font-family:'Inter Tight',system-ui,sans-serif;color:rgba(27,42,56,.7)}.ds-onda-nome{font-family:'Inter Tight',system-ui,sans-serif;font-size:1.05rem;line-height:1.25;color:#071A2E;letter-spacing:-.01em}.ds-onda-meta{font-size:.9rem;color:#2B3A48;margin-top:.5rem}"
+    },
+    {
+      "name": "Opção de resposta",
+      "kind": "input",
+      "refersTo": "opcao",
+      "description": "Opção da pendência em rádio; marcada ganha borda e anel primary.",
+      "html": "<label class=\"ds-opcao\"><input type=\"radio\" name=\"o\" checked> <span><b>Aprovar</b><br>Segue o plano do coordenador.</span></label>",
+      "css": ".ds-opcao{display:flex;gap:.7rem;align-items:flex-start;border:1px solid #D3DAE2;border-radius:.375rem;padding:.7rem .8rem;background:#fff;cursor:pointer;min-height:3rem;font-family:Carlito,Calibri,sans-serif;color:#1B2A38}.ds-opcao:hover{border-color:#6D83A0}.ds-opcao:has(input:checked){border-color:#0A2E5C;background:#EEF3FA;box-shadow:inset 0 0 0 1px #0A2E5C}.ds-opcao:has(input:focus-visible){outline:2px solid #B35A00;outline-offset:2px}"
+    },
+    {
+      "name": "Botão primário",
+      "kind": "button",
+      "refersTo": "botao",
+      "description": "Enviar resposta: azul Basis, texto branco, 2.75rem.",
+      "html": "<button class=\"ds-btn\">Enviar resposta</button>",
+      "css": ".ds-btn{min-height:2.75rem;padding:0 1rem;background:#0A2E5C;color:#fff;border:1px solid #0A2E5C;border-radius:.375rem;font:700 1rem Carlito,Calibri,sans-serif;cursor:pointer}.ds-btn:hover{background:#071A2E}.ds-btn:focus-visible{outline:2px solid #B35A00;outline-offset:2px}"
+    },
+    {
+      "name": "Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Confirmação da resposta; única sombra do sistema.",
+      "html": "<div class=\"ds-toast\" role=\"status\">Resposta enviada: TG-78 P1. O coordenador é avisado.</div>",
+      "css": ".ds-toast{background:#071A2E;color:#fff;padding:.7rem 1rem;border-radius:.375rem;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:28rem;font-family:Carlito,Calibri,sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A fila de trabalho",
+    "overview": "A Central é uma lista que se lê de cima para baixo, não um painel de métricas. A barra da onda carrega o estado inteiro mesmo fechada; o que depende da pessoa sobe para a frente. O mundo é o basis-interno claro: fundo cinza-frio, superfícies brancas, faixa navy no topo, divisórias de 1px no lugar de cartões.\n\nLaranja é a marca e o foco, nunca informação. A informação mora em selos com texto e ícone; a cor só reforça. Dado vencido nunca finge ser atual.",
+    "keyCharacteristics": [
+      "Linhas e divisórias em vez de cartões; accordions aninhados onda > US > MR e pendência.",
+      "Plano: sem sombra de decoração, sem gradiente.",
+      "Selo sempre com texto; tracejado para desconhecido.",
+      "Carlito no corpo, Inter Tight nos títulos e identificadores.",
+      "Mesmo vocabulário em onda, US e MR.",
+      "Só tema claro."
+    ],
+    "rules": [
+      { "name": "A Regra do Laranja Mudo", "body": "Laranja é marca, aba ativa e foco. Texto nunca é #F68B1F; quando precisa de laranja em texto ou anel, é #B35A00.", "section": "colors" },
+      { "name": "A Regra do Âmbar Escuro", "body": "\"Depende de você\" é âmbar-escuro (#8F5A00 cheio com texto branco, ou #7A4D00 sobre pastel). Nunca laranja vivo.", "section": "colors" },
+      { "name": "A Regra dos 70%", "body": "Texto esmaecido nunca abaixo de 70% da tinta; contorno de controle nunca abaixo de 3:1; placeholder #5B6B7A.", "section": "colors" },
+      { "name": "A Regra do Selo sem Cor Solitária", "body": "Estado nunca é só cor: texto sempre, ícone quando cabe, tracejado quando desconhecido ou sem estado.", "section": "colors" },
+      { "name": "A Regra dos 4 Tons", "body": "A cor do projeto existe só no ponto ao lado do nome, em 4 tons.", "section": "colors" },
+      { "name": "A Regra da Voz Dupla", "body": "Inter Tight para título e identificador; Carlito para todo o resto. Sem terceira fonte.", "section": "typography" },
+      { "name": "A Regra do Plano", "body": "Sem sombra, gradiente ou ruído em superfícies em repouso. Separação por linha.", "section": "elevation" },
+      { "name": "A Regra do Movimento de Estado", "body": "Movimento só para estado; tudo desliga em prefers-reduced-motion.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do manter o estado inteiro na barra da onda fechada; o que depende da pessoa sobe para a frente.",
+      "Do usar selo com texto (e ícone, quando cabe) para todo estado; tracejado para desconhecido e sem estado; relógio e \"vencido\" para dado velho.",
+      "Do usar o mesmo vocabulário em todo lugar: \"pipeline falhou\", \"MR pronta\", \"esperam você\".",
+      "Do marcar a aba ativa por aria-current=\"page\".",
+      "Do usar laranja só em marca, aba ativa e foco; #B35A00 onde tocar texto ou anel.",
+      "Do manter esmaecido ≥70%, contorno de controle ≥3:1 (#66768A) e placeholder #5B6B7A."
+    ],
+    "donts": [
+      "Don't pôr cartão dentro de cartão; separe por filete de 1px.",
+      "Don't usar kicker/eyebrow acima de títulos.",
+      "Don't usar sombra ou gradiente decorativos.",
+      "Don't usar fonte do sistema como voz de título.",
+      "Don't transmitir estado só por cor, nem usar a cor do projeto fora do ponto.",
+      "Don't pôr o banner em tela com dados, nem o banner escuro; don't manter o cartão creme depois que a arte nova chegar."
+    ]
+  }
+}
