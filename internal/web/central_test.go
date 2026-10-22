@@ -251,6 +251,7 @@ func TestOndaDiarioEscapadoEPaginado(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d: %s", code, html)
 	}
+	html = doMain(html)
 	contem(t, html, "Onda de alfa", "limpar.falhou", "&lt;script&gt;", "visível", "[pane]", "página 1 de 2", href+"?pagina=2", "mais antigas")
 	naoContem(t, html, "<script>alert", "<img src", "wA:p9", "wA-ws", "nome-x", "mais recentes")
 	// O mais recente vem primeiro.
@@ -320,7 +321,7 @@ func TestCentralMesmosCabecalhosEAutenticacao(t *testing.T) {
 				t.Errorf("%s %s = %q", p, k, got)
 			}
 		}
-		if h := corpo(w); strings.Contains(h, "<script") || strings.Contains(h, "style=") {
+		if h := corpo(w); temInline(h) {
 			t.Errorf("%s tem script ou estilo inline", p)
 		}
 		sem := c.f.faz(req{metodo: "GET", caminho: p, cab: map[string]string{"X-Orq-User": ""}})

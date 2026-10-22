@@ -1,5 +1,5 @@
 {{define "erro"}}{{template "topo" .}}
-<h1>{{.Titulo}}</h1>
+<h1 class="t-pagina">{{.Titulo}}</h1>
 <p class="aviso erro" role="alert">{{.Mensagem}}</p>
-<p><a href="{{.Voltar}}">← voltar</a></p>
+<p class="voltar"><a href="{{.Voltar}}"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Voltar</a></p>
 {{template "rodape" .}}{{end}}

@@ -1,9 +1,9 @@
 {{define "detalhe"}}{{template "topo" .}}
-<p class="voltar"><a href="/">← pendências</a></p>
-<h1>{{.P.Texto}}</h1>
+<p class="voltar"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Pendências</a></p>
+<h1 class="t-pagina">{{.P.Texto}}</h1>
 <p class="selos"><strong>{{.P.ID}}</strong> <span class="selo selo-tipo">{{.P.Tipo}}</span> <span class="selo selo-{{.P.Estado}}">{{.P.Estado}}</span>{{if .P.SemCoordenador}} <span class="selo selo-aviso">sem coordenador</span>{{end}}</p>
 {{if .Registrada}}<p class="aviso ok" role="status">Resposta registrada.</p>{{end}}
-<dl class="meta">
+<dl class="p-meta">
 <dt>US</dt><dd>{{if .TaigaURL}}<a href="{{.TaigaURL}}" rel="noopener noreferrer">{{.P.US}}</a>{{else}}{{.P.US}}{{end}}{{if .TaigaTitulo}} · {{.TaigaTitulo}}{{end}}</dd>
 <dt>Coordenador</dt><dd>{{.P.Coordenador}} · onda {{.P.OndaID}}</dd>
 {{if .P.Autor}}<dt>Autor</dt><dd>{{.P.Autor}}</dd>{{end}}
@@ -16,30 +16,30 @@
 {{else}}<p class="aviso">Pendência antiga, aberta só com o título (sem detalhe). Pergunte ao coordenador o contexto.</p>{{end}}
 
 {{if eq .P.Estado "resolvida"}}
-<h2>Resolvida</h2>
+<h2 class="t-sec">Resolvida</h2>
 <p>{{.ResolvidaEm}}{{if .P.Resposta}} · {{.P.Resposta}}{{end}}</p>
 {{else}}
-<h2>{{if eq .P.Estado "respondida"}}Trocar a resposta{{else}}Sua resposta{{end}}</h2>
+<h2 class="t-sec">{{if eq .P.Estado "respondida"}}Trocar a resposta{{else}}Sua resposta{{end}}</h2>
 {{if eq .P.Estado "respondida"}}<p class="atual">Resposta atual: <strong>{{.RespostaAtual}}</strong> · {{.P.RespondidaPor}} em {{.RespondidaEm}}</p>{{end}}
 {{if .Erro}}<p class="aviso erro" role="alert">{{.Erro}}</p>{{end}}
-<form method="post" action="{{.Acao}}">
+<form class="resposta" method="post" action="{{.Acao}}">
 {{if .P.Opcoes}}
-<fieldset>
+<fieldset class="opcoes">
 <legend>Escolha uma opção</legend>
 {{range .P.Opcoes}}
-<label class="opcao"><input type="radio" name="opcao" value="{{.ID}}" required>
-<span><strong>{{.Titulo}}</strong>{{if .Recomendada}} <span class="selo selo-recomendada">recomendada</span>{{end}}{{if .Descricao}}<br><span class="desc">{{.Descricao}}</span>{{end}}</span></label>
+<label class="opcao"><input type="radio" class="radio" name="opcao" value="{{.ID}}" required>
+<span class="opcao-texto"><strong>{{.Titulo}}</strong>{{if .Recomendada}} <span class="selo selo-recomendada">recomendada</span>{{end}}{{if .Descricao}}<span class="desc">{{.Descricao}}</span>{{end}}</span></label>
 {{end}}
 </fieldset>
 {{end}}
-<label class="campo">{{if .P.Opcoes}}Complemento (opcional){{else}}Resposta{{end}}
-<textarea name="texto" rows="5" maxlength="{{.LimiteTexto}}"{{if not .P.Opcoes}} required{{end}}></textarea></label>
-<button type="submit" class="primario">Enviar resposta</button>
+<label class="campo"><span class="campo-rot">{{if .P.Opcoes}}Complemento (opcional){{else}}Resposta{{end}}</span>
+<textarea class="textarea w-full" name="texto" rows="5" maxlength="{{.LimiteTexto}}"{{if not .P.Opcoes}} required{{end}}></textarea></label>
+<button type="submit" class="btn btn-primary">Enviar resposta</button>
 </form>
 {{end}}
 
 {{if .Historico}}
-<h2>Histórico de respostas</h2>
+<h2 class="t-sec">Histórico de respostas</h2>
 <ol class="historico">
 {{range .Historico}}<li><span class="meta">{{.Quando}} · {{.Por}}</span><br>{{.Texto}}</li>{{end}}
 </ol>

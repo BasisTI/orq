@@ -126,10 +126,41 @@ func corpo(w *httptest.ResponseRecorder) string {
 
 func form(v url.Values) string { return v.Encode() }
 
+// doMain devolve a página a partir do <main>: o cabeçalho e o <head> são do orq (logo, <script src>
+// do htmx), e os testes de escape olham só o que o agente e a pessoa escreveram.
+func doMain(html string) string {
+	if _, resto, ok := strings.Cut(html, "<main"); ok {
+		return resto
+	}
+	return html
+}
+
+// temInline diz se há <script> sem src, atributo style="" ou atributo de evento: o que a CSP
+// proíbe e o que as páginas não podem ter (o <script src> do htmx e do app.js é permitido).
+func temInline(html string) bool {
+	for resto := html; ; {
+		i := strings.Index(resto, "<script")
+		if i < 0 {
+			break
+		}
+		tag, depois, _ := strings.Cut(resto[i:], ">")
+		if !strings.Contains(tag, " src=") || !strings.HasPrefix(depois, "</script>") {
+			return true
+		}
+		resto = depois
+	}
+	for _, a := range []string{"style=", " onclick=", " onload=", " onerror=", " onchange=", " onsubmit="} {
+		if strings.Contains(html, a) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDetalheEscapaScriptEJavascript(t *testing.T) {
 	f := nova(t, false)
 	w := f.faz(req{metodo: "GET", caminho: "/p/orq/15/1"})
-	html := corpo(w)
+	html := doMain(corpo(w))
 	if w.Code != 200 {
 		t.Fatalf("status %d: %s", w.Code, html)
 	}
@@ -183,17 +214,20 @@ func TestMarkdownLinksPerigosos(t *testing.T) {
 	}
 }
 
+// cspEsperada é a CSP da spec (§5.1), escrita por extenso: o teste não a deriva da constante.
+const cspEsperada = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+
 func TestCabecalhosDeSegurancaEmToda(t *testing.T) {
 	f := nova(t, false)
-	for _, c := range []struct{ m, p string }{{"GET", "/"}, {"GET", "/p/orq/15/1"}, {"GET", "/historico"}, {"GET", "/saude"}, {"GET", "/estilo.css"}, {"GET", "/nao-existe"}, {"POST", "/p/orq/15/1/responder"}} {
+	for _, c := range []struct{ m, p string }{{"GET", "/"}, {"GET", "/p/orq/15/1"}, {"GET", "/historico"}, {"GET", "/saude"}, {"GET", "/estilo.css"}, {"GET", "/estatico/app.css"}, {"GET", "/nao-existe"}, {"POST", "/p/orq/15/1/responder"}} {
 		w := f.faz(req{metodo: c.m, caminho: c.p})
 		h := w.Header()
-		if h.Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
+		if h.Get("Content-Security-Policy") != cspEsperada || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
 			t.Errorf("%s %s: cabeçalhos %v", c.m, c.p, h)
 		}
 	}
-	if w := f.faz(req{metodo: "GET", caminho: "/estilo.css"}); w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/css") || !strings.Contains(corpo(w), "--fundo") {
-		t.Errorf("css: %d %v", w.Code, w.Header())
+	if w := f.faz(req{metodo: "GET", caminho: "/estilo.css"}); w.Code != 404 {
+		t.Errorf("/estilo.css = %d, quer 404 (saiu na story 1)", w.Code)
 	}
 }
 

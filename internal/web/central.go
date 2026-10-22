@@ -198,7 +198,7 @@ func (s *Servidor) central(w http.ResponseWriter, r *http.Request) {
 		Coords []coordVista
 		Fontes []fonteVista
 		Gerado string
-	}{base{Titulo: "Central", Usuario: usuarioDe(r), Recarregar: true, Ativa: "central"}, s.vistaCoords(snap), fontes, s.quando(snap.GeradoEm)})
+	}{base{Titulo: "Central", Usuario: usuarioDe(r), Recarregar: true, Ativa: "central", Larga: true}, s.vistaCoords(snap), fontes, s.quando(snap.GeradoEm)})
 }
 
 type eventoVista struct {
@@ -268,7 +268,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		Total             int
 		Pagina, Paginas   int
 		Anterior, Proxima string
-	}{base{Titulo: "Onda " + strconv.FormatInt(id, 10), Usuario: usuarioDe(r), Recarregar: true, Ativa: "central"}, *alvo, coord, evs, total, pagina, paginas, "", ""}
+	}{base{Titulo: "Onda " + strconv.FormatInt(id, 10), Usuario: usuarioDe(r), Recarregar: true, Ativa: "central", Larga: true}, *alvo, coord, evs, total, pagina, paginas, "", ""}
 	if pagina > 1 {
 		d.Anterior = base0 + "?pagina=" + strconv.Itoa(pagina-1)
 	}

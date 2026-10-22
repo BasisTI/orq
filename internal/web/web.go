@@ -18,8 +18,15 @@ import (
 	"github.com/BasisTI/orq/internal/refs"
 )
 
-//go:embed tmpl/*.html estilo.css
-var assets embed.FS
+//go:embed tmpl/*.html
+var modelosFS embed.FS
+
+// estatico é o CSS, o JS, as fontes e as imagens embutidos. A forma de diretório (e não
+// estatico/*) deixa de fora arquivo que começa com "." ou "_". Regenere com
+// scripts/build-frontend.sh; go build não usa Node.
+//
+//go:embed estatico
+var estaticoFS embed.FS
 
 // Limites do POST: o corpo todo e o texto da resposta.
 const (
@@ -27,7 +34,7 @@ const (
 	LimiteTexto     = central.LimiteResposta
 	itensPorPagina  = 20
 	cabecalhoPadrao = "X-Orq-User"
-	csp             = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'"
+	csp             = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 
 // Servidor atende as páginas. Não serve arquivo do disco e não expõe o snapshot em JSON: só
@@ -45,8 +52,8 @@ type Servidor struct {
 	Log   func(format string, args ...any)
 	Agora func() time.Time
 
-	modelos *template.Template
-	css     []byte
+	modelos  *template.Template
+	estatico *estaticos
 }
 
 func (s *Servidor) agora() time.Time {
@@ -67,8 +74,8 @@ func (s *Servidor) cabecalho() string {
 // identificação do usuário e o log.
 func (s *Servidor) Handler() http.Handler {
 	if s.modelos == nil {
-		s.modelos = template.Must(template.New("").Funcs(template.FuncMap{}).ParseFS(assets, "tmpl/*.html"))
-		s.css, _ = assets.ReadFile("estilo.css")
+		s.estatico = carregarEstaticos()
+		s.modelos = template.Must(template.New("").Funcs(template.FuncMap{"ver": s.estatico.versao}).ParseFS(modelosFS, "tmpl/*.html"))
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.indice)
@@ -78,7 +85,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /central", s.central)
 	mux.HandleFunc("GET /onda/{id}", s.onda)
 	mux.HandleFunc("GET /saude", s.saude)
-	mux.HandleFunc("GET /estilo.css", s.estilo)
+	mux.HandleFunc("GET /estatico/{caminho...}", s.servirEstatico)
 	// O mux grava o padrão no Request que recebe; os de fora são cópias (WithContext), então a
 	// rota é anotada aqui, depois do mux, para o log.
 	comRota := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,8 +193,11 @@ type base struct {
 	Titulo     string
 	Usuario    string
 	Recarregar bool
-	// Ativa marca o link da barra: "central"; vazio nas pendências.
+	// Ativa marca a aba da barra com aria-current: "pendencias", "central" ou "historico"; vazio
+	// nas páginas de erro.
 	Ativa string
+	// Larga usa a coluna de 900 px em vez da de 760 px.
+	Larga bool
 }
 
 func (s *Servidor) pagina(w http.ResponseWriter, status int, nome string, dados any) {
@@ -223,11 +233,6 @@ func (s *Servidor) falha(w http.ResponseWriter, r *http.Request, err error, volt
 		}
 		s.erro(w, r, http.StatusInternalServerError, "Erro interno", "Algo falhou do nosso lado. A resposta não foi registrada.", voltar)
 	}
-}
-
-func (s *Servidor) estilo(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	_, _ = w.Write(s.css)
 }
 
 // saude confere que o banco responde e ainda aceita escrita deste orq.
@@ -294,7 +299,7 @@ func (s *Servidor) indice(w http.ResponseWriter, r *http.Request) {
 		Coords, Projetos     []string
 		Ondas                []int64
 		Abertas, Respondidas []itemLista
-	}{base{Titulo: "Pendências", Usuario: usuarioDe(r), Recarregar: true}, f, chaves(coords), chaves(projetos), od, abertas, respondidas})
+	}{base{Titulo: "Pendências", Usuario: usuarioDe(r), Recarregar: true, Ativa: "pendencias"}, f, chaves(coords), chaves(projetos), od, abertas, respondidas})
 }
 
 func chaves(m map[string]bool) []string {
@@ -337,7 +342,7 @@ func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 		Itens             []itemLista
 		Pagina, Paginas   int
 		Anterior, Proxima string
-	}{base: base{Titulo: "Histórico", Usuario: usuarioDe(r)}, Itens: itens, Pagina: pagina, Paginas: paginas}
+	}{base: base{Titulo: "Histórico", Usuario: usuarioDe(r), Ativa: "historico"}, Itens: itens, Pagina: pagina, Paginas: paginas}
 	if pagina > 1 {
 		d.Anterior = "/historico?pagina=" + strconv.Itoa(pagina-1)
 	}
@@ -397,7 +402,7 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		Registrada                  bool
 		Erro                        string
 		LimiteTexto                 int
-	}{base: base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r)}, P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
+	}{base: base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r), Ativa: "pendencias"}, P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
 		Registrada: r.FormValue("registrada") == "1", Erro: msg, LimiteTexto: LimiteTexto}
 	if p.Detalhe != nil {
 		d.Detalhe = RenderizarMarkdown(*p.Detalhe)
