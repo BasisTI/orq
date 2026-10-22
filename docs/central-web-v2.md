@@ -4,11 +4,12 @@ Spec da US #21. Ela diz como implementar, em `internal/web`, o que o protótipo 
 
 - **Protótipo aprovado:** `https://cedagente-orq.basisti.com.br/prototipo/` (atrás de login). Aprovado como composição em 2026-10-22. Ele é descartável e **não** entra no repositório; seus dados são sintéticos.
 - **Origem das decisões:** cada decisão abaixo traz a origem entre parênteses: `P` é o retorno da pessoa sobre o protótipo (2026-10-22), `R` é o README, `S` é o `docs/snapshot.md`, `H` é o código do htmx 2.0.6 lido para esta spec.
+- **Revisada** por revisão independente (r1, sobre o head `cc04725`); as correções desta versão estão no relatório da rodada r3. Os achados citados abaixo como B/S/M são os dessa revisão.
 - Estado atual conferido no `main` (`9e811b6`): rotas em `internal/web/web.go`, modelos em `internal/web/tmpl/`, um `estilo.css` único embutido, CSP `default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'`, sem JS.
 
 ## 1. O que muda, em uma tela
 
-A web deixa de ter "pendências" como página inicial e a Central como página à parte. Passa a ter uma Central só, com abas:
+A web deixa de ter "pendências" como página inicial e a Central como página à parte. Passa a ter uma Central só, com abas (a troca de rotas é feita por último, §2.2):
 
 - **Todos** e **uma aba por projeto** (slug do Taiga): as ondas abertas em accordion, e dentro delas as US em accordion, com MRs e pendências.
 - **Pendências**: as esperando você e as respondidas, com filtros em cascata (projeto → coordenador → onda).
@@ -28,35 +29,44 @@ A web continua somente leitura, **exceto** pela resposta às pendências (R). Me
    ```go
    type Fonte interface {
        Snapshot(ctx context.Context, incluirEncerradas bool) (central.Snapshot, error)
-       LerPendencia(ctx context.Context, ref refs.Pend) (central.Pendencia, []central.RespostaRegistrada, error)
-       Diario(ctx context.Context, f central.FiltroDiario) ([]central.Evento, error)
+       VerPendencia(ctx context.Context, coord *central.Coordenador, p refs.Pend) (central.Pendencia, error)
+       HistoricoRespostas(ctx context.Context, p refs.Pend) ([]central.RespostaRegistrada, error)
+       LerUS(ctx context.Context, u refs.US) (central.US, error)
+       ListarPendencias(ctx context.Context, f central.FiltroPendencias) ([]central.Pendencia, error)
+       ContarPendencias(ctx context.Context, f central.FiltroPendencias) (int, error)
+       Diario(ctx context.Context, coord *central.Coordenador, f central.FiltroDiario) ([]central.Evento, error)
+       ContarDiario(ctx context.Context, coord *central.Coordenador, f central.FiltroDiario) (int, error)
    }
    ```
 
-   `*central.Store` a implementa. Os nomes exatos seguem o que o `Store` já tem hoje; a story 2 acerta a assinatura. A **escrita** continua pelo `Store` (`ResponderPendencia`), e é a única (R).
+   `*central.Store` a implementa; **os nomes e assinaturas acima são os do `Store` no `main` (`9e811b6`)**: `VerPendencia`, `HistoricoRespostas`, `LerUS`, `ListarPendencias`, `ContarPendencias`, `Diario` e `ContarDiario` existem hoje e são os que o `internal/web` já chama. A story 2 só confere se algum mudou até lá. A **escrita** continua pelo `Store` (`ResponderPendencia`), e é a única (R).
 3. **O snapshot é lido uma vez por requisição** e o resultado serve a página inteira. Dois handlers na mesma requisição não podem ver instantes diferentes.
 
 ### 2.2 Rotas
 
-| Rota | Antes | Depois |
-|---|---|---|
-| `GET /` | pendências abertas | **Central, aba Todos** (página inteira) |
-| `GET /projeto/{slug}` | não existe | aba de um projeto; as ondas com ao menos uma US dele; 404 se o slug não tem onda aberta |
-| `GET /pendencias` | não existe | aba Pendências, filtros `?projeto=&coord=&onda=`; com `HX-Request`, só o fragmento `#pend-conteudo` |
-| `GET /central` | Central | `308` para `/` (links antigos) |
-| `GET /p/{projeto}/{ref}/{n}` | detalhe | **continua**, no visual novo: link direto, sem accordion |
-| `GET /p/{projeto}/{ref}/{n}/corpo` | não existe | **fragmento** do corpo da pendência (contexto, opções, formulário); carregado na primeira abertura do accordion |
-| `POST /p/{projeto}/{ref}/{n}/responder` | grava e redireciona | **mesmo contrato** (§5.3); com `HX-Request` devolve fragmento, sem ele continua redirecionando (post/redirect/get) |
-| `GET /vivo` | não existe | **fragmento** da atualização de 30 s (§6) |
-| `GET /onda/{id}` | diário | continua, no visual novo |
-| `GET /historico` | resolvidas | continua; ganha link no rodapé da aba Pendências |
-| `GET /saude` | saúde | continua, sem mudança |
-| `GET /estatico/{arquivo}` | `GET /estilo.css` | **novo**: CSS, `htmx.min.js`, `app.js`, fontes e imagens embutidos (§4); `/estilo.css` é removido |
+A troca de `/` e de `/central` é **a última** a acontecer (story 3, §11): até lá, a web nunca fica sem a lista de pendências. A tabela mostra o **estado final**; a coluna "Story" diz onde cada linha entra.
 
+| Rota | Antes | Depois | Story |
+|---|---|---|---|
+| `GET /central` | Central | **a Central nova** (aba Todos) até a story 3; depois, `308` para `/` | 2 (nova), 3 (308) |
+| `GET /` | pendências abertas | lista de pendências **atual**, no visual novo, até a story 3; depois, **Central, aba Todos**. Com `coord`, `projeto` ou `onda` na query (os filtros da página antiga), `308` para `/pendencias` com a mesma query | 3 |
+| `GET /projeto/{slug}` | não existe | aba de um projeto; as ondas com ao menos uma US dele; 404 se o slug não tem onda aberta | 2 |
+| `GET /pendencias` | não existe | aba Pendências, filtros `?projeto=&coord=&onda=`; com `HX-Request`, só o fragmento `#pend-conteudo` (exceção abaixo) | 3 |
+| `GET /p/{projeto}/{ref}/{n}` | detalhe | **continua**, no visual novo: link direto, sem accordion | 3 |
+| `GET /p/{projeto}/{ref}/{n}/corpo` | não existe | **fragmento** do corpo da pendência (contexto, opções, formulário); carregado na primeira abertura do accordion | 3 |
+| `POST /p/{projeto}/{ref}/{n}/responder` | grava e redireciona | **mesmo contrato** (§5.3); com `HX-Request` devolve fragmento, sem ele continua redirecionando (post/redirect/get) | 3 |
+| `GET /vivo` | não existe | **fragmento** da atualização de 30 s (§6) | 2 |
+| `GET /onda/{id}` | diário | continua, no visual novo | 4 |
+| `GET /historico` | resolvidas | continua; ganha link no rodapé da aba Pendências | 3 |
+| `GET /saude` | saúde | continua, sem mudança | – |
+| `GET /estatico/{arquivo}` | `GET /estilo.css` | **novo**: CSS, `htmx.min.js`, `app.js`, fontes e imagens embutidos (§4); `/estilo.css` é removido | 1 |
+
+- **Por que essa ordem (S1).** O fluxo real é mesclar a story e rodar `orq upgrade` no daemon real (R: "Atualização"); a pessoa responde pendências pelo celular. Se a story 2 trocasse `/` pela Central, a pessoa ficaria sem lista de pendências até a story 3 (a Central nova ainda não tem pendência nas US). Por isso a story 2 entrega a Central nova em **`/central`** (a rota que já existe e que a pessoa e a skill do coordenador já usam), e as abas dela apontam: Todos → `/central`, projeto → `/projeto/{slug}`, Pendências → `/` (a lista atual). A story 3 inverte: `/` vira a Central, `/central` vira 308 e a aba Pendências aponta para `/pendencias`. **A cada merge a web tem os dois caminhos funcionando.**
 - **Só `GET` e o `POST` de resposta.** `POST` nas demais, `PUT`, `DELETE` e `PATCH` continuam `405` (o que a #16 garante, R). O `/vivo` e os `/corpo` são `GET` e não gravam.
 - **O que é fragmento htmx e o que é página:** são fragmentos `/vivo`, `/p/…/corpo`, a resposta do `POST` com `HX-Request` e `/pendencias` com `HX-Request`. Tudo o mais é página inteira. **Página inteira funciona sem JS** (a lista das ondas, os accordions por `<details>` e o `POST` por formulário); o JS só melhora (P: "fácil de entender").
-- **Mudança de comportamento a avisar no README:** `/` deixa de ser a lista de pendências. O aviso de pendência que o daemon manda ao coordenador usa `/p/…` (R), então não quebra; o bookmark antigo de `/` cai na aba Todos.
-- **Modelos:** `html/template` como hoje, embutidos. Um `base` (cabeçalho, abas, rodapé) e um modelo por tela; os fragmentos são `define`s reaproveitados pela página inteira e pelo `/vivo`, para o mesmo HTML nunca existir duas vezes (§5.2).
+- **Exceção: restauração do histórico (B3).** O htmx, ao restaurar a página no botão Voltar com `historyCacheSize:0`, pede a URL de novo e **troca o `<body>` pela resposta**. Com `HX-Request: true` o servidor devolveria só o fragmento e a página viraria o fragmento (provado no Chromium). Duas defesas, as duas obrigatórias: (1) a meta do htmx traz `"historyRestoreAsHxRequest":false`, e o pedido de restauração sai **sem** `HX-Request`; (2) o servidor trata `HX-History-Restore-Request: true` como página inteira, **mesmo que `HX-Request` venha**. A regra "com `HX-Request`, só o fragmento" vale **só quando não há `HX-History-Restore-Request`**. O `HX-Replace-Url` funciona com cache 0 (provado).
+- **Mudanças de comportamento a avisar (M16):** (a) `/` deixa de ser a lista de pendências; o aviso que o daemon manda ao coordenador, o `registrada.json`, o `orq pend ver` e o TUI usam `/p/…` (`refs.URLPendencia`), que **não muda**; (b) os filtros `GET /?coord=&projeto=&onda=` da página atual passam a `308` para `/pendencias` com a mesma query, em vez de serem ignorados em silêncio pela aba Todos; (c) `/central` e `/onda/<id>` aparecem no README (tabela de rotas, "Central pela web") e na skill `orquestrador` (`references/central.md`, que manda o coordenador enviar `<ORQ_WEB_URL>/central` à pessoa); o `308` os mantém vivos, mas o **README é atualizado na story 3** e a **skill é atualizada pelo coordenador** depois do merge dela (§11); (d) `/estilo.css` some (só o `base.html` e o README o citam). `ORQ_WEB_URL` não é afetado. A regra por caminho no Caddy (operação, fora do `orq`) não foi lida: se existir para `/` ou `/estilo.css`, é preciso conferir.
+- **Modelos:** `html/template` como hoje, embutidos. Um `base` (cabeçalho, abas, rodapé, `<link rel="icon">`) e um modelo por tela; os fragmentos são `define`s reaproveitados pela página inteira e pelo `/vivo`, para o mesmo HTML nunca existir duas vezes (§5.2).
 
 ### 2.3 O que sai do `Store.Snapshot` e o que precisa de consulta nova
 
@@ -69,7 +79,7 @@ O snapshot já traz tudo o que as abas, as barras e as linhas precisam. **Nenhum
 | barra da onda | `Onda` (`id`, `titulo`, `autorizacao_ate`, `ordem`), `Coordenador.nome`, `us[].status` (prontas/total) |
 | pendências abertas da onda | `Pendencia.onda_id` e `estado` |
 | sinal agregado das MRs | `MR.estado`, `pipeline` das MRs não `mesclada` nem `fechada` |
-| selo `concluída` | a regra de [Encerrar a onda](../README.md#encerrar-a-onda), já usada pelo TUI e por `/central` (`central.Concluida`) |
+| selo `concluída` | a regra de [Encerrar a onda](../README.md#encerrar-a-onda), já usada pelo TUI e por `/central` (`central.EncerramentoDe(o).Pronta`) |
 | estado do agente, `vencido` | `US.herdr.status` e `central.Vencido("herdr", …)`; **nome, pane e workspace nunca chegam ao modelo** (R) |
 | status no Taiga, link | `US.taiga` |
 | MR: estado, pipeline, aprovação, `vencido`, "consulta extra falhou" | `MR.*`, `situacao_em`, `situacao_erro` (US #16 e #19, S) |
@@ -80,8 +90,10 @@ O snapshot já traz tudo o que as abas, as barras e as linhas precisam. **Nenhum
 
 **O que continua precisando de consulta além do snapshot:**
 
-- **O detalhe da pendência** (até 64 KiB cada, S: "o `detalhe` não vai no snapshot"). Por isso o accordion da pendência traz só o resumo na página e busca o corpo em `/p/…/corpo` na primeira abertura (`hx-trigger="toggle once"`). Uma Central com 20 pendências não carrega 20 detalhes por padrão. Usa `LerPendencia`, que o `detalhe` já usa.
-- **O histórico de respostas** (`RespostaRegistrada`), que só a página `/p/…` e o corpo mostram.
+- **O detalhe da pendência** (até 64 KiB cada, S: "o `detalhe` não vai no snapshot"). Por isso o accordion da pendência traz só o resumo na página e busca o corpo em `/p/…/corpo` na primeira abertura (`hx-trigger="toggle once"`). Uma Central com 20 pendências não carrega 20 detalhes por padrão. Usa `VerPendencia` e `HistoricoRespostas`, que o `detalhe` já usa.
+- **O histórico de respostas** (`HistoricoRespostas`), que só a página `/p/…` e o corpo mostram.
+- **O Taiga e as MRs de uma US** na página `/p/…` (`LerUS`).
+- **Regra do accordion de pendência (M6):** o servidor **nunca serve `<details open>` em pendência**. Um `<details>` servido aberto não dispara `toggle` (0 pedidos de corpo na carga) e o primeiro fechamento consome o `once`: o corpo nunca carregaria. Aberto só por clique, ou por `app.js` ao seguir `#hash` (isso dispara `toggle`, provado).
 - **O diário da onda**, como hoje.
 
 Resultado: o custo de uma página das abas é o de **um `Snapshot`** (uma transação de leitura, sem consulta externa: a leitura é do cache que o daemon grava, S).
@@ -119,7 +131,7 @@ Versões **exatas**, sem `^` nem `~`, travadas por `package-lock.json`:
 | `@fontsource/carlito` | `5.2.5` | Carlito 400 e 700, latin |
 | `@fontsource/inter-tight` | `5.2.6` | Inter Tight 600 e 700, latin |
 
-São as versões do protótipo e as da skill `basis-web-frontend` (`references/tema-interno.md`). Subir versão é uma mudança de código com a regeneração do CSS (§4.4) no mesmo commit.
+São as versões do protótipo (`@tailwindcss/browser@4.1.12`, `htmx.org@2.0.6`, `css/daisyui.css` idêntico ao `daisyui@5.0.46`). A skill `basis-web-frontend` fixa só as **fontes** (`tema-interno.md`); o `frontend-build.md` dela usa faixas (`^`), e aqui as versões são exatas de propósito. As seis existem no registro do npm. Subir versão é uma mudança de código com a regeneração do CSS (§4.4) no mesmo commit.
 
 ### 4.2 Estrutura
 
@@ -140,9 +152,9 @@ internal/web/
 scripts/build-frontend.sh   # o único ponto de regeneração
 ```
 
-- **`go:embed`** pega `estatico/*` e `estatico/fontes/*`. **`go install` e `scripts/build-plugin.sh` seguem sem Node:** o `build-plugin.sh` só roda `go build` (R, "Plugin do Herdr") e passa a ter o CSS pronto no repositório. Node é dependência **só de quem edita o frontend**, e o `AGENTS.md` ganha essa linha.
+- **`//go:embed estatico`** (a **forma de diretório**, não `estatico/*`): a lista com `*` embute arquivos que começam com `.` ou `_` (`.DS_Store`, `_x`), a forma de diretório não. O teste (§8.1) lista o `embed.FS` e compara com uma **lista fechada** de arquivos; arquivo a mais ou a menos falha. **`go install` e `scripts/build-plugin.sh` seguem sem Node:** o `build-plugin.sh` só roda `go build` (R, "Plugin do Herdr") e passa a ter o CSS pronto no repositório. Node é dependência **só de quem edita o frontend**, e o `AGENTS.md` ganha essa linha.
 - **O `input.css` usa `source(none)` com `@source "../tmpl/**/*.html"`.** O Tailwind trata como classe qualquer palavra do que varre, comentário inclusive; sem isso, classe citada em `docs/` ou em skill entraria no CSS (`tema-interno.md`). O `@source` aponta só para os modelos (e para o `app.js`, se usar classe).
-- **Tema:** `@plugin "daisyui" { themes: false; }` e `@plugin "daisyui/theme"` com o `basis-interno` (valores no `DESIGN.md`), `default: true`. As sobrescritas do daisyUI que esmaecem texto (`.label`, `thead`, `.tab`, `.stat-*`, `.menu-title`) e o botão sem variante vão em `@layer utilities` (as mesmas de `tema-interno.md`). Aqui há duas a mais, medidas no protótipo: o `placeholder` (3,07:1 no daisyUI, vai a `#5B6B7A`, 5,48:1) e o contorno de `.radio`, `.select` e `.textarea` (`--input-color: #66768A`, 4,64:1; o do daisyUI dá 1,48:1).
+- **Tema:** `@plugin "daisyui" { themes: false; }` e `@plugin "daisyui/theme"` com o `basis-interno` (valores no `DESIGN.md`), `default: true`. As sobrescritas do daisyUI que esmaecem texto vão em `@layer utilities` e **acompanham o seletor que o daisyUI 5.0.46 gera, não o de `tema-interno.md`** (S2): aquele arquivo traz o seletor da aba do 5.5.19 (`… [aria-current="true"], [aria-current="page"]`), e o 5.0.46 gera `.tab:not(:checked, label:has(:checked), :hover, .tab-active, [aria-selected="true"])` a 50%. **A tela não usa `.tab` do daisyUI** (as abas são `.abas-in a`, com `aria-current`), então a sobrescrita da aba **não entra** no `input.css`; se um modelo passar a usar `.tab`, o teste de contraste (§8.1) reprova até a sobrescrita, escrita para a versão travada, existir. Entram as de `.label`, `thead`/`tfoot`, `.stat-*` e `.menu-title` se o build as gerar (o teste diz), o botão sem variante, e duas medidas no protótipo: o `placeholder` (3,07:1 no daisyUI, vai a `#5B6B7A`, 5,48:1) e o contorno de `.radio`, `.select` e `.textarea` (`--input-color: #66768A`, 4,64:1; o do daisyUI dá 1,48:1).
 - **Fontes servidas pelo binário, sem Google Fonts em produção** (CSP `font-src 'self'`). Os `.woff2` vêm do `@fontsource` (licença OFL; o texto da licença vai em `estatico/fontes/LICENSE-*.txt`). `font-display: swap`.
 - **Imagens:** o ícone (64 px) e o banner (880×440) são a arte da pessoa, reduzidos; a procedência está no relatório da US #21 r1.
 
@@ -153,21 +165,34 @@ Um arquivo, `estatico/app.js`, sem inline e sem dependência: abre os `<details>
 ### 4.4 Como regenerar
 
 ```bash
-scripts/build-frontend.sh          # npm ci, compila, copia htmx e fontes para internal/web/estatico
-git diff --exit-code internal/web/estatico   # vazio se nada mudou
+scripts/build-frontend.sh                    # npm ci, compila, copia htmx e fontes para internal/web/estatico
+git add -N internal/web/estatico && git diff --exit-code -- internal/web/estatico   # vazio se nada mudou
 ```
 
-O script usa `npm ci` (nunca `npm install`), `npx tailwindcss -i frontend/input.css -o estatico/app.css --minify` e `cp` dos arquivos de `node_modules`. Node **22 LTS** (versão em `frontend/.nvmrc`; o CI usa a mesma). Quem mexe em modelo ou `input.css` roda o script e commita o resultado.
+O script faz, nesta ordem, a partir da raiz do repositório (**S4: o comando precisa rodar de dentro de `frontend/`**, onde está o `node_modules`):
+
+```bash
+cd internal/web/frontend
+npm ci --no-audit --no-fund                  # nunca `npm install`
+npx --no-install tailwindcss -i input.css -o ../estatico/app.css --minify
+cp node_modules/htmx.org/dist/htmx.min.js ../estatico/
+cp node_modules/@fontsource/…/files/….woff2 ../estatico/fontes/   # as 4 fontes
+```
+
+- O `@tailwindcss/cli` instala o binário `tailwindcss`; o pacote `tailwindcss` v4 **não tem `bin`**, então um `npx tailwindcss` rodado **fora** de `frontend/` vai ao registro, não acha executável (`could not determine executable to run`) e, num terminal interativo, ofereceria instalar uma versão **não travada**. `--no-install` e o `cd` evitam as duas coisas.
+- **Node 24 LTS**, de propósito (M10): é o que a máquina de desenvolvimento tem e o que o `frontend-build.md` da skill usa (`v24.14.0`). A versão fica em `frontend/.nvmrc` e o CI usa o mesmo arquivo. **O determinismo do build foi provado só no Node 24** (três builds, `rm -rf node_modules && npm ci`, cópia em outro diretório: mesmo hash); em outro Node não foi testado, por isso a versão é fixa. O `package-lock.json` traz as 12 entradas `@tailwindcss/oxide-*` e o `npm ci` roda em `ubuntu-latest`.
+- Quem mexe em modelo ou `input.css` roda o script e commita o resultado.
 
 ### 4.5 Job de CI
 
 Um job novo, `frontend`, ao lado do `unit` em `.github/workflows/ci.yml`:
 
-1. `actions/setup-node` com a versão do `.nvmrc`, cache do `npm`;
+1. `actions/setup-node` com a versão do `frontend/.nvmrc` e cache do `npm`;
 2. `scripts/build-frontend.sh`;
-3. `git diff --exit-code -- internal/web/estatico`: **falha se o CSS (ou o `htmx.min.js`, ou as fontes) versionado não bate com o compilado**, com a mensagem "rode scripts/build-frontend.sh e commite internal/web/estatico".
+3. **arquivo novo também conta (S5):** `git add -N internal/web/estatico` e `git diff --exit-code -- internal/web/estatico` (ou, equivalente, `test -z "$(git status --porcelain -- internal/web/estatico)"`). O `git diff` sozinho **não vê arquivo não rastreado**: uma fonte, uma licença ou um PNG gerados e esquecidos passariam no job e o `main` ficaria sem eles no binário (provado: `exit 0`). **Falha se o CSS, o `htmx.min.js`, as fontes ou qualquer arquivo de `estatico/` versionado não bate com o gerado**, com a mensagem "rode scripts/build-frontend.sh e commite internal/web/estatico";
+4. **o teste de contraste do tema** (S3), `npm run contraste` em `frontend/`: compila o CSS **sem `--minify`** num diretório temporário (esse arquivo **não** é versionado nem embutido) e confere, com um porte do `ContrasteDoTemaTest.java` da skill, que nenhum texto ativo fica abaixo de 70% sem sobrescrita de mesmo seletor. O teste da skill lê o CSS **linha a linha**: no CSS minificado ele acha **zero** regras e passa vazio, e por isso roda sobre o não minificado. O teste tem o guarda de "achou regras" (falha se não encontra nenhuma) e se testa com CSS sintético, como o original.
 
-O job `unit` **não instala Node**: se alguém depender dele, o `go test` quebra no CI, que é o que se quer provar. Um teste Go (§8) lê o `app.css` embutido e confere o contraste do tema (o equivalente ao `ContrasteDoTemaTest` da skill).
+O job `unit` **não instala Node**: se alguém depender dele, o `go test` quebra no CI, que é o que se quer provar. O `go test` confere só o que não precisa de Node (§8.1).
 
 ## 5. CSP, segurança e a resposta pela web
 
@@ -178,16 +203,17 @@ default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-sr
 connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
 ```
 
-- **Sem `unsafe-inline` e sem `unsafe-eval`.** Nenhum `<script>` nem `style=""` inline nas páginas (o protótipo usa `style="width:…"` na barra de progresso: na implementação vira classe por faixa, ou o elemento nativo `<progress>`).
-- **O que o htmx 2.0.6 exige (H, lido no `htmx.js`):** o código usa `eval` e `new Function` só dentro de `maybeEval`, que respeita `htmx.config.allowEval`; com `false`, ele dispara `htmx:evalDisallowedError` e não executa. Isso corta `hx-on:*`, filtros de gatilho (`every 30s [cond]`) e `hx-vals="js:…"`, que a tela não usa. O htmx também injeta um `<style>` dos indicadores, a não ser que `includeIndicatorStyles` seja `false`. Configuração no `<meta name="htmx-config">` (que não é script, então a CSP não a barra):
+- **Sem `unsafe-inline` e sem `unsafe-eval`.** Nenhum `<script>` e **nenhum atributo `style=""`** nas páginas (M4). O protótipo tem 10 `style=` na Central (25 nas páginas todas): a **barra de progresso** (`style="width:67%"`) e o **sprite de ícones** (`<svg style="position:absolute">`); os dois violam `style-src 'self'` (`style-src-attr`, com `console.error` por atributo, provado). Na implementação a barra vira o elemento nativo `<progress value max>` e o sprite vira `<svg class="sprite" …>` com a classe no `app.css`. O htmx em si não viola nada: com `includeIndicatorStyles:false` ele não injeta `<style>`, e as mutações dele são só de `class` e `disabled`.
+- **O que o htmx 2.0.6 exige (H, lido no `htmx.js` e provado no Chromium):** o `eval` e o `new Function` (4 pontos) estão todos dentro de `maybeEval`, que respeita `htmx.config.allowEval`; com `false`, ele dispara `htmx:evalDisallowedError` e **não executa**. **Alcance exato (M5):** isso corta `hx-on:*` e `hx-vals="js:…"`. **Não corta o filtro de gatilho** (`every 30s [cond]`): com `allowEval:false` a condição vira **sempre verdadeira** (o pedido é feito, mais o evento de erro). A tela não usa nenhum dos três. `allowScriptTags:false` impede que um `<script>` de um fragmento seja executado (**M7**: não remove atributos de evento inline como `<img onerror>`; quem barra esses é a CSP, pelo `script-src` sem `unsafe-inline`; é defesa em profundidade, o fragmento já sai de `html/template`). `historyCacheSize:0` impede o htmx de guardar páginas, mas **o cache de histórico dele é `sessionStorage`, não `localStorage`** (M8); com 0 a chave de páginas nunca aparece, e só `htmx-current-path-for-history` (a URL) continua gravada.
 
   ```html
-  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
   ```
 
-  `selfRequestsOnly` já é o padrão. `allowScriptTags:false` impede que um fragmento traga `<script>` e o htmx o execute (defesa em profundidade: o fragmento sai de `html/template`). `historyCacheSize:0` impede o htmx de guardar páginas (com pendências) no `localStorage`. **A story 1 prova isso**: um teste de navegador (§8) carrega a página sob essa CSP e falha em qualquer violação reportada.
-- Cabeçalhos que já existem seguem: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` (também nos fragmentos e nos estáticos? `no-store` nos fragmentos; nos estáticos, `Cache-Control: public, max-age=…` com o hash do conteúdo na URL, ver abaixo).
-- **Estáticos com cache:** `/estatico/app.css?v=<hash>` (o hash do conteúdo embutido, calculado na partida). Só o `/estatico/*` ganha cache longo; páginas e fragmentos continuam `no-store`.
+  `selfRequestsOnly` já é o padrão. A meta não é script, então a CSP não a barra (provado). `historyRestoreAsHxRequest:false` é do **B3** (§2.2).
+- **`error:true` tem custo (S6):** cada resposta 4xx/5xx gera **dois** `console.error` (o do navegador, "Failed to load resource", e o do htmx, "Response Status Error Code"). O teste de navegador (§8.1) aceita esses dois **só nos pedidos de erro que ele mesmo provoca**, por uma lista de permissões, e continua falhando em qualquer outra mensagem. A story 1 também põe `<link rel="icon" href="/estatico/orq-icon-64.png">` no `base`: sem ele, toda carga pede `/favicon.ico`, recebe 404 e gera um erro de console.
+- Cabeçalhos que já existem seguem: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
+- **Cache, decidido (M3, M12):** páginas, fragmentos e `/vivo`: `Cache-Control: no-store`. Estáticos: **nunca `public`**. A web fica atrás de `basic_auth`, e `public` é o que autoriza um cache compartilhado a guardar resposta a pedido com `Authorization` (RFC 9111 §3.5); o dano seria nulo hoje (só CSS, fontes e htmx), mas não há razão para abrir a porta. Dois grupos: (a) `/estatico/app.css?v=<hash>`, `/estatico/htmx.min.js?v=<hash>` e `/estatico/app.js?v=<hash>` (o hash do conteúdo embutido, calculado na partida): `Cache-Control: private, max-age=31536000, immutable`; (b) fontes e imagens, que o Tailwind deixa **sem hash** dentro do `app.css` (`url(/estatico/fontes/….woff2)`): `Cache-Control: private, max-age=86400`. O custo é uma revalidação por dia; o ganho é não precisar reescrever as `url()` do CSS. Não testado em Caddy.
 
 ### 5.2 O que continua igual
 
@@ -197,39 +223,58 @@ connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
 - **Nada de pane no diário** (R, #16): a lista `camposDoDiario` e o `[pane]` dos textos seguem como estão. O diário novo reaproveita a função, não a reescreve.
 - **Limites do POST:** corpo até 16 KiB (413), resposta até 8 KiB (413), controles recusados (400), `Content-Type` `application/x-www-form-urlencoded` (415). O `hx-post` envia exatamente isso.
 - **Métodos recusados:** só `GET` e o `POST` de resposta (405 nos demais); `OPTIONS` e `HEAD` seguem o comportamento do `net/http`.
-- **Log:** método, padrão da rota e status, como hoje. As rotas novas entram com o padrão (`/p/{projeto}/{ref}/{n}/corpo`, `/vivo`), nunca com o caminho nem a query.
+- **Log:** **padrão da rota e status** (`web <rota> <status>`, como `comLog` faz hoje; **sem o método**; o README descreve o mesmo, e a story 3 o corrige). As rotas novas entram com o padrão (`/p/{projeto}/{ref}/{n}/corpo`, `/vivo`), nunca com o caminho nem a query.
 
 ### 5.3 A resposta por `hx-post`
 
-**Contrato do pedido (não muda):** `POST /p/{projeto}/{ref}/{n}/responder`, `application/x-www-form-urlencoded`, campos `opcao` (opcional, inteiro ≥ 1) e `texto`. O formulário do protótipo usa `comentario`; **na implementação o nome é `texto`**, o do contrato de hoje.
+**Contrato do pedido (não muda):** `POST /p/{projeto}/{ref}/{n}/responder`, `application/x-www-form-urlencoded`, campos `opcao` (opcional, inteiro ≥ 1) e `texto`. O formulário do protótipo usa `comentario`; **na implementação o nome é `texto`**, o do contrato de hoje (`r.PostForm.Get("texto")`).
 
-**O formulário** carrega `action` e `method="post"` (funciona sem JS) e `hx-post` para o mesmo endereço, `hx-target="closest .pend"` e `hx-swap="outerHTML"`. Marcas do protótipo que a implementação mantém: opção obrigatória quando há opções (`required` no rádio), comentário obrigatório quando não há.
+**O formulário** carrega `action` e `method="post"` (funciona sem JS) e `hx-post` para o mesmo endereço. **Todo elemento com `hx-get` ou `hx-post` declara o seu `hx-target` e o seu `hx-swap`** (M9): o `hx-swap` é **herdado** dos ancestrais, e um `<details hx-get=… hx-trigger="toggle once">` sem `hx-swap` sob um elemento com `hx-swap="none"` pede o corpo e **não o troca** (provado). O formulário declara `hx-target="closest .pend"` e `hx-swap="outerHTML"`. Marcas do protótipo que a implementação mantém: opção obrigatória quando há opções (`required` no rádio), comentário obrigatório quando não há. O formulário tem um espaço reservado `<div class="erro" role="alert"></div>` (vazio) para o erro (abaixo).
 
-**A resposta do servidor (200, `HX-Request: true`)** devolve:
-1. o **item da pendência já respondido e fechado** (o mesmo `define` da lista), com a opção escolhida, o `respondida_por` e a hora; é o `outerHTML` do alvo;
-2. **swaps fora de banda** (`hx-swap-oob="true"`) das contagens que mudaram, cada uma com `id` estável: a contagem da aba Pendências, o selo `esperam você` da barra da onda, o da linha da US, a linha de situação, e (na aba Pendências) os contadores dos grupos "Esperando você" e "Respondidas", e a **mudança de grupo** do item (o item sai do grupo de cima, entra no de baixo);
-3. um `<div id="aviso" role="status" hx-swap-oob="true">` com "Resposta enviada: TG-78 P1. O coordenador é avisado." (some por animação de CSS, sem JS).
+**A resposta do servidor (200, `HX-Request: true`):**
+1. **na US** (a pendência está dentro da linha da US): o **item respondido e fechado** é a resposta principal, que o `outerHTML` do `closest .pend` troca no lugar. **Na aba Pendências** (o item muda de grupo): a resposta principal é **vazia** (o `outerHTML` com fragmento vazio **remove** o item de cima, provado) e o item respondido vai por oob para o grupo de baixo (item 2).
+2. **mudança de grupo (S7):** o oob **precisa do embrulho**: `<div hx-swap-oob="afterbegin:#lista-resp"><div class="pend" id="pend-…">…</div></div>`. **Não** vale pôr `hx-swap-oob="afterbegin:#lista-resp"` no próprio `<div class="pend">`: para estilo ≠ `outerHTML`, o htmx insere o **conteúdo** do elemento, não o elemento, e o item some dos dois grupos (provado). Oob `true` com o mesmo `id` troca no lugar e o item **fica** no grupo de cima (provado), por isso não serve para mudar de grupo.
+3. **grupo vazio (S7):** `#lista-resp` e `#lista-esp` **existem sempre** (o servidor os renderiza vazios), para o `afterbegin` ter alvo; a frase "Nenhuma pendência…" é um irmão (`<p id="vazio-resp">`, `<p id="vazio-esp">`) renderizado com `hidden` quando o grupo tem itens. A resposta troca por oob o `#vazio-esp` (sem `hidden`, se o grupo ficou vazio) e o `#vazio-resp` (com `hidden`) e atualiza os contadores dos grupos.
+4. **contagens por oob `true` com `id` estável:** a aba Pendências, o selo `esperam você` da barra da onda e o da linha da US, a linha de situação.
+5. `<div id="aviso" role="status" hx-swap-oob="true">` com "Resposta enviada: TG-78 P1. O coordenador é avisado." (some por animação de CSS, sem JS).
 
-**Por que `hx-swap-oob` e não evento:** o servidor sabe todas as contagens (ele tem o snapshot) e o navegador não precisa saber onde cada uma está; um evento (`HX-Trigger`) obrigaria o JS próprio a buscar os números. O custo é que o servidor precisa **conhecer os ids** que a página tem: por isso a vista monta o mesmo `define` de contagem para a página e para o fragmento (§2.2), e a resposta só inclui oob dos ids que o pedido diz que existem (o formulário manda `hx-vals` não, e sim o `HX-Current-URL`, que o htmx envia sozinho; o servidor decide a aba pela URL).
+**Por que `hx-swap-oob` e não evento:** o servidor sabe todas as contagens (ele tem o snapshot) e o navegador não precisa saber onde cada uma está; um evento (`HX-Trigger`) obrigaria o JS próprio a buscar os números. O servidor decide **quais** ids incluir pela aba, lida do `HX-Current-URL` (que o htmx envia sempre, provado), com a função `abaDe(url)` que reconhece `/central`, `/` (e, depois da story 3, só `/`), `/projeto/{slug}` e `/pendencias`.
 
-**Erros:** o servidor devolve o **status de sempre** (400, 409 `pendencia_resolvida`, 413, 415, 503) com um fragmento `<p role="alert">` e o `responseHandling` do htmx (§5.1) troca-o dentro do formulário (`hx-target-error` fica fora: a configuração acima faz o 4xx/5xx trocar). **O que a pessoa digitou não se perde:** o fragmento de erro vai para um espaço reservado no formulário, não substitui o formulário.
+**Erros (B2): o 4xx não pode substituir o formulário.** Com o `responseHandling` da §5.1 (`swap:true` para 4xx/5xx), a resposta de erro seria trocada **no alvo do pedido** (`closest .pend`, `outerHTML`): o `<p role="alert">` ocuparia o lugar do item, o formulário sumiria e **o texto digitado se perderia** (provado: `formExiste:false`, `texto:null`). A correção é feita **pela resposta**, que já sabe que é erro: todo 4xx/5xx de fragmento devolve os cabeçalhos
 
-**Trocar a resposta** (R: "a resposta pode ser trocada até a pendência ser resolvida"): o botão do item respondido faz `hx-get` do `/corpo?trocar=1`, que devolve o formulário com a resposta atual indicada; a nova resposta gera um `pend.responder` e zera o aviso ao coordenador, como hoje. **Trocar não muda as contagens** (já saiu do "esperam você").
+```text
+HX-Retarget: find .erro
+HX-Reswap: innerHTML
+```
+
+e o corpo `<p>…</p>` com a mensagem. O `.erro` (`role="alert"`) é o espaço reservado do formulário; o formulário e o texto ficam. **Os dois cabeçalhos juntos:** só o `HX-Retarget` não basta, porque o `outerHTML` herdado do formulário apagaria o espaço reservado na primeira falha (provado). O servidor tem **uma função só** (`erroFragmento(w, status, alvo)`) para isso, usada pelos handlers de fragmento. A alternativa, `target` e `swapOverride` na entrada do `responseHandling` da meta, **foi recusada**: `target` é relativo ao disparador e um 4xx do `hx-get` do `/corpo` (que não tem `.erro` por perto) daria `htmx:targetError` e deixaria o accordion em "carregando…" (provado). Para o `/corpo`, o erro devolve `HX-Retarget: this` e `HX-Reswap: innerHTML` (o corpo do accordion mostra o erro). O `/vivo` não precisa disso: o elemento dele tem `hx-swap="none"`, e erro dele não troca nada (§6). Efeito de `error:true`: dois `console.error` por 4xx (S6, §5.1).
+
+Status devolvidos, como hoje: 400, 409 `pendencia_resolvida`, 413, 415, 503.
+
+**Trocar a resposta** (R: "a resposta pode ser trocada até a pendência ser resolvida"): o botão do item respondido faz `hx-get` do `/corpo?trocar=1` (com `hx-target` e `hx-swap` próprios), que devolve o formulário com a resposta atual indicada; a nova resposta gera um `pend.responder` e zera o aviso ao coordenador, como hoje. **Trocar não muda as contagens** (já saiu do "esperam você").
 
 **O que não muda:** `central.ResponderPendencia`, o evento `pend.responder` no diário, o aviso ao coordenador pelo `Avisador`, e a regra "worker e revisor nunca respondem".
 
 ## 6. Atualização automática de 30 s
 
-- **O que é consultado:** `GET /vivo`, um por página aberta, com `hx-trigger="every 30s"` no `<body>` da tela (não por elemento). A resposta é só `hx-swap-oob`:
+- **Elemento dedicado, com `hx-swap="none"` (B1).** O disparo **não** vai no `<body>`:
+
+  ```html
+  <div id="vivo" hx-get="/vivo?v=<hash>" hx-trigger="every 30s" hx-swap="none" hidden></div>
+  ```
+
+  Sem `hx-swap`, o htmx faz `innerHTML` no próprio alvo: um `/vivo` no `<body>`, cuja resposta só tem oob, **apagaria a página inteira no primeiro ciclo** (provado: `bodyChildren: 0`, `htmx:oobErrorNoTarget` nos ciclos seguintes; resposta vazia ou só espaço dá o mesmo). Com `hx-swap="none"` os oob são aplicados e `<details open>` e `<textarea>` sobrevivem (provado). **`hx-swap` é herdado (M9)**, e é por isso que o `none` fica num elemento **sem filhos** e nada na página depende dele: nenhum descendente herda. Todo outro `hx-get`/`hx-post` declara o próprio `hx-swap` (§5.3).
+- **O que é consultado:** `GET /vivo?v=<hash>`, um por página aberta. A resposta é só `hx-swap-oob`:
   - a linha de situação e as contagens das abas;
   - a lista "Idade dos dados";
-  - **as barras das ondas e as linhas das US**, trocando **só o `<summary>`** de cada uma (`<summary id="onda-61-barra">`), **nunca o `<details>`**;
-  - na aba Pendências, os contadores dos grupos.
-- **O que nunca é trocado:** o `<details>` (e portanto se está aberto), o corpo de uma pendência, o formulário e o que foi digitado nele. Nada com `<form>`, `<textarea>`, `<input>` ou `.pend-corpo` está na resposta do `/vivo`. **Teste:** um teste de `httptest` garante que o corpo do `/vivo` não contém essas marcas (§8).
-- **Mudança de composição (onda nova, onda encerrada, pendência nova):** o oob não pode inserir nem remover itens sem pisar no que está aberto. O `/vivo` recebe `?v=<hash>` (hash de ids e ordem das ondas, ou das pendências da aba, calculado na renderização); se o hash do servidor difere, a resposta traz, além do resto, `<div id="aviso-lista" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>`. A pessoa decide quando recarregar. **A tela nunca reordena sozinha embaixo da mão de quem está lendo** (é a mesma razão por que o protótipo diz "o que está aberto ou digitado não é trocado").
-- **Aba em segundo plano:** o navegador já reduz os temporizadores a cerca de 1 por minuto; a spec **não** usa filtro de gatilho de visibilidade, porque ele exige `allowEval` (§5.1).
-- **Custo no daemon:** o `/vivo` roda no processo do daemon (`orq daemon --web`) e custa **um `Snapshot`**: uma transação de leitura do SQLite (WAL) sobre o cache que o daemon já gravou, sem chamar Herdr, forja nem Taiga (S). Uma pessoa por máquina (P) e algumas abas abertas dão uma leitura a cada 30 s por aba. A story 2 mede o tempo do `Snapshot` com a Central do protótipo (9 ondas) num `BenchmarkVivo` e registra o número no relatório; se passar de 50 ms, o `/vivo` ganha um cache de 5 s por processo (a chave é a versão do banco). **Isso é uma proposta de limite, não uma medição** (não medi o custo real).
-- **Páginas de diário e de erro** não fazem `/vivo`; o diário de hoje recarrega por `<meta refresh>`, e o v2 o troca pelo `/vivo` da onda só se a story 4 provar que a lista de eventos cabe num oob; senão fica sem recarga automática e a spec do README é atualizada.
+  - **as barras das ondas e as linhas das US**, trocando **só o `<summary>`** de cada uma (`<summary id="onda-61-barra">`), **nunca o `<details>`**. Provado: o oob em `<summary>` troca só o `<summary>`, preserva o `open` e o `<textarea>` digitado dentro, também na US aninhada;
+  - na aba Pendências, os contadores dos grupos;
+  - o próprio `#vivo`, por oob `true`, com o `v` novo (o hash corrente), para o próximo ciclo mandar o hash certo.
+- **O que nunca é trocado:** o `<details>` (e portanto se está aberto), o corpo de uma pendência, o formulário e o que foi digitado nele. Nada com `<form>`, `<textarea>`, `<input>` ou `.pend-corpo` está na resposta do `/vivo`. **Teste:** um teste de `httptest` garante que o corpo do `/vivo` não contém essas marcas (§8.1).
+- **Mudança de composição (onda nova, onda encerrada, pendência nova):** o oob não pode inserir nem remover itens sem pisar no que está aberto. O `/vivo` recebe `?v=<hash>` (hash de ids e ordem das ondas, ou das pendências da aba, calculado na renderização); se o hash do servidor difere, a resposta traz, além do resto, `<div id="aviso-lista" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>`. A pessoa decide quando recarregar (aprovado pela pessoa em 2026-10-22). **A tela nunca reordena sozinha embaixo da mão de quem está lendo.**
+- **Aba em segundo plano:** o navegador já reduz os temporizadores a cerca de 1 por minuto; a spec **não** usa filtro de gatilho de visibilidade, porque, com `allowEval:false`, a condição vira sempre verdadeira (§5.1).
+- **Custo no daemon:** o `/vivo` roda no processo do daemon (`orq daemon --web`) e custa **um `Snapshot`**: uma transação de leitura do SQLite (WAL) sobre o cache que o daemon já gravou, sem chamar Herdr, forja nem Taiga (S). Uma pessoa por máquina (P) e algumas abas abertas dão uma leitura a cada 30 s por aba. A story 2 mede o tempo do `Snapshot` com a Central do protótipo (9 ondas) num `BenchmarkVivo` e registra o número no relatório; se passar de 50 ms, o `/vivo` ganha um cache de 5 s por processo (a chave é a versão do banco). **Isso é uma proposta de limite, não uma medição.**
+- **Diário e erros** não fazem `/vivo`; o diário de hoje recarrega por `<meta refresh>`, e o v2 o troca pelo `/vivo` da onda só se a story 4 provar que a lista de eventos cabe num oob; senão fica sem recarga automática e o README é atualizado.
 
 ## 7. Filtros em cascata (aba Pendências)
 
@@ -248,11 +293,11 @@ connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
 
 ### 8.1 O que muda em `internal/web`
 
-- **`central_test.go`, `central_regressao_test.go`, `situacao_vencida_test.go`, `web_test.go`:** hoje conferem HTML da Central (`/central`) e da lista de pendências (`/`). Passam a conferir as rotas novas. Os **casos de regressão da #16 e #19 não saem**: cada um ganha o equivalente na vista nova (nada de pane no diário, `vencido`, `desconhecido` por extenso, "consulta extra falhou", escape de HTML hostil, métodos recusados, 401 sem cabeçalho, 421 por `Host`).
+- **`central_test.go`, `central_regressao_test.go`, `situacao_vencida_test.go`, `web_test.go`:** hoje conferem HTML da Central (`/central`) e da lista de pendências (`/`). Passam a conferir as rotas novas, **na ordem das stories** (§2.2): `/central` é a Central nova a partir da story 2 e vira 308 na 3. Os **casos de regressão da #16 e #19 não saem**: cada um ganha o equivalente na vista nova (nada de pane no diário, `vencido`, `desconhecido` por extenso, "consulta extra falhou", escape de HTML hostil, métodos recusados, 401 sem cabeçalho, 421 por `Host`).
 - **Vista pura (`vista_test.go`, novo):** alimenta `vistaCentral` e `opcoesCascata` com `central.Snapshot` montados à mão, **sem banco e sem `httptest`**. É o que mantém a regra da §2.1 verdadeira. Cobre: ordem por atenção, sinal de MR por limite da onda, "esperam você" sem a respondida, `concluída` com respondida aberta, onda em duas abas, projeto padrão diferente do projeto das US, todas as combinações da cascata (nenhuma impossível), título de 200 caracteres, texto com `<script>`.
-- **`httptest`:** prova o que é de rede e de cabeçalho: a CSP exata (§5.1) em página, fragmento e estático; `/vivo` sem `<form>`, `<textarea>`, `<input>` nem `.pend-corpo`; `/vivo?v=` com hash velho traz o aviso de lista; `POST` com `HX-Request` devolve o item respondido e os `hx-swap-oob` esperados, e **sem** `HX-Request` redireciona (303); erro 4xx devolve o fragmento de alerta; `/central` dá 308; `/estilo.css` dá 404; `/estatico/` não lista diretório nem sai do `embed`; `POST` em `/` é 405.
-- **Estático (`estatico_test.go`):** o `app.css` embutido tem o tema `basis-interno`, nenhuma regra de texto ativo abaixo de 70% sem sobrescrita (o equivalente ao `ContrasteDoTemaTest.java` da skill), as quatro fontes existem, e o hash da URL muda quando o arquivo muda.
-- **Navegador:** um teste opcional (`-tags=browser`, fora do `go test` padrão e do CI de PR) sobe o servidor em loopback, abre cada tela no Chromium e **falha em qualquer violação de CSP e erro de console**; rodar como parte da revisão das stories de tela. Ele não entra no CI obrigatório para não pôr navegador no job `unit`.
+- **`httptest`:** prova o que é de rede e de cabeçalho: a CSP exata (§5.1) em página, fragmento e estático; `/vivo` sem `<form>`, `<textarea>`, `<input>` nem `.pend-corpo`; `/vivo?v=` com hash velho traz o aviso de lista; `POST` com `HX-Request` devolve a resposta e os `hx-swap-oob` esperados (na US, o item; na aba Pendências, resposta principal vazia e o item embrulhado em `afterbegin:#lista-resp`, §5.3), e **sem** `HX-Request` redireciona (303); **4xx de fragmento traz `HX-Retarget: find .erro` e `HX-Reswap: innerHTML`** (e o do `/corpo`, `this`); **`/pendencias` com `HX-Request` devolve só o fragmento, mas com `HX-History-Restore-Request: true` devolve a página inteira, com ou sem `HX-Request` (B3)**; nenhum fragmento de pendência com `<details open>` (M6); o `Cache-Control` de cada grupo da §5.1 e nenhum `public`; `/central` dá 308 (só depois da story 3); `/?coord=…` dá 308 para `/pendencias` (story 3); `/estilo.css` dá 404; `/estatico/` não lista diretório nem sai do `embed`; `POST` em `/` é 405.
+- **Estático (`estatico_test.go`):** **não depende de Node e não lê o CSS para medir contraste** (S3, §4.5). Confere: o `embed.FS` tem **exatamente a lista fechada** de arquivos (M11); o `app.css` embutido contém o tema `basis-interno` (`data-theme`) e as quatro `@font-face`; as quatro fontes existem; o hash da URL muda quando o arquivo muda. O **contraste** é do job `frontend` do CI (`npm run contraste`, sobre o CSS não minificado).
+- **Navegador:** um teste opcional (`-tags=browser`, fora do `go test` padrão e do CI de PR) sobe o servidor em loopback, abre cada tela no Chromium e **falha em qualquer violação de CSP e em qualquer erro de console que não esteja numa lista de permissões** (S6): a lista admite só os dois `console.error` de cada 4xx que o próprio teste provoca ("Failed to load resource" e "Response Status Error Code") e nada mais; o `<link rel="icon">` evita o 404 de `/favicon.ico`. Cobre também o que só o navegador prova: o `/vivo` preserva `<details open>` e o texto digitado, o erro 4xx **não** remove o formulário nem o texto, e **Voltar depois de dois filtros mantém a página inteira** (B3). Rodar como parte da revisão das stories de tela; fora do CI obrigatório para não pôr navegador no job `unit`.
 - **Concorrência e daemon:** o que sobe daemon continua parando-o no `t.Cleanup` e usando `ORQ_STATE_DIR` e `ORQ_TRABALHO_DIR` temporários (`AGENTS.md`).
 
 ### 8.2 Capturas como evidência
@@ -279,47 +324,53 @@ A arte do `orq-banner-light.png` está sendo refeita pela pessoa, com **fundo `#
 
 ## 11. Proposta de stories
 
-Cada uma cabe numa rodada de executor e tem revisão independente. Títulos no infinitivo. **A proposta fica aqui; quem cria as stories no Taiga é o coordenador, depois da aprovação da pessoa.**
+Cada uma cabe numa rodada de executor e tem revisão independente. Títulos no infinitivo. **A proposta fica aqui; quem cria as stories no Taiga é o coordenador, depois da aprovação da pessoa.** A ordem respeita a regra da §2.2: **a cada merge a web continua com a lista de pendências funcionando** (S1).
 
 **1. Montar o build do frontend e a base visual da web.** *(sem dependência; a primeira)*
-- `internal/web/frontend/` (`package.json` com as versões da §4.1, `package-lock.json`, `input.css` com o tema `basis-interno`), `scripts/build-frontend.sh`, `internal/web/estatico/` (CSS, `htmx.min.js`, fontes, ícone) versionado e embutido; rota `/estatico/*` com cache por hash; `/estilo.css` removido.
-- CSP nova da §5.1, `<meta name="htmx-config">`, base (cabeçalho, abas, rodapé, sprite de ícones) e as páginas atuais passando a usar o `app.css`.
-- Job `frontend` no CI (§4.5), linha do Node no `AGENTS.md`, teste estático de contraste.
-- **Aceite:** `go build` e `go install` sem Node; `git diff --exit-code` do job passa e **falha de propósito** num commit que muda o `input.css` sem regenerar; a página carrega sob a CSP sem violação (teste de navegador); `go test -race ./...` verde; capturas 390/1440 do cabeçalho com abas vazias.
+- `internal/web/frontend/` (`package.json` com as versões da §4.1, `package-lock.json`, `.nvmrc` do Node 24, `input.css` com o tema `basis-interno`), `scripts/build-frontend.sh` (§4.4), `internal/web/estatico/` versionado e embutido por `//go:embed estatico` (§4.2); rota `/estatico/*` com os dois grupos de cache da §5.1; `/estilo.css` removido.
+- CSP nova da §5.1 e `<meta name="htmx-config">` completa (inclui `historyRestoreAsHxRequest:false`), base (cabeçalho, abas, rodapé, `<link rel="icon">`, sprite com classe, sem `style=`) e as páginas atuais passando a usar o `app.css`. **As rotas não mudam nesta story.**
+- Job `frontend` no CI com `git add -N` (§4.5) e o `npm run contraste`, linha do Node no `AGENTS.md`.
+- **Aceite:** `go build` e `go install` sem Node; o job passa e **falha de propósito** em dois commits (um muda o `input.css` sem regenerar; outro acrescenta um arquivo novo em `estatico/` sem rastrear); a página carrega sob a CSP sem violação (teste de navegador); `go test -race ./...` verde; capturas 390/1440 do cabeçalho com abas.
 
 **2. Mostrar a Central com abas, ondas e US em accordion, atualizando sozinha.** *(depende da 1)*
-- `vistaCentral` pura, `Fonte`, rotas `/`, `/projeto/{slug}`, `/central` (308), `/vivo`; barra da onda, linha da US, MRs, selos, linha de situação, idade das fontes e a nota da ordem por atenção; os estados vazio e vencido.
-- **Aceite:** o que o protótipo mostra, com os dados do snapshot; `vista_test.go` sem banco; `/vivo` sem formulário; hash de lista; `BenchmarkVivo` registrado; capturas 390/1440, aberto e fechado, da aba Todos, de um projeto (a onda com US de dois projetos aparece nas duas abas) e da onda de dados vencidos. Nada de pane na página.
+- `vistaCentral` pura, `Fonte`, a **Central nova em `/central`** (as abas: Todos → `/central`, projeto → `/projeto/{slug}`, Pendências → `/`, a lista atual), `/projeto/{slug}`, `/vivo` com o `#vivo` dedicado e `hx-swap="none"` (§6); barra da onda, linha da US, MRs, selos, linha de situação, idade das fontes e a nota da ordem por atenção; estados vazio e vencido. **`/` continua a lista atual.**
+- **Itens abertos da revisão final do protótipo viram critério de aceite (M15):** (a) título de onda longo: decidir e registrar entre 3 linhas ou corte com o título inteiro ao abrir; (b) a coluna "limite · ordem" não quebra a 1440 px (`até mr-pronta · estrita` em uma linha); (c) o link "N pendências esperam você" da situação tem indício visual de link (sublinhado); (d) a faixa de abas no celular indica que rola (borda esmaecida) e rola a aba ativa para a vista; (e) a barra de progresso é `<progress>`, sem `style=`.
+- **Aceite:** o que o protótipo mostra, com os dados do snapshot; `vista_test.go` sem banco; `/vivo` sem formulário e **sem apagar a página** (teste de navegador); hash de lista; `BenchmarkVivo` registrado; os cinco itens acima; capturas 390/1440, aberto e fechado, da aba Todos, de um projeto (a onda com US de dois projetos aparece nas duas abas) e da onda de dados vencidos. Nada de pane na página. **A lista de pendências em `/` segue respondendo.**
 
-**3. Responder as pendências no lugar e filtrar em cascata.** *(depende da 2)*
-- Aba `/pendencias`, `/p/…/corpo`, o `hx-post` com o fragmento e os `hx-swap-oob` (§5.3), "trocar a resposta", a cascata e a URL com o filtro (§7), a pendência dentro da US e na aba (o mesmo `define`), o estado sem detalhe, `/p/…` e `/historico` no visual novo.
-- **Aceite:** `POST` com `HX-Request` devolve o item e as contagens; sem `HX-Request` redireciona; 401 sem cabeçalho no socket Unix; 413, 415, 409 viram alerta no formulário sem perder o texto; combinação impossível na URL é normalizada; o `/vivo` não toca o corpo aberto; capturas 390/1440 da cascata em uso e de uma pendência respondida (contagens atualizadas).
+**3. Responder as pendências no lugar, filtrar em cascata e trocar a página inicial.** *(depende da 2)*
+- Aba `/pendencias`, `/p/…/corpo`, o `hx-post` com a resposta e os oob (§5.3), os erros por `HX-Retarget`/`HX-Reswap`, "trocar a resposta", a cascata e a URL com o filtro (§7), a pendência dentro da US e na aba (o mesmo `define`), o estado sem detalhe, `/p/…` e `/historico` no visual novo, a exceção do histórico (§2.2).
+- **A troca de rotas acontece aqui, e só aqui (S1):** `/` passa a ser a Central, `/central` responde 308, `/?coord=&projeto=&onda=` responde 308 para `/pendencias`, a aba Pendências aponta para `/pendencias`.
+- **README (M16):** atualizar a tabela de rotas, "Central pela web", o log (sem o método) e os avisos de mudança da §2.2. **O coordenador atualiza a skill `orquestrador` (`references/central.md`) depois do merge desta story.**
+- **Aceite:** `POST` com `HX-Request` devolve o item e as contagens; sem `HX-Request` redireciona; 401 sem cabeçalho no socket Unix; 413, 415, 409 viram alerta **dentro do formulário, sem perder o texto** (teste de navegador); combinação impossível na URL é normalizada; o `/vivo` não toca o corpo aberto; **Voltar depois de dois filtros mantém a página inteira**; o item muda de grupo e o grupo vazio mostra a frase; capturas 390/1440 da cascata em uso e de uma pendência respondida (contagens atualizadas).
 
-**4. Redesenhar o diário da onda e as páginas de erro.** *(depende da 1; pode andar junto da 3)*
+**4. Redesenhar o diário da onda e as páginas de erro.** *(depende da 1; pode andar junto da 2 ou da 3)*
 - `/onda/{id}` em lista, com o paginador e a regra de nada de pane; vazio, 401 e 404 com o banner provisório (§10); mensagens de erro do `falha` no visual novo.
 - **Aceite:** os testes da #16 do diário passam sem mudar a lista `camposDoDiario`; 404 para onda inexistente e id mal formado; capturas 390/1440 do diário, do vazio e dos erros.
 
 **5. Trocar o banner pela arte nova, sem o cartão creme.** *(depende da 4 e da arte da pessoa)*
-- Substitui `orq-banner-light.png` pela arte nova, remove `.banner-cartao`, confere que o fundo da arte é o `base-200`. Atualiza o `DESIGN.md` (regra do banner: de "provisório" para "vigente").
+- Substitui `orq-banner-light.png` pela arte nova, remove `.banner-cartao`, confere que o fundo da arte é o `base-200`. Atualiza o `DESIGN.md` e o `PRODUCT.md` (regra do banner: de "provisório" para "vigente").
 - **Aceite:** capturas 390/1440 da tela vazia e do 404 sem emenda visível entre a arte e a página; o peso da imagem ≤ 400 KB.
 
-**Ordem:** 1 → 2 → 3, com a 4 em paralelo à 2 ou à 3, e a 5 por último e só com a arte. **Revisão independente em todas.** A story 1 é a de maior risco (CSP e CI do frontend); se a revisão achar que o build não é determinístico entre máquinas, a 2 espera.
+**Ordem:** 1 → 2 → 3, com a 4 em paralelo à 2 ou à 3, e a 5 por último e só com a arte. **Revisão independente em todas.** A story 1 é a de maior risco (CSP e CI do frontend); se a revisão achar que o build não é determinístico entre máquinas, a 2 espera. **Ações fora do repositório, do coordenador:** atualizar a skill `orquestrador` depois da story 3; conferir a regra por caminho do Caddy para `/` e `/estilo.css`, se existir.
 
 ## 12. Pendências da revisão final do protótipo
 
-O finish reviewer (duas rodadas) fechou o protótipo com `fix`; o que sobrou é pequeno e **a implementação resolve** (a seção "Em aberto" do `DESIGN.md` tem a mesma lista):
+O finish reviewer (duas rodadas) fechou o protótipo com `fix`. O que sobrou é pequeno e **virou critério de aceite da story 2** (M15, §11); a seção "Em aberto" do `DESIGN.md` tem a mesma lista:
 
-- Títulos de onda longos ainda truncam na barra fechada (2 linhas a partir de 760 px, 3 no celular): subir o limite para 3 linhas em barras com selos, ou aceitar o corte (o título inteiro aparece quando a onda abre).
-- A coluna "limite · ordem" quebra em duas linhas a 1440 px para `até mr-pronta · estrita`: `white-space: nowrap` ou um pouco mais de largura.
+- Títulos de onda longos ainda truncam na barra fechada (2 linhas a partir de 760 px, 3 no celular).
+- A coluna "limite · ordem" quebra em duas linhas a 1440 px para `até mr-pronta · estrita`.
 - O link "N pendências esperam você" da linha de situação não tem sublinhado nem outro indício de link.
-- A faixa de abas no celular corta "Faturamento" sem indicar que rola; sugestão: esmaecer a borda direita e rolar a aba ativa para a vista.
-- O `style="width:…"` da barra de progresso não vale sob a CSP (§5.1).
-- Não se rodou o `concept-seed`: o brief traz `seed: none (unavailable)` por pedido do coordenador (estrutura fixada pela pessoa), e o reviewer anotou que a máquina consegue rodá-lo.
+- A faixa de abas no celular corta "Faturamento" sem indicar que rola.
+- O `style="width:…"` da barra de progresso e o `style=` do sprite não valem sob a CSP (§5.1).
+- Não se rodou o `concept-seed`: o brief traz `seed: none (unavailable)` por pedido do coordenador (estrutura fixada pela pessoa), e o reviewer anotou que a máquina consegue rodá-lo. É só nota.
 
 ## 13. Riscos e o que não foi verificado
 
-- **O build do CSS ser determinístico entre máquinas** (o job `frontend` do CI depende disso): o Tailwind 4 com `source(none)` e versões travadas deve ser, mas **não rodei o build Node nesta rodada** (o protótipo usa o build de navegador). A story 1 prova, e é por isso que o job falha ao divergir.
-- **`responseHandling` do htmx para erro 4xx** com `target` por padrão: a configuração da §5.1 foi escrita a partir do código do htmx 2.0.6 (`resolveResponseHandling`) e **não foi executada**. O teste de navegador da story 3 confirma.
-- **`hx-swap-oob` em `<summary>`:** troca de elemento com `id` dentro de um `<details>`, sem o `<details>`. Espera-se que preserve o `open`, **não testado**. Se não preservar, o `/vivo` passa a trocar um `<span>` interno de cada barra.
+A revisão independente (r1) **provou no Chromium 153 com o htmx 2.0.6** os pontos B1, B2, B3, S7 e M5 a M9, e a r3 os **reproduziu** nos scripts da revisão (`t1`, `t4`, `t8`, `t9`, `t10`). O que continua sem prova:
+
+- **O build Node em outro Node ou outro SO.** O determinismo foi provado no Node 24 (três builds, `rm -rf node_modules && npm ci`, outro diretório). Node 22 e macOS não foram testados; por isso a versão é fixa (§4.4).
+- **O `#vivo` trocado por oob a cada ciclo** (para carregar o `v` novo): o gatilho `every 30s` é rearmado quando o elemento é trocado? **Não testado.** A story 2 prova com `every 1s` num teste de navegador; se não rearmar, o `v` vai por `hx-vals` do servidor no próprio `#vivo` ou o hash é recalculado no servidor pela aba.
+- **`HX-Retarget`/`HX-Reswap` do erro do `/corpo`** (`this` + `innerHTML`): o caso do formulário foi provado; o do `/corpo` foi escrito do código. A story 3 prova.
+- **Caddy:** cabeçalhos de cache e regra por caminho não foram lidos nem testados.
 - **O custo do `/vivo`** não foi medido (§6).
 - **Hospedagem do protótipo no Artifact** não foi testada nas telas; ela não afeta a implementação.

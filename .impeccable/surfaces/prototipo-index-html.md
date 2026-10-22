@@ -17,7 +17,7 @@ Cedric, operador único. No celular: acompanhar e responder longe da máquina. N
 
 ## Decisões em aberto
 
-Ordem das ondas (por atenção, no protótipo), multiusuário/papéis, contagem de "respondida" na barra da onda.
+Multiusuário/papéis (a decidir). Ordem das ondas por atenção e contagem de "respondida": confirmadas pela pessoa em 2026-10-22.
 
 ## Direction contract
 

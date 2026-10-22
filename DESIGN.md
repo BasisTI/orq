@@ -334,6 +334,6 @@ Confirmadas pela pessoa: ondas ordenadas por atenção (3 pendência esperando, 
 - A coluna "limite · ordem" quebra em duas linhas em 1440px para "até mr-pronta · estrita".
 - O link "N pendências esperam você" da situação ainda não tem sublinhado nem outro indício de link (herda cor da linha, 700).
 - A faixa de abas no celular não indica que rola.
-- Ordem das ondas por atenção, multiusuário/papéis e a contagem de "respondida" na barra da onda continuam decisões abertas do produto.
+- Multiusuário e papéis continuam "a decidir". A ordem das ondas por atenção e a contagem de "respondida" (sai do "esperam você", segura o `concluída`) estão **confirmadas pela pessoa** (2026-10-22) e valem como regra.
 
 Desvios da construção não canonizados: `style="width:%"` na barra de progresso (a CSP da implementação o proíbe: use classe por faixa ou `<progress>`); cores de texto dos selos e do secundário escritas como hex soltos em vez de tokens do tema; `.selo-neutro` sem regra própria (cai no padrão).
