@@ -1,2 +1,6 @@
 bin/
 /orq
+
+# Impeccable: capturas de revisão e config local de cada pessoa não são versionadas
+.impeccable/review/
+.impeccable/config.local.json
