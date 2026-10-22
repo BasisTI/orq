@@ -19,3 +19,26 @@ jobs:
           if [ -n "$fora" ]; then echo "arquivos fora do gofmt:"; echo "$fora"; exit 1; fi
       - run: go vet ./...
       - run: go test -race ./...
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: internal/web/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+      - run: scripts/build-frontend.sh
+      # git diff sozinho não vê arquivo não rastreado: uma fonte, uma licença ou um PNG gerados e
+      # esquecidos passariam, e o main ficaria sem eles no binário. O -N os põe na comparação.
+      - name: estatico/ bate com o gerado
+        run: |
+          git add -N internal/web/estatico
+          if ! git diff --exit-code -- internal/web/estatico; then
+            echo "rode scripts/build-frontend.sh e commite internal/web/estatico" >&2
+            exit 1
+          fi
+      # Sobre o CSS não minificado: no minificado o teste acha zero regras e passa vazio.
+      - name: contraste do tema
+        run: npm run contraste
+        working-directory: internal/web/frontend

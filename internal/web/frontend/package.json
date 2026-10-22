@@ -1,0 +1,17 @@
+{
+  "name": "orq-web-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build do CSS da web do orq. Só quem edita modelo ou input.css precisa disto; go build e go install não usam Node.",
+  "scripts": {
+    "contraste": "node contraste.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/carlito": "5.2.5",
+    "@fontsource/inter-tight": "5.2.6",
+    "@tailwindcss/cli": "4.1.12",
+    "daisyui": "5.0.46",
+    "htmx.org": "2.0.6",
+    "tailwindcss": "4.1.12"
+  }
+}
