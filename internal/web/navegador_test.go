@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/refs"
 )
 
 // Os testes de navegador abrem as telas no Chromium (playwright-core) e falham em qualquer
@@ -156,13 +158,50 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 	})
 }
 
+// controle é o canal de teste que muda o banco enquanto o navegador está aberto (o navegador
+// não tem como criar onda; a página só responde pendência).
+func controle(t *testing.T, st *central.Store) string {
+	t.Helper()
+	ctx := context.Background()
+	mux := http.NewServeMux()
+	falha := func(w http.ResponseWriter, err error) {
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+		}
+	}
+	mux.HandleFunc("/nova-onda", func(w http.ResponseWriter, r *http.Request) {
+		co, err := st.RegistrarCoord(ctx, central.Registro{Nome: "aurora", Pane: "wA:p1", Projeto: "catalogo"})
+		if err == nil {
+			_, err = st.CriarOnda(ctx, co, central.NovaOnda{Titulo: "Onda nova do teste", US: []refs.US{{Projeto: "catalogo", Ref: 900}}})
+		}
+		falha(w, err)
+	})
+	mux.HandleFunc("/encerrar-onda", func(w http.ResponseWriter, r *http.Request) {
+		_, err := st.EncerrarOnda(ctx, "", 8)
+		falha(w, err)
+	})
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(l)
+	t.Cleanup(func() { _ = srv.Close() })
+	return "http://" + l.Addr().String()
+}
+
 // TestNavegadorVivo: o /vivo não apaga a página, não fecha o que está aberto, não apaga o que foi
-// digitado e avisa quando a lista mudou.
+// digitado e, com a lista diferente da da página (prioridade que muda, onda nova, onda
+// encerrada), avisa e segue atualizando só o que a página tem.
 func TestNavegadorVivo(t *testing.T) {
 	pw, chrome := ferramentasDoNavegador(t)
 	st := abrirStore(t)
 	semear(t, context.Background(), st)
-	r := rodarNode(t, []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}, "vivo.mjs", servirNoNavegador(t, st, nil))
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	if c := os.Getenv("ORQ_CAPTURAS"); c != "" {
+		env = append(env, "ORQ_CAPTURAS="+c)
+	}
+	r := rodarNode(t, env, "vivo.mjs", servirNoNavegador(t, st, nil), controle(t, st))
 	for _, p := range r.Problemas {
 		t.Error(p)
 	}

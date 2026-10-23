@@ -3,6 +3,7 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -227,14 +228,19 @@ func temProjeto(o OndaVista, slug string) bool {
 	return false
 }
 
-// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma e das abas.
+// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma, das
+// pendências exibidas em cada US (nova ou resolvida muda a lista) e das abas.
 // Ele muda quando a lista que a página mostra deixa de ser a do servidor.
 func hashLista(ondas []OndaVista, abas []Aba) string {
 	h := sha256.New()
 	for _, o := range ondas {
 		fmt.Fprintf(h, "o%d:", o.ID)
 		for _, u := range o.US {
-			fmt.Fprintf(h, "%s,", u.Anchor)
+			fmt.Fprintf(h, "%s", u.Anchor)
+			for _, p := range u.Pendencias {
+				fmt.Fprintf(h, "+%s", p.ID)
+			}
+			h.Write([]byte{','})
 		}
 		h.Write([]byte{'\n'})
 	}
@@ -623,4 +629,22 @@ func vistaSituacao(ondas []OndaVista, snap central.Snapshot, agora time.Time) Si
 	}
 	s.Vencidas = strings.Join(venc, ", ")
 	return s
+}
+
+// Vals é o hx-vals estático do #vivo: o hash da lista e a composição que a página renderizou
+// (ondas na ordem, US e abas). O /vivo só manda oob para esses ids, então a lista de uma página
+// desatualizada nunca ganha alvo que ela não tem (spec §6).
+func (c Central) Vals() string {
+	var ondas, us, abas []string
+	for _, o := range c.Ondas {
+		ondas = append(ondas, strconv.FormatInt(o.ID, 10))
+		for _, u := range o.US {
+			us = append(us, u.Anchor)
+		}
+	}
+	for _, a := range c.Abas {
+		abas = append(abas, a.ID)
+	}
+	b, _ := json.Marshal(map[string]string{"v": c.Hash, "o": strings.Join(ondas, ","), "u": strings.Join(us, ","), "a": strings.Join(abas, ",")})
+	return string(b)
 }

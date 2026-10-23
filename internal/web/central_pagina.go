@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/BasisTI/orq/internal/refs"
@@ -65,16 +66,35 @@ func abaDe(atual string) string {
 	return ""
 }
 
-var hashValido = regexp.MustCompile(`^[0-9a-f]{1,32}$`)
+var (
+	hashValido  = regexp.MustCompile(`^[0-9a-f]{1,32}$`)
+	listaValida = regexp.MustCompile(`^[a-z0-9_,-]*$`)
+)
+
+// conjunto lê uma lista separada por vírgula (vazia ou inválida: conjunto vazio).
+func conjunto(s string) map[string]bool {
+	m := map[string]bool{}
+	if len(s) > 8192 || !listaValida.MatchString(s) {
+		return m
+	}
+	for _, x := range strings.Split(s, ",") {
+		if x != "" {
+			m[x] = true
+		}
+	}
+	return m
+}
 
 // vivo atende a atualização de 30 s (spec §6). A resposta é só hx-swap-oob; o elemento que a
-// pede tem hx-swap="none" e nada nele é trocado. Troca as barras das ondas e as linhas das US
-// (só o <summary>, nunca o <details>), a situação, as contagens das abas e a idade dos dados.
-// Nunca devolve formulário, campo de texto nem corpo de pendência.
+// pede tem hx-swap="none" e nada nele é trocado. Troca a situação, a idade dos dados e, só para
+// os ids que a página diz ter (o="ondas", u="US", a="abas", no hx-vals do #vivo), as barras das
+// ondas, as linhas das US e as contagens das abas (só o <summary>, nunca o <details>). Nunca
+// devolve formulário, campo de texto nem corpo de pendência.
 //
-// A pessoa lê uma lista que não pode mudar embaixo da mão: se o hash (v) que a página tem não é
-// o do servidor, a composição mudou. Aí a resposta não toca em nada que dependa dela (barras,
-// US, abas, que podem nem existir na página) e traz o aviso "A lista mudou".
+// A lista não muda embaixo da mão de quem lê: se o hash (v) da página difere do do servidor
+// (onda nova ou encerrada, ordem por atenção, pendência nova), nada é inserido, removido nem
+// reordenado; os alvos que a página tem continuam sendo atualizados no lugar, e a resposta traz
+// o aviso "A lista mudou. Atualizar".
 func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	snap, err := s.fonte().Snapshot(r.Context(), false)
 	if err != nil {
@@ -85,28 +105,41 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "indisponível", http.StatusServiceUnavailable)
 		return
 	}
+	q := r.URL.Query()
 	c := vistaCentral(snap, s.agora(), Filtro{Projeto: abaDe(r.Header.Get("HX-Current-URL"))})
-	v := r.URL.Query().Get("v")
-	igual := v == c.Hash
-	if !hashValido.MatchString(v) {
-		v = c.Hash
-	}
+	igual := q.Get("v") == c.Hash
+	ondas, us, abas := conjunto(q.Get("o")), conjunto(q.Get("u")), conjunto(q.Get("a"))
 	c.Situacao.Oob, c.FontesOob = true, true
-	for i := range c.Abas {
-		c.Abas[i].Oob = true
-	}
-	for i := range c.Ondas {
-		c.Ondas[i].Oob = true
-		for j := range c.Ondas[i].US {
-			c.Ondas[i].US[j].Oob = true
+	var as []Aba
+	for _, a := range c.Abas {
+		if abas[a.ID] {
+			a.Oob = true
+			as = append(as, a)
 		}
 	}
+	c.Abas = as
+	var os []OndaVista
+	for _, o := range c.Ondas {
+		if !ondas[strconv.FormatInt(o.ID, 10)] {
+			continue
+		}
+		o.Oob = true
+		var uu []USVista
+		for _, u := range o.US {
+			if us[u.Anchor] {
+				u.Oob = true
+				uu = append(uu, u)
+			}
+		}
+		o.US = uu
+		os = append(os, o)
+	}
+	c.Ondas = os
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	err = s.modelos.ExecuteTemplate(w, "vivo", struct {
 		Central
 		Igual bool
-		V     string
-	}{c, igual, v})
+	}{c, igual})
 	if err != nil && s.Log != nil {
 		s.Log("web: modelo vivo: %v", err)
 	}

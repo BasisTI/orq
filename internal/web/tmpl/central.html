@@ -96,13 +96,12 @@
 </div>
 {{template "rail" .}}
 </div>
-<div id="vivo" hx-get="/vivo?v={{.Hash}}" hx-trigger="every 30s" hx-swap="none" hidden></div>
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-trigger="every 30s" hx-swap="none" hidden></div>
 {{template "rodape" .}}{{end}}
 
 {{define "vivo"}}{{template "situacao" .Situacao}}
 {{template "fontes" .}}
-{{if .Igual}}{{range .Abas}}{{template "aba-n" .}}{{end}}
+{{range .Abas}}{{template "aba-n" .}}{{end}}
 {{range .Ondas}}{{template "onda-barra" .}}{{range .US}}{{template "us-barra" .}}{{end}}{{end}}
-{{else}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
-{{end}}<div id="vivo" hx-get="/vivo?v={{.V}}" hx-trigger="every 30s" hx-swap="none" hidden hx-swap-oob="true"></div>
-{{end}}
+{{if not .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
+{{end}}{{end}}

@@ -4,9 +4,11 @@
 // env: ORQ_PLAYWRIGHT (pasta do playwright-core), ORQ_CHROMIUM (executável).
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
 
 const { chromium } = await import(pathToFileURL(join(process.env.ORQ_PLAYWRIGHT, 'index.mjs')).href);
-const [base] = process.argv.slice(2);
+const [base, controle] = process.argv.slice(2);
+const muda = async (acao) => { const r = await fetch(`${controle}/${acao}`); if (!r.ok) falha(`controle ${acao}: ${r.status}`); };
 
 const navegador = await chromium.launch({ executablePath: process.env.ORQ_CHROMIUM, args: ['--no-sandbox'] });
 const problemas = [];
@@ -81,18 +83,81 @@ await pagina.waitForTimeout(200);
 if (pedidos.length !== 2) falha(`pedidos ao /vivo depois de dois ciclos = ${pedidos.length}, quer 2`);
 if (pedidos.length === 2 && pedidos[0] !== pedidos[1]) falha(`o v mudou entre os ciclos: ${pedidos.join(' | ')}`);
 
-// Hash diferente do que a página tem: avisa e não mexe em nada.
-await pagina.evaluate(() => {
-  const v = document.querySelector('#vivo');
-  v.setAttribute('hx-get', '/vivo?v=000000000000');
-  htmx.process(v); // o htmx lê o hx-get ao processar o elemento, não a cada ciclo
-});
-const antesDoAviso = await foto();
-await Promise.all([pagina.waitForResponse((r) => r.url().includes('/vivo')), pagina.clock.runFor(30500)]);
-await pagina.waitForTimeout(300);
-const comAviso = await foto();
-if (!comAviso.aviso?.startsWith('A lista mudou')) falha(`sem o aviso "A lista mudou": ${JSON.stringify(comAviso.aviso)}`);
-if (comAviso.filhosDoBody !== antesDoAviso.filhosDoBody || comAviso.texto !== 'texto digitado pela pessoa' || comAviso.usAbertas.length !== 1) falha('o aviso de lista mexeu na página');
+const ciclo = async () => {
+  await Promise.all([pagina.waitForResponse((r) => r.url().includes('/vivo')), pagina.clock.runFor(30500)]);
+  await pagina.waitForTimeout(300);
+};
+const lista = () => pagina.evaluate(() => ({
+  ondas: [...document.querySelectorAll('details.onda')].map((d) => d.id).join(','),
+  barraOnda3: document.querySelector('#onda-3-barra .onda-sinais')?.textContent.replace(/\s+/g, ' ').trim(),
+  todos: document.querySelector('#aba-n-todos')?.textContent.trim(),
+  pend: document.querySelector('#aba-n-pendencias')?.textContent.trim(),
+  aviso: document.querySelector('#aviso-lista')?.textContent.trim(),
+}));
+const intacto = (a, b, onde) => {
+  if (b.filhosDoBody !== a.filhosDoBody || b.texto !== 'texto digitado pela pessoa' || b.usAbertas.length !== 1 || b.ondasAbertas.length !== 1) falha(`${onde}: mexeu na página (body ${a.filhosDoBody}->${b.filhosDoBody}, texto ${JSON.stringify(b.texto)}, abertas ${b.ondasAbertas}/${b.usAbertas})`);
+};
+
+// A) Mudança de prioridade depois de uma resposta: a onda 3 perde a atenção 3 e desce na ordem.
+//    A lista não é reordenada, o aviso aparece e a barra da onda 3, as abas e a situação seguem vivas.
+{
+  const a0 = await foto(), l0 = await lista();
+  const st = await pagina.evaluate(async () => (await fetch('/p/faturamento/513/1/responder', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'texto=ok', redirect: 'manual' })).status);
+  if (st !== 0 && st !== 303) falha(`caso A: POST = ${st}`);
+  await ciclo();
+  const a1 = await foto(), l1 = await lista();
+  intacto(a0, a1, 'caso A');
+  if (l1.ondas !== l0.ondas) falha(`caso A: a lista foi reordenada: ${l0.ondas} -> ${l1.ondas}`);
+  if (!l1.aviso?.startsWith('A lista mudou')) falha(`caso A: sem o aviso (${JSON.stringify(l1.aviso)})`);
+  if (l1.barraOnda3 === l0.barraOnda3) falha(`caso A: a barra da onda 3 não foi atualizada (${l1.barraOnda3})`);
+  if (Number(l1.pend) !== Number(l0.pend) - 1) falha(`caso A: a aba Pendências não caiu 1 (${l0.pend} -> ${l1.pend})`);
+}
+
+// B) Onda nova: não é inserida; o aviso fica; o que a página tem segue atualizando.
+{
+  const a0 = await foto(), l0 = await lista();
+  await muda('nova-onda');
+  await ciclo();
+  const a1 = await foto(), l1 = await lista();
+  intacto(a0, a1, 'caso B');
+  if (l1.ondas !== l0.ondas) falha(`caso B: a lista mudou sozinha: ${l0.ondas} -> ${l1.ondas}`);
+  if (Number(l1.todos) !== Number(l0.todos) + 1) falha(`caso B: a aba Todos não contou a onda nova (${l0.todos} -> ${l1.todos})`);
+  if (!l1.aviso?.startsWith('A lista mudou')) falha('caso B: sem o aviso');
+}
+
+// C) Onda encerrada: continua na página (nada é removido), sem erro de oob, com o aviso.
+{
+  const a0 = await foto(), l0 = await lista();
+  await muda('encerrar-onda');
+  await ciclo();
+  const a1 = await foto(), l1 = await lista();
+  intacto(a0, a1, 'caso C');
+  if (l1.ondas !== l0.ondas) falha(`caso C: a lista mudou sozinha: ${l0.ondas} -> ${l1.ondas}`);
+  if (Number(l1.todos) !== Number(l0.todos) - 1) falha(`caso C: a aba Todos não descontou a encerrada (${l0.todos} -> ${l1.todos})`);
+}
+
+// Captura do estado "lista mudou" (aviso visível, lista como estava), a 1440 e a 390 px.
+if (process.env.ORQ_CAPTURAS) {
+  mkdirSync(process.env.ORQ_CAPTURAS, { recursive: true });
+  for (const [nome, w, h] of [['1440', 1440, 900], ['390', 390, 844]]) {
+    await pagina.setViewportSize({ width: w, height: h });
+    await pagina.evaluate(() => document.querySelector('#aviso-lista').scrollIntoView({ block: 'center' }));
+    await pagina.screenshot({ path: join(process.env.ORQ_CAPTURAS, `lista-mudou-${nome}.png`) });
+  }
+  await pagina.setViewportSize({ width: 1440, height: 900 });
+}
+
+// Recarregar pelo link do aviso traz a lista nova, sem aviso.
+await Promise.all([pagina.waitForNavigation({ waitUntil: 'load' }), pagina.locator('#aviso-lista a').click()]);
+await pagina.waitForTimeout(500);
+{
+  const l = await lista();
+  if (l.aviso) falha(`depois de Atualizar o aviso continua: ${l.aviso}`);
+  if (l.ondas.includes('onda-8,') || l.ondas.endsWith('onda-8')) falha('onda encerrada continua na lista recarregada');
+}
+if (process.env.ORQ_CAPTURAS) {
+  // a captura do caso "lista mudou" é feita pelo navegador.mjs; aqui só se garante o estado final
+}
 
 // Um 503 num ciclo não troca nada (hx-swap="none") e o poll continua: servidor de teste não tem
 // como falhar sob demanda; o httptest cobre o status. Aqui só se confere que não houve erro de console.

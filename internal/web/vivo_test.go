@@ -2,13 +2,17 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/refs"
 )
 
 // BenchmarkVivo mede a duração de UMA resposta do /vivo (o Snapshot mais a renderização) sobre a
@@ -29,12 +33,13 @@ func BenchmarkVivo(b *testing.B) {
 	rp.Host = "127.0.0.1:8080"
 	wp := httptest.NewRecorder()
 	h.ServeHTTP(wp, rp)
-	m := regexp.MustCompile(`/vivo\?v=([0-9a-f]+)`).FindStringSubmatch(wp.Body.String())
+	m := valsRe.FindStringSubmatch(wp.Body.String())
 	if m == nil {
 		b.Fatal("a página não tem o #vivo")
 	}
+	query := valsParaQuery(m[1])
 	novo := func() *http.Request {
-		rq := httptest.NewRequest("GET", "/vivo?v="+m[1], nil)
+		rq := httptest.NewRequest("GET", "/vivo?"+query, nil)
 		rq.Host = "127.0.0.1:8080"
 		rq.Header.Set("HX-Request", "true")
 		return rq
@@ -72,23 +77,40 @@ func BenchmarkVivo(b *testing.B) {
 	})
 }
 
-func hashDaPagina(t *testing.T, c *cena, caminho string) string {
+var valsRe = regexp.MustCompile(`hx-vals="([^"]*)"`)
+
+// valsParaQuery transforma o hx-vals do #vivo (JSON, escapado em HTML) na query que o htmx manda.
+func valsParaQuery(attr string) string {
+	var m map[string]string
+	if err := json.Unmarshal([]byte(html.UnescapeString(attr)), &m); err != nil {
+		panic(err)
+	}
+	q := url.Values{}
+	for k, v := range m {
+		q.Set(k, v)
+	}
+	return q.Encode()
+}
+
+// queryDaPagina é o que o htmx da página mandaria ao /vivo.
+func queryDaPagina(t *testing.T, c *cena, caminho string) url.Values {
 	t.Helper()
-	_, html := c.get(caminho)
-	m := regexp.MustCompile(`/vivo\?v=([0-9a-f]+)`).FindStringSubmatch(html)
+	_, h := c.get(caminho)
+	m := valsRe.FindStringSubmatch(h)
 	if m == nil {
 		t.Fatalf("%s não tem o #vivo", caminho)
 	}
-	return m[1]
+	q, _ := url.ParseQuery(valsParaQuery(m[1]))
+	return q
 }
 
-func (c *cena) vivo(v, atual string) (int, string, http.Header) {
+func (c *cena) vivo(q url.Values, atual string) (int, string, http.Header) {
 	c.t.Helper()
 	cab := map[string]string{"HX-Request": "true"}
 	if atual != "" {
 		cab["HX-Current-URL"] = "http://127.0.0.1:8080" + atual
 	}
-	w := c.f.faz(req{metodo: "GET", caminho: "/vivo?v=" + v, cab: cab})
+	w := c.f.faz(req{metodo: "GET", caminho: "/vivo?" + q.Encode(), cab: cab})
 	return w.Code, corpo(w), w.Header()
 }
 
@@ -100,12 +122,12 @@ func semeada(t *testing.T) *cena {
 
 func TestVivoSoTemOobESemFormulario(t *testing.T) {
 	c := semeada(t)
-	code, html, h := c.vivo(hashDaPagina(t, c, "/central"), "/central")
+	code, html, h := c.vivo(queryDaPagina(t, c, "/central"), "/central")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	contem(t, html, `id="situacao"`, `id="fontes"`, `id="onda-1-barra"`, `id="us-catalogo-404-barra"`, `id="aba-n-todos"`, `id="aba-n-pendencias"`, `id="vivo"`, `hx-swap="none"`)
-	naoContem(t, html, "<form", "<textarea", "<input", "pend-corpo", "<details", "<body", "<main", `id="aviso-lista"`)
+	contem(t, html, `id="situacao"`, `id="fontes"`, `id="onda-1-barra"`, `id="us-catalogo-404-barra"`, `id="aba-n-todos"`, `id="aba-n-pendencias"`)
+	naoContem(t, html, "<form", "<textarea", "<input", "pend-corpo", "<details", "<body", "<main", `id="aviso-lista"`, `id="vivo"`)
 	// Cada <summary> da resposta é um oob.
 	if n, o := strings.Count(html, "<summary"), strings.Count(html, `<summary class="`); n == 0 || n != o || strings.Count(html, `hx-swap-oob="true"`) < n {
 		t.Errorf("<summary> sem oob: %d summaries", n)
@@ -118,26 +140,50 @@ func TestVivoSoTemOobESemFormulario(t *testing.T) {
 	}
 }
 
-func TestVivoComHashVelhoAvisaENaoTocaNaLista(t *testing.T) {
+func TestVivoComHashVelhoAvisaEAtualizaSoOQueAPaginaTem(t *testing.T) {
 	c := semeada(t)
-	_, html, _ := c.vivo("000000000000", "/central")
-	contem(t, html, `id="aviso-lista"`, "A lista mudou", `id="situacao"`, `id="fontes"`, `v=000000000000`)
-	naoContem(t, html, "<summary", `id="aba-n-`)
-	// hash inválido não é ecoado: vira o corrente.
-	_, html, _ = c.vivo("<x>", "/central")
-	naoContem(t, html, "<x>")
+	q := queryDaPagina(t, c, "/central")
+	// A página tem só as ondas 1 e 2 (a lista do servidor é maior) e um hash que não é o atual.
+	q.Set("v", "000000000000")
+	q.Set("o", "1,2")
+	q.Set("a", "aba-n-todos")
+	_, html, _ := c.vivo(q, "/central")
+	contem(t, html, `id="aviso-lista"`, "A lista mudou", `id="situacao"`, `id="fontes"`, `id="onda-1-barra"`, `id="onda-2-barra"`, `id="aba-n-todos"`, `id="us-catalogo-404-barra"`)
+	naoContem(t, html, `id="onda-3-barra"`, `id="onda-9-barra"`, `id="aba-n-pendencias"`, `id="aba-n-p-nuvem"`, `id="us-nuvem-78-barra"`)
+	// lista inválida: nada é atualizado além da situação e das fontes, e o aviso aparece.
+	q.Set("o", "<x>")
+	_, html, _ = c.vivo(q, "/central")
+	naoContem(t, html, "<x>", "<summary")
 	contem(t, html, "A lista mudou")
+}
+
+func TestVivoPendenciaNovaMudaOHash(t *testing.T) {
+	c := semeada(t)
+	antes := queryDaPagina(t, c, "/central")
+	_, html, _ := c.vivo(antes, "/central")
+	naoContem(t, html, "A lista mudou")
+	_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: refsUS("catalogo", 406), Tipo: "duvida", Titulo: "nova", Autor: "w", Detalhe: "d", Slug: "n1", Hash: "n1"})
+	c.ok(err)
+	_, html, _ = c.vivo(antes, "/central")
+	contem(t, html, "A lista mudou", `id="us-catalogo-406-barra"`)
+	// Responder não muda a lista (a pendência segue na US), então não avisa.
+	depois := queryDaPagina(t, c, "/central")
+	_, err = c.st.ResponderPendencia(c.ctx, nil, refs.Pend{US: refsUS("catalogo", 406), Numero: 1}, central.Resposta{Texto: "ok", Por: "ana"})
+	c.ok(err)
+	_, html, _ = c.vivo(depois, "/central")
+	naoContem(t, html, "A lista mudou")
 }
 
 func TestVivoPorAbaDeProjeto(t *testing.T) {
 	c := semeada(t)
-	v := hashDaPagina(t, c, "/projeto/agenda")
-	_, html, _ := c.vivo(v, "/projeto/agenda")
+	q := queryDaPagina(t, c, "/projeto/agenda")
+	_, html, _ := c.vivo(q, "/projeto/agenda")
 	contem(t, html, `id="onda-4-barra"`, `id="onda-7-barra"`)
 	naoContem(t, html, `id="onda-1-barra"`, "A lista mudou")
-	// A mesma hash na aba Todos é de outra lista.
-	_, html, _ = c.vivo(v, "/central")
+	// O mesmo pedido, vindo da aba Todos, é de outra lista.
+	_, html, _ = c.vivo(q, "/central")
 	contem(t, html, "A lista mudou")
+	naoContem(t, html, `id="onda-1-barra"`)
 }
 
 func TestVivoSemCabecalhoNoSocketUnix(t *testing.T) {
