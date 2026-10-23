@@ -1,0 +1,78 @@
+{{/* A pendência no lugar (spec §5.3): o item é um <details> fechado e sem corpo; o corpo vem de
+     /p/…/corpo na primeira abertura. O servidor nunca serve <details open> em pendência: um
+     <details> servido aberto não dispara toggle e o corpo nunca carregaria. Todo elemento com hx-get
+     ou hx-post declara o próprio hx-target e hx-swap (o hx-swap é herdado). */}}
+{{define "pend"}}<details class="pend{{if .Respondida}} pend-ok{{end}}{{if .Nova}} pend-nova{{end}}" id="{{.Anchor}}" data-estado="{{.Estado}}" hx-get="{{.CorpoHref}}" hx-trigger="toggle once" hx-target="find .pend-corpo" hx-swap="innerHTML"><summary class="pend-sum">{{template "chev"}}<span class="pend-chave">{{.ID}}</span><span class="selo selo-tipo">{{if .Icone}}{{template "ic" .Icone}}{{end}}{{.Tipo}}</span><span class="pend-idade">{{.Idade}}</span><span class="pend-titulo">{{.Titulo}}</span><span class="pend-estado">{{if .Respondida}}<span class="selo selo-ok">{{template "ic" "check"}}respondida</span>{{end}}{{if .SemDetalhe}}<span class="selo selo-apagado">[sem detalhe]</span>{{end}}{{if .SemCoordenador}}<span class="selo selo-aviso">sem coordenador</span>{{end}}</span></summary><div class="pend-corpo"><p class="vazio-linha">Abra para ler o contexto e responder. <a href="{{.Href}}">Abrir só esta pendência</a></p></div></details>{{end}}
+
+{{define "form-resp"}}<form class="resposta" method="post" action="{{.Acao}}"{{if .HX}} hx-post="{{.Acao}}"{{if .ComComp}} hx-include="#comp"{{end}} hx-target="closest .pend" hx-swap="outerHTML"{{end}}>
+{{if .P.Opcoes}}<fieldset class="opcoes"><legend>{{if .Trocar}}Sua nova escolha{{else}}Sua escolha{{end}}</legend>
+{{range .P.Opcoes}}<label class="opcao"><input type="radio" class="radio radio-primary radio-sm" name="opcao" value="{{.ID}}"{{if eq .ID $.AtualOpcao}} checked{{end}} required><span class="opcao-texto"><span class="opcao-titulo">{{.ID}} · {{.Titulo}}{{if .Recomendada}} <span class="selo selo-recomendada">{{template "ic" "check"}}recomendada</span>{{end}}</span>{{if .Descricao}}<span class="opcao-desc">{{.Descricao}}</span>{{end}}</span></label>
+{{end}}</fieldset>{{end}}
+<label class="campo"><span class="campo-rot">{{if .P.Opcoes}}Comentário (opcional){{else}}Resposta{{end}}</span>
+<textarea name="texto" class="textarea textarea-bordered w-full" rows="4" maxlength="{{.LimiteTexto}}"{{if not .P.Opcoes}} required{{end}} placeholder="{{if .P.Opcoes}}Algo que o coordenador deva saber{{else}}Sua resposta ao coordenador{{end}}">{{.TextoAtual}}</textarea></label>
+<div class="erro" role="alert"></div>
+<div class="acoes"><button type="submit" class="btn btn-primary">Enviar resposta</button>{{if .HX}}<a class="link-direto" href="{{.Href}}">{{template "ic" "ligacao"}}Link direto</a>{{end}}</div>
+</form>{{end}}
+
+{{define "pend-corpo"}}{{if eq .P.Estado "resolvida"}}<p class="resp-linha">{{template "ic" "check"}}<span>Resolvida {{.ResolvidaEm}}{{if .P.Resposta}} · {{.P.Resposta}}{{end}}</span></p>
+<p><a class="link-direto" href="{{.Href}}">{{template "ic" "ligacao"}}Link direto</a></p>
+{{else if and (eq .P.Estado "respondida") (not .Trocar)}}<p class="resp-linha">{{template "ic" "check"}}<span>{{if .Resposta.Opcao}}Opção {{.Resposta.Opcao}}{{if .Resposta.Titulo}} · <b>{{.Resposta.Titulo}}</b>{{end}} · {{end}}respondida por {{.Resposta.Por}} · {{.Resposta.Idade}}</span></p>
+{{if .Resposta.Comentario}}<blockquote class="resp-coment">{{.Resposta.Comentario}}</blockquote>{{end}}
+<div class="acoes"><button type="button" class="btn btn-sm" hx-get="{{.CorpoHref}}?trocar=1" hx-target="closest .pend-corpo" hx-swap="innerHTML">Trocar a resposta</button><a class="link-direto" href="{{.Href}}">{{template "ic" "ligacao"}}Link direto</a></div>
+{{else}}{{if .SemDetalhe}}<p class="aviso-sem-detalhe">{{template "ic" "alerta"}}<span>Pendência antiga: só tem o título, sem contexto, opções ou evidências. Responda pelo comentário.</span></p>
+{{else}}<div class="detalhe">{{.Detalhe}}</div>{{end}}
+{{if .ArquivoAlterado}}<p class="aviso">O arquivo de origem mudou depois do registro. O que aparece é o que foi registrado.</p>{{end}}
+{{if .Trocar}}<p class="resp-anterior">Trocando a resposta de {{.Resposta.Por}} ({{.Resposta.Idade}}). A anterior fica no histórico.</p>{{end}}
+{{template "form-resp" .}}{{end}}{{end}}
+
+{{define "pend-conteudo"}}<section id="pend-conteudo" class="pend-conteudo">
+<form class="filtros" id="filtros" method="get" action="/pendencias" aria-label="Filtros das pendências">
+<label class="filtro"><span class="filtro-rot">Projeto</span><select id="f-projeto" name="projeto" class="select select-bordered w-full" hx-get="/pendencias" hx-trigger="change" hx-include="closest form" hx-params="projeto" hx-sync="closest form:replace" hx-target="#pend-conteudo" hx-swap="outerHTML" hx-push-url="true"><option value="">todos</option>{{range .Projetos}}<option value="{{.Valor}}"{{if .Sel}} selected{{end}}>{{.Rotulo}}</option>{{end}}</select></label>
+<label class="filtro"><span class="filtro-rot">Coordenador</span><select id="f-coord" name="coord" class="select select-bordered w-full" hx-get="/pendencias" hx-trigger="change" hx-include="closest form" hx-params="projeto,coord" hx-sync="closest form:replace" hx-target="#pend-conteudo" hx-swap="outerHTML" hx-push-url="true"><option value="">todos</option>{{range .Coords}}<option value="{{.Valor}}"{{if .Sel}} selected{{end}}>{{.Rotulo}}</option>{{end}}</select></label>
+<label class="filtro"><span class="filtro-rot">Onda</span><select id="f-onda" name="onda" class="select select-bordered w-full" hx-get="/pendencias" hx-trigger="change" hx-include="closest form" hx-params="projeto,coord,onda" hx-sync="closest form:replace" hx-target="#pend-conteudo" hx-swap="outerHTML" hx-push-url="true"><option value="">todas</option>{{range .Ondas}}<option value="{{.Valor}}"{{if .Sel}} selected{{end}}>{{.Rotulo}}</option>{{end}}</select></label>
+<noscript><button type="submit" class="btn">Filtrar</button></noscript>
+</form>
+<section class="grupo" aria-labelledby="t-esp"><h2 id="t-esp" class="grupo-t">Esperando você <span class="grupo-n" id="grupo-n-esp">{{.NEsp}}</span></h2>
+<div id="lista-esp" class="pend-lista">{{range .Esperam}}{{template "pend" .}}{{end}}</div>
+<p id="vazio-esp" class="vazio-linha vazio-caixa"{{if .Esperam}} hidden{{end}}>Nenhuma pendência esperando para este filtro.</p></section>
+<section class="grupo" aria-labelledby="t-resp"><h2 id="t-resp" class="grupo-t">Respondidas <span class="grupo-n" id="grupo-n-resp">{{.NResp}}</span></h2>
+<div id="lista-resp" class="pend-lista">{{range .Respondidas}}{{template "pend" .}}{{end}}</div>
+<p id="vazio-resp" class="vazio-linha vazio-caixa"{{if .Respondidas}} hidden{{end}}>Nenhuma pendência respondida para este filtro.</p></section>
+<input type="hidden" id="comp" name="comp" value="{{.Composicao}}">
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-include="#comp" hx-trigger="every 30s" hx-swap="none" hidden></div>
+</section>{{end}}
+
+{{define "pendencias"}}{{template "topo" .}}
+<div class="colunas"><div class="principal">
+<h1 class="t-pagina">Pendências</h1>
+<p class="ordem-nota">Respondidas continuam abertas até o coordenador resolver; ele lê a resposta com <code>orq pend ver</code>. As resolvidas ficam no <a href="/historico">histórico</a>.</p>
+<div id="aviso-lista" class="aviso-lista" role="status"></div>
+<div id="pend-aviso" class="aviso-lista" role="alert"></div>
+{{template "pend-conteudo" .Pendencias}}
+</div>
+{{template "rail" .Pendencias}}
+</div>
+{{template "rodape" .}}{{end}}
+
+{{define "vivo-pend"}}{{template "fontes" .}}
+{{range .Abas}}{{template "aba-n" .}}{{end}}
+{{if .Igual}}{{if .Grupos}}<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.NEsp}}</span>
+<span class="grupo-n" id="grupo-n-resp" hx-swap-oob="true">{{.NResp}}</span>
+{{end}}{{else}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
+{{end}}{{end}}
+
+{{/* A resposta do POST com HX-Request (spec §5.3). Na US, o item respondido e fechado é a resposta
+     principal. Na aba Pendências a principal é vazia (o outerHTML a remove de cima) e o item entra no
+     grupo de baixo pelo oob com embrulho: o afterbegin insere o conteúdo do elemento, não ele. */}}
+{{define "resposta"}}{{if .Principal}}{{template "pend" .Item}}{{end}}
+{{if .Mover}}<div hx-swap-oob="afterbegin:#lista-resp">{{template "pend" .Item}}</div>
+<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.NEsp}}</span>
+<span class="grupo-n" id="grupo-n-resp" hx-swap-oob="true">{{.NResp}}</span>
+<p id="vazio-esp" class="vazio-linha vazio-caixa"{{if .NEsp}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência esperando para este filtro.</p>
+<p id="vazio-resp" class="vazio-linha vazio-caixa"{{if .NResp}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência respondida para este filtro.</p>
+{{end}}{{if .Comp}}<input type="hidden" id="comp" name="comp" value="{{.Comp}}" hx-swap-oob="true">
+{{end}}{{if .AbaPend}}{{template "aba-n" .AbaPend}}
+{{end}}{{if .Situacao}}{{template "situacao" .Situacao}}
+{{end}}{{if .Onda}}{{template "onda-barra" .Onda}}
+{{end}}{{if .US}}{{template "us-barra" .US}}
+{{end}}<div id="aviso" class="aviso-flash" role="status" hx-swap-oob="true">{{.Aviso}}</div>{{end}}

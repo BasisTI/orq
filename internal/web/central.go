@@ -168,13 +168,13 @@ type eventoVista struct {
 func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != r.PathValue("id") {
-		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Endereço de onda inválido.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Endereço de onda inválido.", "/")
 		return
 	}
 	ctx := r.Context()
 	snap, err := s.fonte().Snapshot(ctx, true)
 	if err != nil {
-		s.falha(w, r, err, "/central")
+		s.falha(w, r, err, "/")
 		return
 	}
 	var alvo *ondaVista
@@ -188,7 +188,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if alvo == nil {
-		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Não há onda com esse número.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Não há onda com esse número.", "/")
 		return
 	}
 	pagina, _ := strconv.Atoi(r.FormValue("pagina"))
@@ -196,7 +196,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	f := central.FiltroDiario{OndaID: id}
 	total, err := s.fonte().ContarDiario(ctx, nil, f)
 	if err != nil {
-		s.falha(w, r, err, "/central")
+		s.falha(w, r, err, "/")
 		return
 	}
 	paginas := max((total+eventosPorPagina-1)/eventosPorPagina, 1)
@@ -204,7 +204,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	f.Limite, f.Deslocamento = eventosPorPagina, (pagina-1)*eventosPorPagina
 	es, err := s.fonte().Diario(ctx, nil, f)
 	if err != nil {
-		s.falha(w, r, err, "/central")
+		s.falha(w, r, err, "/")
 		return
 	}
 	// O mais recente primeiro: é o que se quer ver no celular.

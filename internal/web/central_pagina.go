@@ -18,9 +18,24 @@ type centralPagina struct {
 	Abas []Aba
 }
 
-// central atende /central: a Central nova, aba Todos. A lista de pendências segue em /.
-func (s *Servidor) central(w http.ResponseWriter, r *http.Request) {
+// inicio atende /: a Central, aba Todos. Os filtros da página antiga (?coord=&projeto=&onda=)
+// passam para /pendencias com a mesma query, em vez de serem ignorados em silêncio (spec §2.2).
+func (s *Servidor) inicio(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Has("coord") || q.Has("projeto") || q.Has("onda") {
+		http.Redirect(w, r, "/pendencias?"+r.URL.RawQuery, http.StatusPermanentRedirect)
+		return
+	}
 	s.mostrarCentral(w, r, "")
+}
+
+// centralAntiga atende /central, que virou /: 308, para os links e a skill que ainda o usam.
+func (s *Servidor) centralAntiga(w http.ResponseWriter, r *http.Request) {
+	destino := "/"
+	if r.URL.RawQuery != "" {
+		destino += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, destino, http.StatusPermanentRedirect)
 }
 
 // projeto atende /projeto/{slug}: as ondas com ao menos uma US do projeto. O slug que não tem
@@ -28,7 +43,7 @@ func (s *Servidor) central(w http.ResponseWriter, r *http.Request) {
 func (s *Servidor) projeto(w http.ResponseWriter, r *http.Request) {
 	slug, err := refs.ValidarProjeto(r.PathValue("slug"))
 	if err != nil || slug != r.PathValue("slug") {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Não há projeto com esse nome nas ondas abertas.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Não há projeto com esse nome nas ondas abertas.", "/")
 		return
 	}
 	s.mostrarCentral(w, r, slug)
@@ -43,7 +58,7 @@ func (s *Servidor) mostrarCentral(w http.ResponseWriter, r *http.Request, slug s
 	}
 	c := vistaCentral(snap, s.agora(), Filtro{Projeto: slug})
 	if c.ProjetoSemOnda {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Não há projeto com esse nome nas ondas abertas.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Não há projeto com esse nome nas ondas abertas.", "/")
 		return
 	}
 	s.pagina(w, http.StatusOK, "central", centralPagina{
@@ -53,17 +68,43 @@ func (s *Servidor) mostrarCentral(w http.ResponseWriter, r *http.Request, slug s
 	})
 }
 
+// Em que aba a pessoa está, lido do HX-Current-URL.
+const (
+	semAba       = ""
+	abaDeTodos   = "todos"
+	abaDePend    = "pendencias"
+	abaDeProjeto = "projeto"
+)
+
+// AbaAtual é a aba lida do HX-Current-URL: o tipo, o slug do projeto (só na aba de projeto) e a
+// query (o filtro, na aba Pendências).
+type AbaAtual struct {
+	Tipo, Projeto string
+	Query         url.Values
+}
+
 // abaDe lê, do HX-Current-URL que o htmx envia em todo pedido, em que aba a pessoa está.
-// Devolve o slug do projeto ("" para Todos, para Pendências e para o que não reconhece).
-func abaDe(atual string) string {
+// Reconhece /, /central, /projeto/{slug} e /pendencias; o que não reconhece é semAba.
+func abaDe(atual string) AbaAtual {
 	u, err := url.Parse(atual)
 	if err != nil {
-		return ""
+		return AbaAtual{}
+	}
+	switch {
+	case u.Path == "/" || u.Path == "/central":
+		return AbaAtual{Tipo: abaDeTodos}
+	case u.Path == "/pendencias":
+		return AbaAtual{Tipo: abaDePend, Query: u.Query()}
 	}
 	if resto, ok := strings.CutPrefix(u.Path, "/projeto/"); ok && resto != "" && !strings.Contains(resto, "/") {
-		return resto
+		return AbaAtual{Tipo: abaDeProjeto, Projeto: resto}
 	}
-	return ""
+	return AbaAtual{}
+}
+
+// filtroDe lê o filtro da aba Pendências de uma query.
+func filtroDe(q url.Values) FiltroPend {
+	return FiltroPend{Projeto: q.Get("projeto"), Coord: q.Get("coord"), Onda: q.Get("onda")}
 }
 
 var (
@@ -106,7 +147,12 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	c := vistaCentral(snap, s.agora(), Filtro{Projeto: abaDe(r.Header.Get("HX-Current-URL"))})
+	aba := abaDe(r.Header.Get("HX-Current-URL"))
+	if aba.Tipo == abaDePend {
+		s.vivoPendencias(w, snap, q, aba)
+		return
+	}
+	c := vistaCentral(snap, s.agora(), Filtro{Projeto: aba.Projeto})
 	igual := q.Get("v") == c.Hash
 	ondas, us, abas := conjunto(q.Get("o")), conjunto(q.Get("u")), conjunto(q.Get("a"))
 	c.Situacao.Oob, c.FontesOob = true, true

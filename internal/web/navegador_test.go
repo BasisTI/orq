@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 		t.Fatal(err)
 	}
 	// "=<status>" é a página de erro que o teste provoca de propósito.
-	caminhos := []string{"/", "/p/catalogo/404/2", "/historico", "/onda/1", "/onda/999=404", "/onda/abc=404", "/central", "/projeto/catalogo", "/projeto/nuvem", "/projeto/faturamento", "/projeto/agenda", "/projeto/nada=404"}
+	caminhos := []string{"/", "/p/catalogo/404/2", "/historico", "/onda/1", "/onda/999=404", "/onda/abc=404", "/central", "/pendencias", "/pendencias?projeto=nuvem&coord=cais", "/pendencias?projeto=agenda&coord=bussola&onda=4", "/projeto/catalogo", "/projeto/nuvem", "/projeto/faturamento", "/projeto/agenda", "/projeto/nada=404"}
 
 	t.Run("Central", func(t *testing.T) {
 		r := rodarNode(t, env, "navegador.mjs", append([]string{servirNoNavegador(t, st, nil)}, caminhos...)...)
@@ -122,7 +123,7 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 	// Dados vencidos: o relógio do servidor uma hora à frente, sem o daemon renovar o cache.
 	t.Run("DadosVencidos", func(t *testing.T) {
 		base := servirNoNavegador(t, st, func() time.Time { return time.Now().Add(time.Hour) })
-		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=vencida-"), "navegador.mjs", base, "/central")
+		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=vencida-"), "navegador.mjs", base, "/")
 		for _, p := range r.Problemas {
 			t.Error(p)
 		}
@@ -139,7 +140,7 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 		fim := make(chan error, 1)
 		go func() { fim <- srv.Servir(ctx, l) }()
 		defer func() { cancelar(); <-fim }()
-		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=proxy_"), "navegador.mjs", fmt.Sprintf("http://127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port), "/central=401")
+		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=proxy_"), "navegador.mjs", fmt.Sprintf("http://127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port), "/=401")
 		for _, p := range r.Problemas {
 			t.Error(p)
 		}
@@ -151,7 +152,7 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 			t.Fatal(err)
 		}
 		base := servirNoNavegador(t, vz, nil)
-		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=vazia-"), "navegador.mjs", base, "/central")
+		r := rodarNode(t, append(env, "ORQ_CAPTURA_PREFIXO=vazia-"), "navegador.mjs", base, "/")
 		for _, p := range r.Problemas {
 			t.Error(p)
 		}
@@ -180,6 +181,27 @@ func controle(t *testing.T, st *central.Store) string {
 		_, err := st.EncerrarOnda(ctx, "", 8)
 		falha(w, err)
 	})
+	// A pendência é de outra pessoa/coordenador: o teste precisa que ela mude embaixo da página aberta.
+	pend := func(r *http.Request) refs.Pend {
+		ref, _ := strconv.Atoi(r.URL.Query().Get("ref"))
+		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+		return refs.Pend{US: refs.US{Projeto: r.URL.Query().Get("proj"), Ref: ref}, Numero: n}
+	}
+	mux.HandleFunc("/responder", func(w http.ResponseWriter, r *http.Request) {
+		_, err := st.ResponderPendencia(ctx, nil, pend(r), central.Resposta{Texto: "respondida por outra pessoa", Por: "outra"})
+		falha(w, err)
+	})
+	nPend := 0
+	mux.HandleFunc("/nova-pend", func(w http.ResponseWriter, r *http.Request) {
+		nPend++
+		ref, _ := strconv.Atoi(r.URL.Query().Get("ref"))
+		_, err := st.RegistrarPendencia(ctx, central.NovaPendencia{US: refs.US{Projeto: r.URL.Query().Get("proj"), Ref: ref}, Tipo: "duvida", Titulo: "Chegou depois da carga", Autor: "w", Detalhe: "d", Slug: fmt.Sprintf("np%d", nPend), Hash: fmt.Sprintf("np%d", nPend)})
+		falha(w, err)
+	})
+	mux.HandleFunc("/resolver", func(w http.ResponseWriter, r *http.Request) {
+		_, err := st.ResolverPendencia(ctx, nil, pend(r), "resolvida pelo coordenador")
+		falha(w, err)
+	})
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -204,5 +226,48 @@ func TestNavegadorVivo(t *testing.T) {
 	r := rodarNode(t, env, "vivo.mjs", servirNoNavegador(t, st, nil), controle(t, st))
 	for _, p := range r.Problemas {
 		t.Error(p)
+	}
+}
+
+// TestNavegadorPendencias: a pendência no lugar, os erros dentro do formulário sem perder o texto,
+// o /vivo que não toca o corpo aberto, a cascata e o Voltar que mantém a página inteira (story 3).
+func TestNavegadorPendencias(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	st := abrirStore(t)
+	semear(t, context.Background(), st)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	if c := os.Getenv("ORQ_CAPTURAS"); c != "" {
+		env = append(env, "ORQ_CAPTURAS="+c)
+	}
+	r := rodarNode(t, env, "pendencias.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+	for _, p := range r.Problemas {
+		t.Error(p)
+	}
+	// O celular: um banco novo, porque responder muda o estado.
+	t.Run("Celular", func(t *testing.T) {
+		st := abrirStore(t)
+		semear(t, context.Background(), st)
+		r := rodarNode(t, append(env, "ORQ_LARGURA=390"), "pendencias.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+		for _, p := range r.Problemas {
+			t.Error(p)
+		}
+	})
+}
+
+// TestNavegadorComposicao: o POST publica só a composição que a página renderizou mais a mudança
+// que ele aplicou; o que mudou fora dele (pendência nova, resolvida, onda/projeto que aparece ou
+// some) continua sendo avisado pelo /vivo (S1), e a aba antiga move o item (M1).
+func TestNavegadorComposicao(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	for _, caso := range []string{"pendência nova", "pendência resolvida por outro", "onda nova", "onda encerrada", "sem mudança alheia", "M1", "M2"} {
+		t.Run(caso, func(t *testing.T) {
+			st := abrirStore(t)
+			semear(t, context.Background(), st)
+			r := rodarNode(t, append(env, "ORQ_CASO="+caso), "composicao.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+			for _, p := range r.Problemas {
+				t.Error(p)
+			}
+		})
 	}
 }

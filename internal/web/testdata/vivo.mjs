@@ -25,7 +25,7 @@ const respostasVivo = [];
 pagina.on('response', async (r) => { if (r.url().includes('/vivo')) respostasVivo.push(r.status()); });
 
 await pagina.clock.install();
-await pagina.goto(base + '/central', { waitUntil: 'networkidle' });
+await pagina.goto(base + '/', { waitUntil: 'networkidle' });
 
 const foto = () => pagina.evaluate(() => ({
   filhosDoBody: document.body.children.length,

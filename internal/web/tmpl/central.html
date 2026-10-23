@@ -33,8 +33,7 @@
 <h3 class="sec">Merge requests</h3>
 {{if .MRs}}<ul class="mrs">{{range .MRs}}{{template "c-mr" .}}{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma MR ligada a esta US.</p>{{end}}
 <h3 class="sec">Pendências</h3>
-{{if .Pendencias}}<ul class="pends">{{range .Pendencias}}<li><a class="pend-id" href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span> {{if eq .Estado "respondida"}}<span class="selo selo-ok">{{template "ic" "check"}}respondida</span>{{else}}<span class="selo selo-aviso">{{template "ic" "user"}}espera você</span>{{end}}</li>
-{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma pendência.</p>{{end}}
+{{if .Pendencias}}<div class="pend-lista pend-lista-us">{{range .Pendencias}}{{template "pend" .}}{{end}}</div>{{else}}<p class="vazio-linha">Nenhuma pendência.</p>{{end}}
 </div></details>{{end}}
 
 {{define "onda-barra"}}<summary class="onda-sum" id="{{.BarraID}}"{{if .Oob}} hx-swap-oob="true"{{end}}>

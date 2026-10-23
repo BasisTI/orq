@@ -1,5 +1,5 @@
 {{define "onda"}}{{template "topo" .}}
-<p class="voltar"><a href="/central"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Central</a></p>
+<p class="voltar"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Central</a></p>
 <h1 class="t-pagina">{{if .Onda.Titulo}}<span class="onda-id">#{{.Onda.ID}}</span> {{.Onda.Titulo}}{{else}}Onda {{.Onda.ID}}{{end}}</h1>
 <p class="p-meta"><span><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg>{{.Coordenador}}</span><span>até {{.Onda.Ate}} · ordem {{.Onda.Ordem}}</span><span>{{.Onda.Feitas}}/{{len .Onda.US}} prontas</span>
 {{if .Onda.Concluida}}<span class="selo selo-respondida">concluída</span>{{end}}{{if .Onda.Encerrada}}<span class="selo selo-resolvida">encerrada</span>{{end}}</p>

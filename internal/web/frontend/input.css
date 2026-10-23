@@ -95,7 +95,7 @@ a.btn-primary, .btn-primary { color: var(--color-primary-content); }
 .textarea::placeholder, .select::placeholder { color: #5B6B7A; opacity: 1; }
 /* contorno dos controles a 3:1 ou mais sobre branco (WCAG 1.4.11); o do daisyUI dá 1,48:1 */
 .radio, .select, .textarea { --input-color: #66768A; }
-.select { min-height: 2.75rem; background: #fff; }
+.select { min-height: 2.75rem; background-color: #fff; }
 
 [hidden] { display: none !important; }
 .apagado { color: var(--suave); }
@@ -395,5 +395,68 @@ details[open] > summary .chev { rotate: 90deg; }
 
 /* ---------- erro e confirmação ---------- */
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  *:not(.aviso-flash) { animation: none !important; transition: none !important; }
+}
+
+/* ===== story 3 (#24): pendência no lugar, cascata e aviso ===== */
+.pend-lista { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); overflow: hidden; }
+.pend-lista:not(:has(.pend, .hist-item)) { display: none; }
+.pend-lista-us { background: transparent; border: 0; border-radius: 0; border-top: 1px solid var(--linha); }
+.pend { border-top: 1px solid var(--linha); }
+.pend:first-child { border-top: 0; }
+.pend-sum { display: grid; grid-template-columns: 1.25rem auto minmax(0, 1fr); grid-template-areas: "chev chave tipo" ". tit tit" ". estado estado"; gap: .3rem .6rem; align-items: center; padding: .7rem .8rem; cursor: pointer; color: inherit; text-decoration: none; min-height: 2.75rem; }
+.pend-sum:hover { background: color-mix(in oklab, var(--color-base-200) 55%, #fff); }
+.pend-sum > .chev, .pend-sum > .ic:first-child { grid-area: chev; }
+.pend-chave { grid-area: chave; font-weight: 700; font-family: var(--font-display); font-size: .95rem; white-space: nowrap; }
+.pend-sum .selo-tipo { grid-area: tipo; justify-self: start; }
+.pend-idade { display: none; grid-area: idade; color: var(--suave); font-size: .88rem; }
+.pend-titulo { grid-area: tit; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.pend[open] > .pend-sum .pend-titulo { -webkit-line-clamp: unset; font-weight: 700; }
+.pend-estado { grid-area: estado; display: flex; flex-wrap: wrap; gap: .35rem; }
+.pend-estado:empty { display: none; }
+@media (min-width: 760px) {
+  .pend-sum { grid-template-columns: 1.25rem 7.5rem 7.4rem 4.5rem minmax(0, 1fr) auto; grid-template-areas: "chev chave tipo idade tit estado"; column-gap: .75rem; }
+  .pend-idade { display: block; }
+  .pend-titulo { -webkit-line-clamp: 1; }
+}
+.pend-corpo { padding: .25rem .8rem 1rem .8rem; max-width: 62rem; overflow-wrap: anywhere; }
+@media (min-width: 760px) { .pend-corpo { padding-left: 2.15rem; } }
+.pend-corpo .detalhe { background: transparent; border: 0; padding: 0; margin: .25rem 0 .5rem; }
+.pend-nova { animation: confirma 2.2s ease-out 1; }
+@keyframes confirma { from { background: #E1F1E8; } to { background: transparent; } }
+.aviso-sem-detalhe { display: flex; gap: .5rem; align-items: baseline; padding: .6rem .8rem; background: #FBEFD6; color: #5F3C00; border-radius: var(--radius-field); margin: .6rem 0; max-width: 70ch; }
+.opcao-titulo { font-weight: 700; }
+.opcao-desc { color: #2B3A48; font-size: .94rem; overflow-wrap: anywhere; }
+.link-direto { display: inline-flex; gap: .3rem; align-items: center; min-height: 2.75rem; }
+.resp-linha { display: flex; gap: .4rem; align-items: baseline; color: #0E5C38; margin: .5rem 0; }
+.resp-linha .ic { align-self: center; flex: none; }
+.resp-linha b { color: var(--color-secondary); }
+.resp-coment { border-left: 1px solid var(--color-base-300); padding: .1rem 0 .1rem .75rem; margin: .5rem 0 .8rem; color: #2B3A48; white-space: pre-wrap; }
+.resp-anterior { background: #E0EEF6; color: #0A4A6C; padding: .5rem .7rem; border-radius: var(--radius-field); margin: .5rem 0; }
+.acoes .btn-sm { min-height: 2.75rem; }
+/* o espaço reservado do erro do formulário: vazio some, com texto é um alerta que o texto digitado não sai de baixo */
+.resposta .erro:empty { display: none; }
+.resposta .erro { background: #FBE6E3; color: #9C1F18; border-radius: var(--radius-field); padding: .55rem .8rem; }
+.resposta .erro p { margin: 0; }
+
+.pend-conteudo { display: block; }
+.grupo { margin-top: 1.25rem; }
+.grupo-t { font-size: 1.05rem; font-weight: 700; margin-bottom: .5rem; display: flex; gap: .5rem; align-items: center; }
+.grupo-n { font-size: .85rem; font-weight: 400; background: #E8EDF2; color: #2B3A48; border-radius: 9999px; padding: 0 .55rem; font-family: var(--font-sans); }
+.vazio-caixa { background: var(--color-base-100); border: 1px dashed var(--color-base-300); border-radius: var(--radius-box); padding: .9rem 1rem; }
+.vazio-caixa[hidden] { display: none; }
+.select { min-height: 2.75rem; background-color: #fff; }
+#pend-aviso:empty { display: none; }
+#pend-aviso:not(:empty) { background: #FBE6E3; color: #9C1F18; }
+.hist-item .ic:first-child { color: #0E5C38; }
+
+/* a confirmação da resposta: uma região role="status" que some sozinha (animação de CSS, sem JS).
+   Com prefers-reduced-motion some de uma vez, sem fade, depois do mesmo tempo (aviso-corte). */
+.aviso-flash { position: fixed; left: 50%; bottom: 1rem; translate: -50% 0; max-width: min(92vw, 28rem); background: var(--navy); color: #fff; padding: .7rem 1rem; border-radius: var(--radius-field); box-shadow: 0 6px 20px rgba(0, 0, 0, .25); z-index: 60; }
+.aviso-flash:empty { display: none; }
+.aviso-flash:not(:empty) { animation: aviso-some 6s linear 1 forwards; }
+@keyframes aviso-some { 0%, 85% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes aviso-corte { 0% { visibility: visible; } 100% { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .aviso-flash:not(:empty) { animation: aviso-corte 6s step-end 1 forwards !important; }
 }

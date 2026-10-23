@@ -11,7 +11,7 @@ const [base, ...pedidos] = process.argv.slice(2);
 // "<caminho>[=<status esperado>]". Com 401, os estáticos vão com o cabeçalho do proxy (a página de
 // erro é o que se mede; sem isso o CSS também seria 401 e ela sairia sem estilo, como no socket
 // Unix real).
-const caminhos = pedidos.map((x) => { const [c, st] = x.split('='); return [c, Number(st) || 200]; });
+const caminhos = pedidos.map((x) => { const m = x.match(/^(.*)=(\d{3})$/); return m ? [m[1], Number(m[2])] : [x, 200]; });
 const capturas = process.env.ORQ_CAPTURAS;
 const prefixo = process.env.ORQ_CAPTURA_PREFIXO ?? '';
 if (capturas) mkdirSync(capturas, { recursive: true });
@@ -96,6 +96,7 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
       allowEval: window.htmx?.config?.allowEval,
       historyRestoreAsHxRequest: window.htmx?.config?.historyRestoreAsHxRequest,
       historyCacheSize: window.htmx?.config?.historyCacheSize,
+      settle: window.htmx?.config?.attributesToSettle?.join(','),
       carlito: document.fonts.check('16px Carlito') && [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'Carlito' && f.status === 'loaded'),
       interTight: [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'Inter Tight' && f.status === 'loaded'),
       fundoCabecalho: (document.querySelector('.cab') ? getComputedStyle(document.querySelector('.cab')).backgroundColor : null),
@@ -109,11 +110,12 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
     if (estado.htmx !== 'object' || estado.allowEval !== false || estado.historyRestoreAsHxRequest !== false || estado.historyCacheSize !== 0) {
       falhas.push(`htmx/meta: ${JSON.stringify({ htmx: estado.htmx, allowEval: estado.allowEval, h: estado.historyRestoreAsHxRequest, c: estado.historyCacheSize })}`);
     }
+    if (estado.settle !== 'class,width,height') falha(`htmx attributesToSettle: ${estado.settle}`);
     if (!estado.carlito || !estado.interTight) falhas.push(`fontes não carregadas: ${JSON.stringify({ c: estado.carlito, i: estado.interTight })}`);
     if (estado.fundoCabecalho !== 'rgb(7, 26, 46)') falhas.push(`cabeçalho sem o navy do tema: ${estado.fundoCabecalho}`);
     if (estado.larguraRolavel > 0) falhas.push(`rolagem horizontal da página: ${estado.larguraRolavel}px`);
 
-    const ehCentral = esperado === 200 && (caminho === '/central' || caminho.startsWith('/projeto/'));
+    const ehCentral = esperado === 200 && (caminho === '/' || caminho === '/central' || caminho.startsWith('/projeto/'));
     if (ehCentral) await checarCentral(pagina, nome, falhas);
 
     const slug = (caminho + (esperado === 200 ? '' : `_${esperado}`)).replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'raiz';
