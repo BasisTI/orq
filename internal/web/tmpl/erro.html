@@ -23,6 +23,6 @@
 <div class="banner-txt">
 <h2 class="t-pagina">Nenhuma onda aberta</h2>
 <p>{{if .Coordenadores}}Coordenadores registrados, sem onda aberta: {{range $i, $c := .Coordenadores}}{{if $i}}, {{end}}<strong>{{$c}}</strong>{{end}}.{{else}}Nenhum coordenador registrado.{{end}} As ondas aparecem aqui quando um coordenador cria uma com <code>orq onda criar</code>. As encerradas ficam no diário de cada onda.</p>
-<p class="acoes"><a class="btn btn-primary" href="/">Ver pendências</a><a class="btn" href="/central">Atualizar</a></p>
+<p class="acoes"><a class="btn btn-primary" href="/pendencias">Ver pendências</a><a class="btn" href="/">Atualizar</a></p>
 </div>
 </section>{{end}}

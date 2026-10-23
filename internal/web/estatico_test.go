@@ -166,7 +166,7 @@ func TestEstaticoExigeUsuarioNoSocketUnix(t *testing.T) {
 
 func TestPaginasNaoTemScriptNemEstiloInline(t *testing.T) {
 	f := nova(t, false)
-	for _, p := range []string{"/", "/p/orq/15/1", "/historico", "/central", "/nao-existe"} {
+	for _, p := range []string{"/", "/pendencias", "/p/orq/15/1", "/historico", "/nao-existe"} {
 		w := f.faz(req{metodo: "GET", caminho: p})
 		// Até o <main>: cabeçalho, abas e sprite são do orq. O que vem depois é texto de agente (a
 		// fixture traz "onerror=" escapado), coberto pelos testes de escape.

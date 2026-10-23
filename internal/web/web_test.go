@@ -396,26 +396,8 @@ func TestResponderResolvidaEInexistente(t *testing.T) {
 	}
 }
 
-func TestIndiceEHistorico(t *testing.T) {
+func TestHistorico(t *testing.T) {
 	f := nova(t, true)
-	html := corpo(f.faz(req{metodo: "GET", caminho: "/"}))
-	if !strings.Contains(html, "TG-15#P1") || !strings.Contains(html, `http-equiv="refresh" content="30"`) || !strings.Contains(html, "Esperando você") {
-		t.Fatalf("índice:\n%s", html)
-	}
-	// Respondida muda de seção; os filtros escondem o resto.
-	f.faz(req{metodo: "POST", caminho: "/p/orq/15/1/responder", corpo: form(url.Values{"opcao": {"1"}})})
-	html = corpo(f.faz(req{metodo: "GET", caminho: "/"}))
-	if !strings.Contains(html, `<span class="contagem">0</span>`) || !strings.Contains(html, "selo-respondida") {
-		t.Fatalf("respondida no índice:\n%s", html)
-	}
-	for _, q := range []string{"?coord=outro", "?projeto=zeta", "?onda=77"} {
-		if h := corpo(f.faz(req{metodo: "GET", caminho: "/" + q})); strings.Contains(h, "TG-15#P1</strong>") {
-			t.Errorf("filtro %s não escondeu", q)
-		}
-	}
-	if h := corpo(f.faz(req{metodo: "GET", caminho: "/?coord=coord&projeto=orq&onda=1"})); !strings.Contains(h, "TG-15#P1</strong>") {
-		t.Errorf("filtro certo escondeu:\n%s", h)
-	}
 	// Histórico paginado: 25 resolvidas → 2 páginas.
 	ctx := context.Background()
 	for i := 0; i < 25; i++ {
@@ -429,8 +411,8 @@ func TestIndiceEHistorico(t *testing.T) {
 	}
 	p1 := corpo(f.faz(req{metodo: "GET", caminho: "/historico"}))
 	p2 := corpo(f.faz(req{metodo: "GET", caminho: "/historico?pagina=2"}))
-	if strings.Count(p1, `class="cartao"`) != 20 || strings.Count(p2, `class="cartao"`) != 5 || !strings.Contains(p1, "página 1 de 2") || !strings.Contains(p1, "pagina=2") || !strings.Contains(p2, "pagina=1") {
-		t.Fatalf("páginas: %d / %d\n%s", strings.Count(p1, "cartao"), strings.Count(p2, "cartao"), p1)
+	if strings.Count(p1, `hist-item`) != 20 || strings.Count(p2, `hist-item`) != 5 || !strings.Contains(p1, "página 1 de 2") || !strings.Contains(p1, "pagina=2") || !strings.Contains(p2, "pagina=1") {
+		t.Fatalf("páginas: %d / %d\n%s", strings.Count(p1, "hist-item"), strings.Count(p2, "hist-item"), p1)
 	}
 	if h := corpo(f.faz(req{metodo: "GET", caminho: "/historico?pagina=99"})); !strings.Contains(h, "página 2 de 2") {
 		t.Errorf("página fora do intervalo: %s", h)
@@ -449,7 +431,7 @@ func TestLogSoTemRotaEStatus(t *testing.T) {
 			t.Errorf("linha de log com dado: %q", l)
 		}
 	}
-	if f.log[0] != "web POST /p/{projeto}/{ref}/{n}/responder 303" {
+	if f.log[0] != "web /p/{projeto}/{ref}/{n}/responder 303" {
 		t.Errorf("log[0] = %q", f.log[0])
 	}
 }

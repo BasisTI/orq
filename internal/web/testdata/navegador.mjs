@@ -11,7 +11,7 @@ const [base, ...pedidos] = process.argv.slice(2);
 // "<caminho>[=<status esperado>]". Com 401, os estáticos vão com o cabeçalho do proxy (a página de
 // erro é o que se mede; sem isso o CSS também seria 401 e ela sairia sem estilo, como no socket
 // Unix real).
-const caminhos = pedidos.map((x) => { const [c, st] = x.split('='); return [c, Number(st) || 200]; });
+const caminhos = pedidos.map((x) => { const m = x.match(/^(.*)=(\d{3})$/); return m ? [m[1], Number(m[2])] : [x, 200]; });
 const capturas = process.env.ORQ_CAPTURAS;
 const prefixo = process.env.ORQ_CAPTURA_PREFIXO ?? '';
 if (capturas) mkdirSync(capturas, { recursive: true });
@@ -113,7 +113,7 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
     if (estado.fundoCabecalho !== 'rgb(7, 26, 46)') falhas.push(`cabeçalho sem o navy do tema: ${estado.fundoCabecalho}`);
     if (estado.larguraRolavel > 0) falhas.push(`rolagem horizontal da página: ${estado.larguraRolavel}px`);
 
-    const ehCentral = esperado === 200 && (caminho === '/central' || caminho.startsWith('/projeto/'));
+    const ehCentral = esperado === 200 && (caminho === '/' || caminho === '/central' || caminho.startsWith('/projeto/'));
     if (ehCentral) await checarCentral(pagina, nome, falhas);
 
     const slug = (caminho + (esperado === 200 ? '' : `_${esperado}`)).replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'raiz';

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
-	"github.com/BasisTI/orq/internal/refs"
 )
 
 // A tela sai do snapshot (spec §2.1): vistaCentral não abre banco, não chama ferramenta e não lê
@@ -43,9 +42,9 @@ type Aba struct {
 
 // Identificadores das abas (o que as páginas passam como "ativa").
 const (
-	abaTodos      = "todos"
-	abaPendencias = "pendencias"
-	abaProjeto    = "projeto:"
+	abaTodos         = "todos"
+	abaTabPendencias = "pendencias"
+	abaProjeto       = "projeto:"
 )
 
 // ProjetoTag é o slug do projeto com o tom do ponto (4 tons, só ali).
@@ -75,11 +74,6 @@ type MRVista struct {
 	Erro string
 }
 
-// PendVista é o link de uma pendência dentro da US (a pendência no lugar é da story 3).
-type PendVista struct {
-	ID, Href, Tipo, Estado string
-}
-
 // USVista é uma linha de US.
 type USVista struct {
 	ID, Anchor, Titulo string
@@ -98,7 +92,7 @@ type USVista struct {
 	ResumoMRs          []Selo
 	SemMRs             bool
 	MRsQtd             int
-	Pendencias         []PendVista
+	Pendencias         []PendItem
 	Esperam            int
 	Oob                bool
 }
@@ -206,12 +200,7 @@ func vistaCentral(snap central.Snapshot, agora time.Time, f Filtro) Central {
 	})
 	c.ProjetoSemOnda = f.Projeto != "" && len(c.Ondas) == 0
 	c.Situacao = vistaSituacao(c.Ondas, snap, agora)
-	for _, nome := range central.Fontes {
-		if fs, ok := snap.Fontes[nome]; ok {
-			fr := frescorEm(agora, nome, fs.AtualizadoEm, fs.Erro)
-			c.Fontes = append(c.Fontes, FonteVista{Nome: nome, Idade: fr.Idade, Vencido: fr.Vencido, Nunca: fr.Nunca, Erro: fr.Erro})
-		}
-	}
+	c.Fontes = fontesDe(snap, agora)
 	c.Hash = hashLista(c.Ondas, c.Abas)
 	for _, co := range snap.Coordenadores {
 		c.Coordenadores = append(c.Coordenadores, co.Nome)
@@ -291,7 +280,7 @@ func abasDe(snap central.Snapshot, ativa string) []Aba {
 			}
 		}
 	}
-	abas := []Aba{{Rotulo: "Todos", Href: "/central", ID: "aba-n-todos", N: total, Atual: ativa == abaTodos}}
+	abas := []Aba{{Rotulo: "Todos", Href: "/", ID: "aba-n-todos", N: total, Atual: ativa == abaTodos}}
 	slugs := make([]string, 0, len(porProjeto))
 	for s := range porProjeto {
 		slugs = append(slugs, s)
@@ -306,7 +295,7 @@ func abasDe(snap central.Snapshot, ativa string) []Aba {
 			pend++
 		}
 	}
-	return append(abas, Aba{Rotulo: "Pendências", Href: "/", ID: "aba-n-pendencias", N: pend, Aviso: pend > 0, Atual: ativa == abaPendencias, Fim: true})
+	return append(abas, Aba{Rotulo: "Pendências", Href: "/pendencias", ID: "aba-n-pendencias", N: pend, Aviso: pend > 0, Atual: ativa == abaTabPendencias, Fim: true})
 }
 
 var (
@@ -545,8 +534,7 @@ func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]str
 		default:
 			continue
 		}
-		r := p.RefUS()
-		uv.Pendencias = append(uv.Pendencias, PendVista{ID: p.ID, Href: refs.RotaPendencia(r.Projeto, r.Ref, p.Numero), Tipo: p.Tipo, Estado: p.Estado})
+		uv.Pendencias = append(uv.Pendencias, pendItemDe(p, agora))
 	}
 	return uv
 }
@@ -607,7 +595,7 @@ func vistaSituacao(ondas []OndaVista, snap central.Snapshot, agora time.Time) Si
 		revisao += o.paraRevisao
 	}
 	if esperam > 0 {
-		s.Itens = append(s.Itens, ItemSituacao{Cls: "aviso", Icone: "user", Href: "/", Texto: fmt.Sprintf("%d %s", esperam, plural(esperam, "pendência espera você", "pendências esperam você"))})
+		s.Itens = append(s.Itens, ItemSituacao{Cls: "aviso", Icone: "user", Href: "/pendencias", Texto: fmt.Sprintf("%d %s", esperam, plural(esperam, "pendência espera você", "pendências esperam você"))})
 	}
 	if falhando > 0 {
 		s.Itens = append(s.Itens, ItemSituacao{Cls: "erro", Icone: "x", Texto: fmt.Sprintf("%d %s", falhando, plural(falhando, "pipeline falhou", "pipelines falharam"))})

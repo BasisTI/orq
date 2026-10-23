@@ -8,7 +8,6 @@ import (
 	"html/template"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +49,7 @@ type Servidor struct {
 	CabecalhoUsuario string
 	// Porta é a porta TCP, para conferir o cabeçalho Host (rebinding de DNS); zero no Unix.
 	Porta int
-	// Log recebe uma linha por requisição, só com método, rota e status.
+	// Log recebe uma linha por requisição, só com a rota (o padrão) e o status.
 	Log   func(format string, args ...any)
 	Agora func() time.Time
 
@@ -80,11 +79,13 @@ func (s *Servidor) Handler() http.Handler {
 		s.modelos = template.Must(template.New("").Funcs(template.FuncMap{"ver": s.estatico.versao}).ParseFS(modelosFS, "tmpl/*.html"))
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.indice)
+	mux.HandleFunc("GET /{$}", s.inicio)
+	mux.HandleFunc("GET /central", s.centralAntiga)
+	mux.HandleFunc("GET /pendencias", s.pendencias)
 	mux.HandleFunc("GET /p/{projeto}/{ref}/{n}", s.detalhe)
+	mux.HandleFunc("GET /p/{projeto}/{ref}/{n}/corpo", s.corpo)
 	mux.HandleFunc("POST /p/{projeto}/{ref}/{n}/responder", s.responder)
 	mux.HandleFunc("GET /historico", s.historico)
-	mux.HandleFunc("GET /central", s.central)
 	mux.HandleFunc("GET /projeto/{slug}", s.projeto)
 	mux.HandleFunc("GET /vivo", s.vivo)
 	mux.HandleFunc("GET /onda/{id}", s.onda)
@@ -126,7 +127,7 @@ func (r *respostaStatus) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// comLog escreve só o método, a rota (o padrão, sem o caminho nem a query) e o status: nada do
+// comLog escreve só a rota (o padrão, sem o método, o caminho nem a query) e o status: nada do
 // que a pessoa digitou nem do que o agente escreveu vai para o log.
 func (s *Servidor) comLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +135,10 @@ func (s *Servidor) comLog(next http.Handler) http.Handler {
 		var rota string
 		next.ServeHTTP(rs, r.WithContext(context.WithValue(r.Context(), chaveRota{}, &rota)))
 		if s.Log != nil {
+			// O padrão do mux começa pelo método ("GET /vivo"); o log leva só a rota.
+			if _, resto, ok := strings.Cut(rota, " "); ok {
+				rota = resto
+			}
 			if rota == "" {
 				rota = "-"
 			}
@@ -212,8 +217,8 @@ func (s *Servidor) comAbas(r *http.Request, b base, ativa string) base {
 	snap, err := s.fonte().Snapshot(r.Context(), false)
 	if err != nil {
 		b.Abas = []Aba{
-			{Rotulo: "Todos", Href: "/central", ID: "aba-n-todos", SemN: true, Atual: ativa == abaTodos},
-			{Rotulo: "Pendências", Href: "/", ID: "aba-n-pendencias", SemN: true, Atual: ativa == abaPendencias, Fim: true},
+			{Rotulo: "Todos", Href: "/", ID: "aba-n-todos", SemN: true, Atual: ativa == abaTodos},
+			{Rotulo: "Pendências", Href: "/pendencias", ID: "aba-n-pendencias", SemN: true, Atual: ativa == abaTabPendencias, Fim: true},
 		}
 		return b
 	}
@@ -236,6 +241,10 @@ func (s *Servidor) erro(w http.ResponseWriter, r *http.Request, status int, titu
 // paginaErro desenha a página de erro. O banner (direto sobre a página, spec §10) é só do 401 e
 // do 404: os outros erros são um aviso, sem a arte. dica é uma linha a mais, esmaecida.
 func (s *Servidor) paginaErro(w http.ResponseWriter, r *http.Request, status int, titulo, msg, dica, voltar string) {
+	if ehFragmento(r) {
+		s.erroHX(w, r, status, msg)
+		return
+	}
 	s.pagina(w, status, "erro", struct {
 		base
 		Mensagem, Dica, Voltar string
@@ -295,51 +304,6 @@ func (s *Servidor) quando(t string) string {
 	return v.Local().Format("02/01 15:04")
 }
 
-type filtro struct{ Coord, Projeto, Onda string }
-
-func (s *Servidor) indice(w http.ResponseWriter, r *http.Request) {
-	f := filtro{Coord: r.FormValue("coord"), Projeto: r.FormValue("projeto"), Onda: r.FormValue("onda")}
-	todas, err := s.fonte().ListarPendencias(r.Context(), central.FiltroPendencias{Abertas: true})
-	if err != nil {
-		s.falha(w, r, err, "/")
-		return
-	}
-	coords, projetos, ondas := map[string]bool{}, map[string]bool{}, map[int64]bool{}
-	var abertas, respondidas []itemLista
-	for _, p := range todas {
-		coords[p.Coordenador], projetos[p.RefUS().Projeto], ondas[p.OndaID] = true, true, true
-		if f.Coord != "" && p.Coordenador != f.Coord || f.Projeto != "" && p.RefUS().Projeto != f.Projeto || f.Onda != "" && strconv.FormatInt(p.OndaID, 10) != f.Onda {
-			continue
-		}
-		if p.Estado == central.EstadoRespondida {
-			respondidas = append(respondidas, s.item(p))
-		} else {
-			abertas = append(abertas, s.item(p))
-		}
-	}
-	od := make([]int64, 0, len(ondas))
-	for o := range ondas {
-		od = append(od, o)
-	}
-	sort.Slice(od, func(i, j int) bool { return od[i] < od[j] })
-	s.pagina(w, http.StatusOK, "indice", struct {
-		base
-		Filtro               filtro
-		Coords, Projetos     []string
-		Ondas                []int64
-		Abertas, Respondidas []itemLista
-	}{s.comAbas(r, base{Titulo: "Pendências", Usuario: usuarioDe(r), Recarregar: true}, abaPendencias), f, chaves(coords), chaves(projetos), od, abertas, respondidas})
-}
-
-func chaves(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 	pagina, _ := strconv.Atoi(r.FormValue("pagina"))
 	if pagina < 1 {
@@ -371,7 +335,7 @@ func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 		Itens             []itemLista
 		Pagina, Paginas   int
 		Anterior, Proxima string
-	}{base: s.comAbas(r, base{Titulo: "Histórico", Usuario: usuarioDe(r)}, abaPendencias), Itens: itens, Pagina: pagina, Paginas: paginas}
+	}{base: s.comAbas(r, base{Titulo: "Histórico", Usuario: usuarioDe(r)}, abaTabPendencias), Itens: itens, Pagina: pagina, Paginas: paginas}
 	if pagina > 1 {
 		d.Anterior = "/historico?pagina=" + strconv.Itoa(pagina-1)
 	}
@@ -431,8 +395,20 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		Registrada                  bool
 		Erro                        string
 		LimiteTexto                 int
-	}{base: s.comAbas(r, base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r)}, abaPendencias), P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
-		Registrada: r.FormValue("registrada") == "1", Erro: msg, LimiteTexto: LimiteTexto}
+		// Os campos do formulário compartilhado com o corpo da pendência (modelo "form-resp").
+		HX         bool
+		Trocar     bool
+		Href       string
+		AtualOpcao int
+		TextoAtual string
+	}{base: s.comAbas(r, base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r)}, abaTabPendencias), P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
+		Registrada: r.FormValue("registrada") == "1", Erro: msg, LimiteTexto: LimiteTexto, Href: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero)}
+	if p.Estado == central.EstadoRespondida {
+		d.Trocar, d.TextoAtual = true, derefStr(p.Resposta)
+		if p.RespostaOpcao != nil {
+			d.AtualOpcao = *p.RespostaOpcao
+		}
+	}
 	if p.Detalhe != nil {
 		d.Detalhe = RenderizarMarkdown(*p.Detalhe)
 	}
@@ -500,8 +476,9 @@ func textoDoHistorico(h central.RespostaRegistrada) string {
 	return strings.Join(partes, " · ")
 }
 
-// responder grava a resposta e redireciona para a página (post/redirect/get): recarregar o
-// resultado não reenvia o formulário.
+// responder grava a resposta. Sem HX-Request redireciona para a página (post/redirect/get:
+// recarregar o resultado não reenvia o formulário); com HX-Request devolve o fragmento do item e
+// das contagens (spec §5.3), e os erros vão para dentro do formulário (erroHX).
 func (s *Servidor) responder(w http.ResponseWriter, r *http.Request) {
 	ref, ok := pendDe(r)
 	if !ok {
@@ -536,11 +513,16 @@ func (s *Servidor) responder(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Opcao = &n
 	}
-	if _, err := s.St.ResponderPendencia(r.Context(), nil, ref, resp); err != nil {
+	p, err := s.St.ResponderPendencia(r.Context(), nil, ref, resp)
+	if err != nil {
 		s.falha(w, r, err, voltar)
 		return
 	}
-	http.Redirect(w, r, voltar+"?registrada=1", http.StatusSeeOther)
+	if !ehFragmento(r) {
+		http.Redirect(w, r, voltar+"?registrada=1", http.StatusSeeOther)
+		return
+	}
+	s.respostaFragmento(w, r, p)
 }
 
 // Servir atende l até ctx acabar e então encerra com prazo. Devolve o erro do servidor, se

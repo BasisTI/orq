@@ -1,6 +1,6 @@
 package web
 
-// Testes adversariais da orq #19 na página /central: o selo da consulta extra
+// Testes adversariais da orq #19 na página /: o selo da consulta extra
 // (escape e exposição), a primeira falha sem valor anterior, e o último valor bom velho.
 
 import (
@@ -25,7 +25,7 @@ func TestSituacaoSeloDaConsultaExtraEscapadoENaoExpoeMensagem(t *testing.T) {
 	payload := `<img src=x onerror=alert(1)>`
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta",
 		SituacaoErro: &central.Erro{Codigo: payload, Mensagem: "segredo-mensagem " + payload}}, nil))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	naoContem(t, html, payload, "segredo-mensagem")
 	contem(t, html, "consulta extra falhou: ")
 }
@@ -39,7 +39,7 @@ func TestSituacaoPrimeiraFalhaSemValorAnteriorNaPagina(t *testing.T) {
 	_, _, err := c.st.AdicionarMR(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, url)
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	row := linhaMR(t, html)
 	contem(t, row, "valores lidos: nunca", "consulta extra falhou: falha_comando")
 	if n := strings.Count(row, ">desconhecido<"); n != 2 {
@@ -61,7 +61,7 @@ func TestSituacaoUltimoBomVelhoApareceComoVencido(t *testing.T) {
 	// Uma hora sem conseguir renovar pipeline e aprovação, com o estado da MR em dia.
 	depois := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return depois }
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	row := linhaMR(t, html)
 	contem(t, row, "valores lidos: há 1 h", "consulta extra falhou: falha_comando", "vencido")
 }
@@ -79,7 +79,7 @@ func TestSituacaoMesclaComCacheAntigoNaoDizNuncaLidos(t *testing.T) {
 		"estado": "aberta", "web_url": url, "pipeline": "sucesso", "aprovacao": "aprovada",
 	}, nil))
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	row := linhaMR(t, html)
 	contem(t, row, ">sucesso<", ">aprovada<", "consulta extra falhou: falha_comando")
 	naoContem(t, row, "valores lidos: nunca")

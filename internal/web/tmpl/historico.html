@@ -1,10 +1,12 @@
 {{define "historico"}}{{template "topo" .}}
+<p class="voltar"><a href="/pendencias"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Pendências</a></p>
 <h1 class="t-pagina">Histórico</h1>
-<p class="nota">Pendências resolvidas, da mais recente para a mais antiga.</p>
-{{if .Itens}}{{template "lista" .Itens}}{{else}}<p class="vazio">Nenhuma pendência resolvida.</p>{{end}}
-<nav class="paginas">
-{{if .Anterior}}<a href="{{.Anterior}}">← mais recentes</a>{{end}}
-<span>página {{.Pagina}} de {{.Paginas}}</span>
-{{if .Proxima}}<a href="{{.Proxima}}">mais antigas →</a>{{end}}
+<p class="ordem-nota">Pendências resolvidas, da mais recente para a mais antiga.</p>
+{{if .Itens}}<div class="pend-lista">{{range .Itens}}<a class="pend-sum hist-item" href="{{.Href}}">{{template "ic" "check"}}<span class="pend-chave">{{.P.ID}}</span><span class="selo selo-tipo">{{.P.Tipo}}</span><span class="pend-idade">{{.Quando}}</span><span class="pend-titulo">{{.P.Texto}}</span><span class="pend-estado">{{if not .P.TemDetalhe}}<span class="selo selo-apagado">[sem detalhe]</span>{{end}}</span></a>
+{{end}}</div>{{else}}<p class="vazio-linha vazio-caixa">Nenhuma pendência resolvida.</p>{{end}}
+<nav class="pager" aria-label="Páginas do histórico">
+{{if .Anterior}}<a class="btn" href="{{.Anterior}}"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>mais recentes</a>{{else}}<span></span>{{end}}
+<span class="apagado">página {{.Pagina}} de {{.Paginas}}</span>
+{{if .Proxima}}<a class="btn" href="{{.Proxima}}">mais antigas<svg class="ic ic-seguir" aria-hidden="true"><use href="#i-voltar"/></svg></a>{{else}}<span></span>{{end}}
 </nav>
 {{template "rodape" .}}{{end}}

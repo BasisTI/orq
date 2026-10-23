@@ -29,7 +29,7 @@ func BenchmarkVivo(b *testing.B) {
 	srv := &Servidor{St: st, Porta: 8080}
 	h := srv.Handler()
 	// O hash que a página tem: com ele a resposta traz tudo (barras, US, abas); com um velho, só o aviso.
-	rp := httptest.NewRequest("GET", "/central", nil)
+	rp := httptest.NewRequest("GET", "/", nil)
 	rp.Host = "127.0.0.1:8080"
 	wp := httptest.NewRecorder()
 	h.ServeHTTP(wp, rp)
@@ -66,7 +66,7 @@ func BenchmarkVivo(b *testing.B) {
 	})
 	b.Run("pagina", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			rq := httptest.NewRequest("GET", "/central", nil)
+			rq := httptest.NewRequest("GET", "/", nil)
 			rq.Host = "127.0.0.1:8080"
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, rq)
@@ -122,7 +122,7 @@ func semeada(t *testing.T) *cena {
 
 func TestVivoSoTemOobESemFormulario(t *testing.T) {
 	c := semeada(t)
-	code, html, h := c.vivo(queryDaPagina(t, c, "/central"), "/central")
+	code, html, h := c.vivo(queryDaPagina(t, c, "/"), "/central")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
@@ -142,35 +142,35 @@ func TestVivoSoTemOobESemFormulario(t *testing.T) {
 
 func TestVivoComHashVelhoAvisaEAtualizaSoOQueAPaginaTem(t *testing.T) {
 	c := semeada(t)
-	q := queryDaPagina(t, c, "/central")
+	q := queryDaPagina(t, c, "/")
 	// A página tem só as ondas 1 e 2 (a lista do servidor é maior) e um hash que não é o atual.
 	q.Set("v", "000000000000")
 	q.Set("o", "1,2")
 	q.Set("a", "aba-n-todos")
-	_, html, _ := c.vivo(q, "/central")
+	_, html, _ := c.vivo(q, "/")
 	contem(t, html, `id="aviso-lista"`, "A lista mudou", `id="situacao"`, `id="fontes"`, `id="onda-1-barra"`, `id="onda-2-barra"`, `id="aba-n-todos"`, `id="us-catalogo-404-barra"`)
 	naoContem(t, html, `id="onda-3-barra"`, `id="onda-9-barra"`, `id="aba-n-pendencias"`, `id="aba-n-p-nuvem"`, `id="us-nuvem-78-barra"`)
 	// lista inválida: nada é atualizado além da situação e das fontes, e o aviso aparece.
 	q.Set("o", "<x>")
-	_, html, _ = c.vivo(q, "/central")
+	_, html, _ = c.vivo(q, "/")
 	naoContem(t, html, "<x>", "<summary")
 	contem(t, html, "A lista mudou")
 }
 
 func TestVivoPendenciaNovaMudaOHash(t *testing.T) {
 	c := semeada(t)
-	antes := queryDaPagina(t, c, "/central")
-	_, html, _ := c.vivo(antes, "/central")
+	antes := queryDaPagina(t, c, "/")
+	_, html, _ := c.vivo(antes, "/")
 	naoContem(t, html, "A lista mudou")
 	_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: refsUS("catalogo", 406), Tipo: "duvida", Titulo: "nova", Autor: "w", Detalhe: "d", Slug: "n1", Hash: "n1"})
 	c.ok(err)
-	_, html, _ = c.vivo(antes, "/central")
+	_, html, _ = c.vivo(antes, "/")
 	contem(t, html, "A lista mudou", `id="us-catalogo-406-barra"`)
 	// Responder não muda a lista (a pendência segue na US), então não avisa.
-	depois := queryDaPagina(t, c, "/central")
+	depois := queryDaPagina(t, c, "/")
 	_, err = c.st.ResponderPendencia(c.ctx, nil, refs.Pend{US: refsUS("catalogo", 406), Numero: 1}, central.Resposta{Texto: "ok", Por: "ana"})
 	c.ok(err)
-	_, html, _ = c.vivo(depois, "/central")
+	_, html, _ = c.vivo(depois, "/")
 	naoContem(t, html, "A lista mudou")
 }
 
@@ -181,7 +181,7 @@ func TestVivoPorAbaDeProjeto(t *testing.T) {
 	contem(t, html, `id="onda-4-barra"`, `id="onda-7-barra"`)
 	naoContem(t, html, `id="onda-1-barra"`, "A lista mudou")
 	// O mesmo pedido, vindo da aba Todos, é de outra lista.
-	_, html, _ = c.vivo(q, "/central")
+	_, html, _ = c.vivo(q, "/")
 	contem(t, html, "A lista mudou")
 	naoContem(t, html, `id="onda-1-barra"`)
 }
@@ -221,7 +221,7 @@ func TestProjetoEAbas(t *testing.T) {
 
 func TestCentralPaginaSemInlineEComCSP(t *testing.T) {
 	c := semeada(t)
-	for _, p := range []string{"/central", "/projeto/catalogo", "/vivo"} {
+	for _, p := range []string{"/", "/pendencias", "/projeto/catalogo", "/vivo"} {
 		w := c.f.faz(req{metodo: "GET", caminho: p})
 		if w.Header().Get("Content-Security-Policy") != csp {
 			t.Errorf("%s sem a CSP exata", p)
@@ -233,10 +233,10 @@ func TestCentralPaginaSemInlineEComCSP(t *testing.T) {
 			t.Errorf("%s Cache-Control %q", p, w.Header().Get("Cache-Control"))
 		}
 	}
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	naoContem(t, html, "<details open", "wA:p", "sintetico-")
 	contem(t, html, "<progress")
-	for _, p := range []string{"/vivo", "/projeto/nuvem"} {
+	for _, p := range []string{"/vivo", "/projeto/nuvem", "/pendencias"} {
 		if w := c.f.faz(req{metodo: "POST", caminho: p, corpo: "x=1"}); w.Code != 405 {
 			t.Errorf("POST %s = %d", p, w.Code)
 		}
@@ -248,7 +248,7 @@ func TestCentralEscapaTextoHostil(t *testing.T) {
 	_, _ = c.coord("alfa", "wA:p1", "proj", 7, "")
 	u := refsUS("proj", 7)
 	c.taiga(u, `<script>alert(1)</script>`, `<img src=x onerror=alert(2)>`)
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	naoContem(t, html, "<script>alert", "<img src=x")
 	contem(t, html, "&lt;script&gt;alert(1)&lt;/script&gt;")
 }

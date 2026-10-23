@@ -55,7 +55,7 @@ func TestRegressaoMRMostraPipelineEAprovacao(t *testing.T) {
 	_, _, err := c.st.AdicionarMR(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, url)
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta"}, nil))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	row := linhaMR(t, html)
 	// A legenda geral na coluna lateral não informa a situação desta MR.
 	if !strings.Contains(row, "pipeline") || !strings.Contains(row, "aprovação") || strings.Count(row, "desconhecido") < 2 {
@@ -76,7 +76,7 @@ func TestRegressaoEscapeDeTodasAsFontes(t *testing.T) {
 	_, err = c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: u, Tipo: "duvida", Titulo: payload, Autor: "worker", Detalhe: payload, Slug: "s", Hash: "h"})
 	c.ok(err)
 	c.ok(c.st.RegistrarExternos(c.ctx, &co, u, []central.EventoExterno{{Tipo: "limpar.falhou", Detalhe: map[string]any{"motivo": payload}}}))
-	for _, path := range []string{"/central", fmt.Sprintf("/onda/%d", o.ID), "/", "/p/proj/7/1"} {
+	for _, path := range []string{"/", "/pendencias", fmt.Sprintf("/onda/%d", o.ID), "/p/proj/7/1"} {
 		code, html := c.get(path)
 		if code != 200 {
 			t.Errorf("%s: %d", path, code)
@@ -92,7 +92,7 @@ func TestRegressaoMetodosCabecalhosEIdentidade(t *testing.T) {
 	_, o := c.coord("alfa", "wA:p1", "proj", 7, "")
 	before, err := c.st.Diario(c.ctx, nil, central.FiltroDiario{})
 	c.ok(err)
-	for _, path := range []string{"/central", fmt.Sprintf("/onda/%d", o.ID)} {
+	for _, path := range []string{"/", "/pendencias", fmt.Sprintf("/onda/%d", o.ID)} {
 		for _, method := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 			w := c.f.faz(req{metodo: method, caminho: path})
 			want := http.StatusMethodNotAllowed
@@ -150,7 +150,7 @@ func TestRegressaoCacheFalhouEAposPrazo(t *testing.T) {
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{}, &central.Erro{Codigo: "falha_comando"}))
 	future := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return future }
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	contem(t, html, ">pronta<", "falhou: falha_comando", "trabalhando", "Dados vencidos")
 	if n := strings.Count(html, `title="o cache passou do prazo da fonte"`); n < 5 {
 		t.Errorf("só %d fontes/valores marcados", n)
@@ -177,7 +177,7 @@ func TestMRMostraPipelineEAprovacaoDoCache(t *testing.T) {
 		c.ok(err)
 		c.ok(c.st.GravarMR(c.ctx, url, k.valor, nil))
 	}
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	for _, k := range casos {
 		_, resto, _ := strings.Cut(html, fmt.Sprintf("repo#%d</b>", k.pr))
 		linha, _, _ := strings.Cut(resto, "</li>")
@@ -265,7 +265,7 @@ func TestCentralMostraFalhaDaConsultaExtra(t *testing.T) {
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta", Pipeline: "sucesso", Aprovacao: "aprovada"}, nil))
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	row := linhaMR(t, html)
 	for _, quer := range []string{">sucesso<", ">aprovada<", "consulta extra falhou: falha_comando"} {
 		if !strings.Contains(row, quer) {

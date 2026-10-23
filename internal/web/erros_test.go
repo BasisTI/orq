@@ -55,13 +55,13 @@ func TestSemUsuarioNoSocketUnixDevolve401EmHTML(t *testing.T) {
 
 func TestCentralVaziaMostraOBanner(t *testing.T) {
 	c := vazia(t, false)
-	code, html := c.get("/central")
+	code, html := c.get("/")
 	if code != 200 {
 		t.Fatal(code)
 	}
 	contem(t, html, `class="banner"`, "Nenhuma onda aberta", "Nenhum coordenador registrado")
 	_, o := c.coord("alfa", "wA:p1", "proj", 7, "")
-	_, html = c.get("/central")
+	_, html = c.get("/")
 	naoContem(t, html, `class="banner"`, "orq-banner-light.png")
 	_, html = c.get(fmt.Sprintf("/onda/%d", o.ID))
 	naoContem(t, html, `class="banner"`, "orq-banner-light.png") // o banner nunca aparece com dados

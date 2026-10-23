@@ -89,7 +89,7 @@ func naoContem(t *testing.T, html string, nao ...string) {
 
 func TestCentralSemCoordenadores(t *testing.T) {
 	c := vazia(t, false)
-	code, html := c.get("/central")
+	code, html := c.get("/")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
@@ -115,7 +115,7 @@ func TestCentralUmCoordenador(t *testing.T) {
 	_, err = c.st.ResponderPendencia(c.ctx, nil, refs.Pend{US: u, Numero: 2}, central.Resposta{Opcao: new(1), Texto: "sim", Por: "ana"})
 	c.ok(err)
 
-	code, html := c.get("/central")
+	code, html := c.get("/")
 	if code != 200 {
 		t.Fatalf("status %d: %s", code, html)
 	}
@@ -135,7 +135,7 @@ func TestCentralTresCoordenadores(t *testing.T) {
 	for i, n := range []string{"um", "dois", "tres"} {
 		c.coord(n, fmt.Sprintf("wA:p%d", i+1), "proj", 10+i, "")
 	}
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	if got := strings.Count(html, `<details class="onda"`); got != 3 {
 		t.Errorf("%d ondas na página, quer 3", got)
 	}
@@ -152,7 +152,7 @@ func TestCentralOndaConcluida(t *testing.T) {
 	co, _ := c.coord("alfa", "wA:p1", "proj", 7, "plano")
 	_, _, err := c.st.AtualizarStatus(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, central.MudancaStatus{Status: "done"})
 	c.ok(err)
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	contem(t, html, "1/1", "1 onda concluída")
 	if n := strings.Count(html, "concluída</span>"); n != 2 {
 		t.Errorf("selo concluída ×%d, quer o da onda e o da legenda", n)
@@ -161,7 +161,7 @@ func TestCentralOndaConcluida(t *testing.T) {
 	// Uma onda com US pendente não ganha o selo.
 	c2 := vazia(t, false)
 	c2.coord("beta", "wA:p2", "proj", 8, "plano")
-	_, html = c2.get("/central")
+	_, html = c2.get("/")
 	naoContem(t, html, "1 onda concluída")
 	// A legenda da coluna lateral tem um "concluída"; a onda concluída teria dois.
 	if n := strings.Count(html, "concluída</span>"); n != 1 {
@@ -174,7 +174,7 @@ func TestCentralMRSemEstado(t *testing.T) {
 	co, _ := c.coord("alfa", "wA:p1", "proj", 7, "")
 	_, _, err := c.st.AdicionarMR(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, "https://github.com/Exemplo/repo/pull/21")
 	c.ok(err)
-	code, html := c.get("/central")
+	code, html := c.get("/")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
@@ -193,14 +193,14 @@ func TestCentralCacheVencido(t *testing.T) {
 	c.taiga(u, "Titulo", "New")
 	c.herdr(map[string]central.PaneHerdr{"wA:p9": {Status: "idle", WorkspaceID: "wA"}})
 
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	naoContem(t, html, "Dados vencidos", `title="o cache passou do prazo da fonte"`)
 	contem(t, html, "agora", "ocioso")
 
 	// Uma hora depois, sem o daemon, tudo passou do prazo e aparece como vencido.
 	depois := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return depois }
-	_, html = c.get("/central")
+	_, html = c.get("/")
 	contem(t, html, "Dados vencidos: herdr (1 h), mr (1 h), taiga (1 h)", "há 1 h")
 	// 3 fontes na coluna lateral, o agente, o Taiga da US e a MR (a MR duas vezes: estado e valores).
 	if n := strings.Count(html, `title="o cache passou do prazo da fonte"`); n < 6 {
@@ -213,7 +213,7 @@ func TestCentralVencidoRecenteDaSegundos(t *testing.T) {
 	c.herdr(map[string]central.PaneHerdr{})
 	depois := time.Now().Add(30 * time.Second)
 	c.f.srv.Agora = func() time.Time { return depois }
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	if !regexp.MustCompile(`há \d+ s`).MatchString(html) {
 		t.Error("o vencido de menos de um minuto deveria dar a idade em segundos")
 	}
@@ -227,7 +227,7 @@ func TestCentralErroDeFonteNaoApagaOValor(t *testing.T) {
 	u := refs.US{Projeto: "proj", Ref: 7}
 	c.taiga(u, "Titulo", "New")
 	c.ok(c.st.GravarCache(c.ctx, central.FonteTaiga, u.Chave(), nil, &central.Erro{Codigo: "autenticacao", Mensagem: "token <b>x</b>", Em: time.Now().UTC().Format(time.RFC3339)}))
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	contem(t, html, "Titulo", "New", "falhou: autenticacao")
 	naoContem(t, html, "token <b>")
 }
@@ -241,7 +241,7 @@ func TestCentralHerdrSoMostraEstado(t *testing.T) {
 		"wA:p1": {Status: "done", Nome: "coord-nome", WorkspaceID: "wA-ws"},
 		"wA:p9": {Status: "blocked", Agente: "claude", Nome: "worker-nome", WorkspaceID: "wA-ws"},
 	})
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	contem(t, html, "bloqueado", "estado do agente: blocked")
 	naoContem(t, html, "wA:p", "coord-nome", "worker-nome", "wA-ws")
 }
@@ -314,7 +314,7 @@ func TestOndaEncerradaAindaTemDiario(t *testing.T) {
 	c.ok(err)
 	_, err = c.st.EncerrarOnda(c.ctx, "alfa", o.ID)
 	c.ok(err)
-	_, html := c.get("/central")
+	_, html := c.get("/")
 	naoContem(t, html, "Onda de alfa") // /central traz só as abertas, como o snapshot
 	code, html := c.get(fmt.Sprintf("/onda/%d", o.ID))
 	if code != 200 {
@@ -326,7 +326,7 @@ func TestOndaEncerradaAindaTemDiario(t *testing.T) {
 func TestCentralEOndaSoLeitura(t *testing.T) {
 	c := vazia(t, false)
 	_, o := c.coord("alfa", "wA:p1", "proj", 7, "")
-	for _, p := range []string{"/central", fmt.Sprintf("/onda/%d", o.ID)} {
+	for _, p := range []string{"/", "/pendencias", fmt.Sprintf("/onda/%d", o.ID)} {
 		w := c.f.faz(req{metodo: "POST", caminho: p, corpo: "x=1"})
 		if w.Code != 405 {
 			t.Errorf("POST %s = %d, quer 405", p, w.Code)
@@ -337,7 +337,7 @@ func TestCentralEOndaSoLeitura(t *testing.T) {
 func TestCentralMesmosCabecalhosEAutenticacao(t *testing.T) {
 	c := vazia(t, true)
 	_, o := c.coord("alfa", "wA:p1", "proj", 7, "")
-	for _, p := range []string{"/central", fmt.Sprintf("/onda/%d", o.ID), "/"} {
+	for _, p := range []string{"/", "/pendencias", fmt.Sprintf("/onda/%d", o.ID)} {
 		w := c.f.faz(req{metodo: "GET", caminho: p})
 		if w.Code != 200 {
 			t.Fatalf("GET %s = %d", p, w.Code)
@@ -362,7 +362,7 @@ func TestCentralVaziaComCoordenadorRegistrado(t *testing.T) {
 	c := vazia(t, false)
 	_, err := c.st.RegistrarCoord(c.ctx, central.Registro{Nome: "alfa", Pane: "wA:p1", Projeto: "proj"})
 	c.ok(err)
-	code, html := c.get("/central")
+	code, html := c.get("/")
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
@@ -370,6 +370,6 @@ func TestCentralVaziaComCoordenadorRegistrado(t *testing.T) {
 	naoContem(t, html, "Nenhum coordenador registrado")
 	// Com uma onda, o banner some.
 	c.coord("beta", "wA:p2", "proj", 7, "")
-	_, html = c.get("/central")
+	_, html = c.get("/")
 	naoContem(t, html, `class="banner"`)
 }
