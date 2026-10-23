@@ -366,6 +366,100 @@ if (caso === 'vivo no meio da fila') {
   await c.ctx.close();
 }
 
+// S2 (r2 da revisão): o toque repetido em Enviar não gera envio a mais nem deixa um envio fantasma
+// que prenda os filtros. Os toques extras entram por requestSubmit, porque o botão fica desabilitado
+// depois do primeiro. M2a: enquanto a fila espera, a página diz isso.
+if (caso === 'toque repetido') {
+  const c = await abrir();
+  const { pagina } = c;
+  const ids = ['nuvem-78-1', 'nuvem-78-2'];
+  await pagina.goto(base + '/pendencias?projeto=nuvem', { waitUntil: 'networkidle' });
+  for (const id of ids) await preencher(pagina, id, `texto ${id}`);
+  const g = await segurar(pagina);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await g.primeira;
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  for (let i = 0; i < 3; i++) await pagina.evaluate(() => document.querySelector('#pend-nuvem-78-2 form').requestSubmit());
+  await pagina.selectOption('#f-projeto', 'catalogo');
+  await pagina.waitForTimeout(300);
+  const e = await pagina.evaluate(() => ({
+    url: location.pathname + location.search, espera: document.querySelector('#espera')?.textContent,
+    busy: document.querySelector('#principal').getAttribute('aria-busy'), btn: document.querySelector('#pend-nuvem-78-2 button[type=submit]').disabled,
+  }));
+  if (e.url !== '/pendencias?projeto=nuvem') falha(`toque repetido: o filtro trocou a página com envio na fila (${e.url})`);
+  if (!e.espera || !e.busy) falha(`toque repetido: a espera não foi indicada (${JSON.stringify(e)})`);
+  if (!e.btn) falha('toque repetido: o botão do envio na fila continua habilitado');
+  g.soltar();
+  await pagina.waitForURL('**/pendencias?projeto=catalogo', { timeout: 8000 }).catch(() => {});
+  await pagina.waitForTimeout(500);
+  const f = await pagina.evaluate(() => ({ url: location.pathname + location.search, espera: document.querySelector('#espera')?.textContent, busy: document.querySelector('#principal').getAttribute('aria-busy') }));
+  if (f.url !== '/pendencias?projeto=catalogo') falha(`toque repetido: o filtro ficou preso depois dos envios (${f.url})`);
+  if (f.espera || f.busy) falha(`toque repetido: a espera não sumiu (${JSON.stringify(f)})`);
+  if (g.posts.length !== 2) falha(`toque repetido: ${g.posts.length} POSTs, esperava 2`);
+  coerente(await estado(pagina), 'toque repetido');
+  const gr = await gravadas(ids);
+  if (gr.length !== 2) falha(`toque repetido: ${gr.length} respostas gravadas de 2 (${gr})`);
+  await pagina.selectOption('#f-projeto', 'nuvem');
+  await pagina.waitForURL('**/pendencias?projeto=nuvem', { timeout: 8000 }).catch(() => {});
+  if ((await pagina.evaluate(() => location.search)) !== '?projeto=nuvem') falha('toque repetido: o segundo filtro não passou');
+  await saude(c, 'toque repetido');
+  await c.ctx.close();
+}
+
+// S2, defesa em profundidade: um envio que o htmx abandona (formulário fora da página, sem
+// htmx:afterRequest) não prende os filtros.
+if (caso === 'envio abandonado') {
+  const c = await abrir();
+  const { pagina } = c;
+  await pagina.goto(base + '/pendencias', { waitUntil: 'networkidle' });
+  await pagina.evaluate(() => {
+    const f = document.createElement('form');
+    f.className = 'resposta';
+    f.setAttribute('hx-post', '/nada');
+    document.body.appendChild(f);
+    f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    f.remove();
+  });
+  await pagina.selectOption('#f-projeto', 'catalogo');
+  await pagina.waitForURL('**/pendencias?projeto=catalogo', { timeout: 5000 }).catch(() => {});
+  if ((await pagina.evaluate(() => location.search)) !== '?projeto=catalogo') falha('envio abandonado: o filtro ficou preso por um envio fantasma');
+  await saude(c, 'envio abandonado');
+  await c.ctx.close();
+}
+
+// M2b: o que estava escolhido no clique é o que vai ao servidor, mesmo que o campo mude (aqui por
+// script, porque os campos ficam travados) enquanto o envio espera na fila.
+if (caso === 'campos fixados') {
+  const c = await abrir();
+  const { pagina } = c;
+  const corpos = [];
+  pagina.on('request', (r) => { if (r.url().includes('/responder')) corpos.push(r.postData()); });
+  await pagina.goto(base + '/pendencias?projeto=nuvem', { waitUntil: 'networkidle' });
+  await preencher(pagina, 'nuvem-78-1', 'texto nuvem-78-1');
+  await abrirItem(pagina, 'nuvem-78-2');
+  await pagina.check('#pend-nuvem-78-2 input[name=opcao][value="1"]');
+  await pagina.fill('#pend-nuvem-78-2 textarea', 'texto do clique');
+  const g = await segurar(pagina);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await g.primeira;
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  const t = await pagina.evaluate(() => {
+    const f = document.querySelector('#pend-nuvem-78-2 form');
+    const ta = f.querySelector('textarea'), r2 = f.querySelector('input[name=opcao][value="2"]');
+    const travado = ta.readOnly && r2.disabled;
+    ta.value = 'editado depois do clique';
+    r2.checked = true;
+    return travado;
+  });
+  if (!t) falha('campos fixados: os campos do envio na fila não ficaram travados');
+  g.soltar();
+  await pagina.waitForFunction(() => document.querySelectorAll('#lista-resp .pend-ok').length >= 2, null, { timeout: 8000 }).catch(() => {});
+  const dois = corpos[1] ? new URLSearchParams(corpos[1]) : null;
+  if (!dois || dois.get('opcao') !== '1' || dois.get('texto') !== 'texto do clique') falha(`campos fixados: o segundo POST levou ${corpos[1]}`);
+  await saude(c, 'campos fixados');
+  await c.ctx.close();
+}
+
 await navegador.close();
 console.log(JSON.stringify({ problemas }));
 process.exit(problemas.length ? 1 : 0);
