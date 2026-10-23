@@ -56,7 +56,8 @@
 
 {{define "vivo-pend"}}{{template "fontes" .}}
 {{range .Abas}}{{template "aba-n" .}}{{end}}
-{{if .Igual}}{{if .Grupos}}<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.NEsp}}</span>
+{{if .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true"></div>
+{{if .Grupos}}<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.NEsp}}</span>
 <span class="grupo-n" id="grupo-n-resp" hx-swap-oob="true">{{.NResp}}</span>
 {{end}}{{else}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
 {{end}}{{end}}

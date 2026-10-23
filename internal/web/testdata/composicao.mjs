@@ -250,6 +250,122 @@ if (caso === 'concorrente na Central') {
   await c.ctx.close();
 }
 
+// S1 e M1 (#28 r2): a fila de envios (hx-sync "queue all") guarda pedidos presos ao formulário, e o
+// htmx descarta o que sai da fila com o formulário já fora da página. Por isso filtrar ou usar o
+// Voltar com envio na fila espera a fila acabar: nenhum envio some, o texto não enviado fica até lá.
+// A rota segura a primeira resposta (depois de o servidor gravar) até a página tentar sair.
+const preencher = async (pagina, id, texto) => {
+  await abrirItem(pagina, id);
+  await pagina.fill(`#pend-${id} textarea`, texto);
+  if (await pagina.locator(`#pend-${id} input[name=opcao]`).count()) await pagina.check(`#pend-${id} input[name=opcao][value="1"]`);
+};
+const segurar = async (pagina) => {
+  const posts = [];
+  let soltar;
+  const portao = new Promise((r) => { soltar = r; });
+  let pronto;
+  const primeira = new Promise((r) => { pronto = r; });
+  await pagina.route('**/responder', async (rota) => {
+    const i = posts.length;
+    posts.push(rota.request().url());
+    const resposta = await rota.fetch();
+    if (i === 0) { pronto(); await portao; }
+    await rota.fulfill({ response: resposta });
+  });
+  return { posts, soltar, primeira };
+};
+const gravadas = async (id) => {
+  const c = await abrir();
+  await c.pagina.goto(base + '/pendencias', { waitUntil: 'networkidle' });
+  const r = await estado(c.pagina);
+  await c.ctx.close();
+  return id.filter((x) => r.resp.includes(`pend-${x}`));
+};
+
+if (caso === 'cascata') {
+  const c = await abrir();
+  const { pagina } = c;
+  const ids = ['nuvem-78-1', 'nuvem-78-2', 'catalogo-405-1'];
+  await pagina.goto(base + '/pendencias', { waitUntil: 'networkidle' });
+  for (const id of ids) await preencher(pagina, id, `texto ${id}`);
+  const g = await segurar(pagina);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await g.primeira;
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  await pagina.click('#pend-catalogo-405-1 button[type=submit]');
+  await pagina.selectOption('#f-projeto', 'catalogo');
+  await pagina.waitForTimeout(400);
+  let e = await pagina.evaluate(() => ({ url: location.pathname + location.search, textos: [...document.querySelectorAll('form.resposta textarea')].map((t) => t.value) }));
+  if (e.url !== '/pendencias') falha(`cascata: o filtro trocou a página com envio na fila (${e.url})`);
+  if (!e.textos.includes('texto nuvem-78-2') || !e.textos.includes('texto catalogo-405-1')) falha(`cascata: o texto dos envios na fila sumiu (${e.textos})`);
+  g.soltar();
+  await pagina.waitForURL('**/pendencias?projeto=catalogo');
+  await pagina.waitForTimeout(600);
+  if (g.posts.length !== 3) falha(`cascata: ${g.posts.length} POSTs, esperava 3`);
+  const f = await estado(pagina);
+  coerente(f, 'cascata (depois do filtro)');
+  const gr = await gravadas(ids);
+  if (gr.length !== 3) falha(`cascata: ${gr.length} respostas gravadas de 3 (${gr})`);
+  await saude(c, 'cascata');
+  await c.ctx.close();
+}
+
+if (caso === 'voltar') {
+  const c = await abrir();
+  const { pagina } = c;
+  const ids = ['nuvem-78-1', 'nuvem-78-2'];
+  await pagina.goto(base + '/pendencias', { waitUntil: 'networkidle' });
+  await pagina.selectOption('#f-projeto', 'nuvem');
+  await pagina.waitForURL('**/pendencias?projeto=nuvem');
+  for (const id of ids) await preencher(pagina, id, `texto ${id}`);
+  const g = await segurar(pagina);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await g.primeira;
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  await pagina.goBack();
+  await pagina.waitForURL('**/pendencias');
+  await pagina.waitForTimeout(400);
+  const e = await pagina.evaluate(() => [...document.querySelectorAll('form.resposta textarea')].map((t) => t.value));
+  if (!e.includes('texto nuvem-78-2')) falha(`voltar: a página foi restaurada com envio na fila (${e})`);
+  g.soltar();
+  await pagina.waitForFunction(() => !document.querySelector('#f-projeto')?.value, null, { timeout: 8000 }).catch(() => {});
+  await pagina.waitForTimeout(600);
+  if (g.posts.length !== 2) falha(`voltar: ${g.posts.length} POSTs, esperava 2`);
+  const f = await estado(pagina);
+  coerente(f, 'voltar (depois de restaurar)');
+  if (await pagina.evaluate(() => document.querySelector('#f-projeto')?.value) !== '') falha('voltar: o histórico não foi restaurado depois da fila');
+  const gr = await gravadas(ids);
+  if (gr.length !== 2) falha(`voltar: ${gr.length} respostas gravadas de 2 (${gr})`);
+  await saude(c, 'voltar');
+  await c.ctx.close();
+}
+
+// M1 (r1 da revisão): um /vivo no meio da fila vê a gravação que o #comp ainda não tem e avisa; o
+// aviso sai no ciclo seguinte à fila, quando a composição volta a bater.
+if (caso === 'vivo no meio da fila') {
+  const c = await abrir();
+  const { pagina } = c;
+  const ids = ['nuvem-78-1', 'nuvem-78-2'];
+  await pagina.goto(base + '/pendencias?projeto=nuvem', { waitUntil: 'networkidle' });
+  for (const id of ids) await preencher(pagina, id, `texto ${id}`);
+  const g = await segurar(pagina);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await g.primeira;
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  await ciclo(pagina);
+  if (!(await estado(pagina)).aviso?.startsWith('A lista mudou')) falha('vivo no meio da fila: o ciclo no meio da fila não viu a diferença');
+  g.soltar();
+  await pagina.waitForFunction(() => document.querySelectorAll('#lista-resp .pend-ok').length >= 2, null, { timeout: 8000 }).catch(() => {});
+  await pagina.waitForTimeout(400);
+  coerente(await estado(pagina), 'vivo no meio da fila');
+  await ciclo(pagina);
+  const e = await estado(pagina);
+  coerente(e, 'vivo no meio da fila (depois do ciclo)');
+  if (e.aviso) falha(`vivo no meio da fila: o aviso ficou preso (${e.aviso})`);
+  await saude(c, 'vivo no meio da fila');
+  await c.ctx.close();
+}
+
 await navegador.close();
 console.log(JSON.stringify({ problemas }));
 process.exit(problemas.length ? 1 : 0);
