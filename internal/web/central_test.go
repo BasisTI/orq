@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -92,8 +93,8 @@ func TestCentralSemCoordenadores(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	contem(t, html, "Nenhum coordenador registrado", `http-equiv="refresh" content="30"`, "herdr", "sem dado")
-	naoContem(t, html, "vencido")
+	contem(t, html, "Nenhuma onda aberta", "banner-cartao", `id="vivo"`, `hx-swap="none"`, "Idade dos dados", "sem dado", "<b>0</b> ondas abertas")
+	naoContem(t, html, "Dados vencidos", `title="o cache passou do prazo da fonte"`, `http-equiv="refresh"`)
 }
 
 func TestCentralUmCoordenador(t *testing.T) {
@@ -104,7 +105,9 @@ func TestCentralUmCoordenador(t *testing.T) {
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, "https://github.com/Exemplo/repo/pull/20", central.ValorMR{Estado: "pronta"}, nil))
 	c.taiga(u, "Exportar a folha", "In progress")
-	c.herdr(map[string]central.PaneHerdr{"wA:p1": {Status: "working", Agente: "claude", Nome: "nome-secreto", WorkspaceID: "wA"}})
+	_, _, err = c.st.AtualizarStatus(c.ctx, &co, u, central.MudancaStatus{Status: "exec", Pane: ptr("wA:p9")})
+	c.ok(err)
+	c.herdr(map[string]central.PaneHerdr{"wA:p9": {Status: "working", Agente: "claude", Nome: "nome-secreto", WorkspaceID: "wA"}})
 	for i, tipo := range []string{"duvida", "autorizacao"} {
 		_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: u, Tipo: tipo, Titulo: fmt.Sprintf("pergunta %d", i+1), Autor: "w", Detalhe: "d", Slug: fmt.Sprintf("s%d", i), Hash: fmt.Sprintf("h%d", i)})
 		c.ok(err)
@@ -117,13 +120,14 @@ func TestCentralUmCoordenador(t *testing.T) {
 		t.Fatalf("status %d: %s", code, html)
 	}
 	contem(t, html,
-		"alfa", "Onda de alfa", fmt.Sprintf(`href="/onda/%d"`, o.ID), "até merge", "ordem livre",
-		"TG-7", "Exportar a folha", "In progress", "wait",
-		"pull/20", "pronta", "agente working",
-		"<strong>1</strong> abertas · <strong>1</strong> respondidas",
+		"alfa", "Onda de alfa", fmt.Sprintf(`href="/onda/%d"`, o.ID), "até merge · livre",
+		"TG-7", "Exportar a folha", "In progress", ">execução<",
+		"repo#20", ">espera merge<", "1 MR espera merge", "trabalhando", "estado do agente: working",
 		`href="/p/proj/7/1"`, `href="/p/proj/7/2"`, "respondida",
+		// A respondida sai de "esperam você": sobra uma, na onda, na US, na situação e na aba.
+		"1 espera você", "1 pendência espera você",
 	)
-	naoContem(t, html, "wA:p1", "nome-secreto", `"versao"`, "sem estado", "vencido")
+	naoContem(t, html, "wA:p", "nome-secreto", `"versao"`, "sem estado", "2 esperam você")
 }
 
 func TestCentralTresCoordenadores(t *testing.T) {
@@ -132,16 +136,15 @@ func TestCentralTresCoordenadores(t *testing.T) {
 		c.coord(n, fmt.Sprintf("wA:p%d", i+1), "proj", 10+i, "")
 	}
 	_, html := c.get("/central")
-	for _, n := range []string{"um", "dois", "tres"} {
-		contem(t, html, "<h2>"+n)
+	if got := strings.Count(html, `<details class="onda"`); got != 3 {
+		t.Errorf("%d ondas na página, quer 3", got)
 	}
-	if got := strings.Count(html, `class="coord"`); got != 3 {
-		t.Errorf("%d coordenadores na página, quer 3", got)
+	// Sem nada que peça atenção, a ordem é a do id (a do snapshot).
+	i1, i2, i3 := strings.Index(html, "Onda de um"), strings.Index(html, "Onda de dois"), strings.Index(html, "Onda de tres")
+	if i1 < 0 || i1 > i2 || i2 > i3 {
+		t.Error("ondas fora da ordem do snapshot")
 	}
-	// Ordem: por nome, a do snapshot.
-	if strings.Index(html, "<h2>dois") > strings.Index(html, "<h2>tres") || strings.Index(html, "<h2>dois") > strings.Index(html, "<h2>um") {
-		t.Error("coordenadores fora da ordem do snapshot")
-	}
+	contem(t, html, "<b>3</b> ondas abertas")
 }
 
 func TestCentralOndaConcluida(t *testing.T) {
@@ -150,13 +153,20 @@ func TestCentralOndaConcluida(t *testing.T) {
 	_, _, err := c.st.AtualizarStatus(c.ctx, &co, refs.US{Projeto: "proj", Ref: 7}, central.MudancaStatus{Status: "done"})
 	c.ok(err)
 	_, html := c.get("/central")
-	contem(t, html, "concluída", "1/1 prontas")
+	contem(t, html, "1/1", "1 onda concluída")
+	if n := strings.Count(html, "concluída</span>"); n != 2 {
+		t.Errorf("selo concluída ×%d, quer o da onda e o da legenda", n)
+	}
 
 	// Uma onda com US pendente não ganha o selo.
 	c2 := vazia(t, false)
 	c2.coord("beta", "wA:p2", "proj", 8, "plano")
 	_, html = c2.get("/central")
-	naoContem(t, html, "concluída")
+	naoContem(t, html, "1 onda concluída")
+	// A legenda da coluna lateral tem um "concluída"; a onda concluída teria dois.
+	if n := strings.Count(html, "concluída</span>"); n != 1 {
+		t.Errorf("selo concluída ×%d, quer só o da legenda", n)
+	}
 }
 
 func TestCentralMRSemEstado(t *testing.T) {
@@ -168,8 +178,7 @@ func TestCentralMRSemEstado(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	contem(t, html, "pull/21", "sem estado", "sem dado")
-	naoContem(t, html, "selo-mr-")
+	contem(t, html, "repo#21", "selo-tracejado", ">sem estado<", "sem dado")
 }
 
 func TestCentralCacheVencido(t *testing.T) {
@@ -178,21 +187,24 @@ func TestCentralCacheVencido(t *testing.T) {
 	u := refs.US{Projeto: "proj", Ref: 7}
 	_, _, err := c.st.AdicionarMR(c.ctx, &co, u, "https://github.com/Exemplo/repo/pull/20")
 	c.ok(err)
+	_, _, err = c.st.AtualizarStatus(c.ctx, &co, u, central.MudancaStatus{Status: "exec", Pane: ptr("wA:p9")})
+	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, "https://github.com/Exemplo/repo/pull/20", central.ValorMR{Estado: "aberta"}, nil))
 	c.taiga(u, "Titulo", "New")
-	c.herdr(map[string]central.PaneHerdr{"wA:p1": {Status: "idle", WorkspaceID: "wA"}})
+	c.herdr(map[string]central.PaneHerdr{"wA:p9": {Status: "idle", WorkspaceID: "wA"}})
 
 	_, html := c.get("/central")
-	naoContem(t, html, "vencido")
-	contem(t, html, "agora", "agente idle")
+	naoContem(t, html, "Dados vencidos", `title="o cache passou do prazo da fonte"`)
+	contem(t, html, "agora", "ocioso")
 
 	// Uma hora depois, sem o daemon, tudo passou do prazo e aparece como vencido.
 	depois := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return depois }
 	_, html = c.get("/central")
-	contem(t, html, "há 1 h · vencido", "idade-vencida", "selo-vencido")
-	if n := strings.Count(html, "idade-vencida"); n < 5 { // 3 fontes + Taiga da US + MR
-		t.Errorf("%d marcas de vencido, quer ao menos 5", n)
+	contem(t, html, "Dados vencidos: herdr (1 h), mr (1 h), taiga (1 h)", "há 1 h")
+	// 3 fontes na coluna lateral, o agente, o Taiga da US e a MR (a MR duas vezes: estado e valores).
+	if n := strings.Count(html, `title="o cache passou do prazo da fonte"`); n < 6 {
+		t.Errorf("%d marcas de vencido, quer ao menos 6", n)
 	}
 }
 
@@ -202,8 +214,11 @@ func TestCentralVencidoRecenteDaSegundos(t *testing.T) {
 	depois := time.Now().Add(30 * time.Second)
 	c.f.srv.Agora = func() time.Time { return depois }
 	_, html := c.get("/central")
-	contem(t, html, " s · vencido")
-	naoContem(t, html, "agora · vencido")
+	if !regexp.MustCompile(`há \d+ s`).MatchString(html) {
+		t.Error("o vencido de menos de um minuto deveria dar a idade em segundos")
+	}
+	contem(t, html, "Dados vencidos: herdr (")
+	naoContem(t, html, "Dados vencidos: herdr (agora")
 }
 
 func TestCentralErroDeFonteNaoApagaOValor(t *testing.T) {
@@ -227,11 +242,22 @@ func TestCentralHerdrSoMostraEstado(t *testing.T) {
 		"wA:p9": {Status: "blocked", Agente: "claude", Nome: "worker-nome", WorkspaceID: "wA-ws"},
 	})
 	_, html := c.get("/central")
-	contem(t, html, "agente done", "agente blocked")
+	contem(t, html, "bloqueado", "estado do agente: blocked")
 	naoContem(t, html, "wA:p", "coord-nome", "worker-nome", "wA-ws")
 }
 
 func ptr(s string) *string { return &s }
+
+// linhaMR devolve o primeiro <li class="mr"> da página.
+func linhaMR(t *testing.T, html string) string {
+	t.Helper()
+	_, row, ok := strings.Cut(html, `<li class="mr">`)
+	if !ok {
+		t.Fatal("MR ausente")
+	}
+	row, _, _ = strings.Cut(row, "</li>")
+	return row
+}
 
 func TestOndaDiarioEscapadoEPaginado(t *testing.T) {
 	c := vazia(t, false)
@@ -329,4 +355,21 @@ func TestCentralMesmosCabecalhosEAutenticacao(t *testing.T) {
 			t.Errorf("GET %s sem usuário = %d, quer 401", p, sem.Code)
 		}
 	}
+}
+
+// A tela vazia é a ausência global de ondas abertas (spec §10), mesmo com coordenador registrado.
+func TestCentralVaziaComCoordenadorRegistrado(t *testing.T) {
+	c := vazia(t, false)
+	_, err := c.st.RegistrarCoord(c.ctx, central.Registro{Nome: "alfa", Pane: "wA:p1", Projeto: "proj"})
+	c.ok(err)
+	code, html := c.get("/central")
+	if code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	contem(t, html, `class="banner-cartao"`, "orq-banner-light.png", "Nenhuma onda aberta", "Coordenadores registrados, sem onda aberta: <strong>alfa</strong>", `id="vivo"`)
+	naoContem(t, html, "Nenhum coordenador registrado")
+	// Com uma onda, o banner some.
+	c.coord("beta", "wA:p2", "proj", 7, "")
+	_, html = c.get("/central")
+	naoContem(t, html, "banner-cartao")
 }

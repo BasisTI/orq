@@ -3,12 +3,10 @@ package web
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/BasisTI/orq/internal/central"
@@ -31,26 +29,7 @@ type Frescor struct {
 }
 
 func (s *Servidor) frescor(fonte string, atualizadoEm *string, erro *central.Erro) Frescor {
-	f := Frescor{}
-	if atualizadoEm == nil {
-		f.Nunca = true
-	} else {
-		f.Idade = central.Idade(*atualizadoEm, s.agora())
-		f.Vencido = central.Vencido(fonte, atualizadoEm, s.agora())
-		// "agora" ao lado de "vencido" se contradiz (o prazo do Herdr é de 15 s): dá os segundos.
-		if t, err := time.Parse(time.RFC3339, *atualizadoEm); err == nil && f.Vencido && s.agora().Sub(t) < time.Minute {
-			f.Idade = fmt.Sprintf("há %d s", int(s.agora().Sub(t)/time.Second))
-		}
-	}
-	if erro != nil {
-		f.Erro = erro.Codigo
-	}
-	return f
-}
-
-type fonteVista struct {
-	Nome string
-	Frescor
+	return frescorEm(s.agora(), fonte, atualizadoEm, erro)
 }
 
 type pendLink struct {
@@ -181,26 +160,6 @@ func (s *Servidor) agente(h *central.Herdr) (string, bool) {
 	return *h.Status, central.Vencido(central.FonteHerdr, h.AtualizadoEm, s.agora())
 }
 
-func (s *Servidor) central(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.St.Snapshot(r.Context(), false)
-	if err != nil {
-		s.falha(w, r, err, "/")
-		return
-	}
-	var fontes []fonteVista
-	for _, nome := range central.Fontes {
-		if f, ok := snap.Fontes[nome]; ok {
-			fontes = append(fontes, fonteVista{Nome: nome, Frescor: s.frescor(nome, f.AtualizadoEm, f.Erro)})
-		}
-	}
-	s.pagina(w, http.StatusOK, "central", struct {
-		base
-		Coords []coordVista
-		Fontes []fonteVista
-		Gerado string
-	}{base{Titulo: "Central", Usuario: usuarioDe(r), Recarregar: true, Ativa: "central", Larga: true}, s.vistaCoords(snap), fontes, s.quando(snap.GeradoEm)})
-}
-
 type eventoVista struct {
 	Quando, Tipo, US, Detalhe string
 	Cortado                   bool
@@ -213,7 +172,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	snap, err := s.St.Snapshot(ctx, true)
+	snap, err := s.fonte().Snapshot(ctx, true)
 	if err != nil {
 		s.falha(w, r, err, "/central")
 		return
@@ -235,7 +194,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	pagina, _ := strconv.Atoi(r.FormValue("pagina"))
 	pagina = max(pagina, 1)
 	f := central.FiltroDiario{OndaID: id}
-	total, err := s.St.ContarDiario(ctx, nil, f)
+	total, err := s.fonte().ContarDiario(ctx, nil, f)
 	if err != nil {
 		s.falha(w, r, err, "/central")
 		return
@@ -243,7 +202,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	paginas := max((total+eventosPorPagina-1)/eventosPorPagina, 1)
 	pagina = min(pagina, paginas)
 	f.Limite, f.Deslocamento = eventosPorPagina, (pagina-1)*eventosPorPagina
-	es, err := s.St.Diario(ctx, nil, f)
+	es, err := s.fonte().Diario(ctx, nil, f)
 	if err != nil {
 		s.falha(w, r, err, "/central")
 		return
@@ -268,7 +227,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		Total             int
 		Pagina, Paginas   int
 		Anterior, Proxima string
-	}{base{Titulo: "Onda " + strconv.FormatInt(id, 10), Usuario: usuarioDe(r), Recarregar: true, Ativa: "central", Larga: true}, *alvo, coord, evs, total, pagina, paginas, "", ""}
+	}{s.comAbas(r, base{Titulo: "Onda " + strconv.FormatInt(id, 10), Usuario: usuarioDe(r), Recarregar: true, Larga: true}, abaTodos), *alvo, coord, evs, total, pagina, paginas, "", ""}
 	if pagina > 1 {
 		d.Anterior = base0 + "?pagina=" + strconv.Itoa(pagina-1)
 	}

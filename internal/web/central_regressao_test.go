@@ -56,12 +56,8 @@ func TestRegressaoMRMostraPipelineEAprovacao(t *testing.T) {
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta"}, nil))
 	_, html := c.get("/central")
-	_, row, ok := strings.Cut(html, `<div class="mr">`)
-	if !ok {
-		t.Fatal("MR ausente")
-	}
-	row, _, _ = strings.Cut(row, "</div></div>")
-	// A legenda geral no rodapé não informa a situação desta MR.
+	row := linhaMR(t, html)
+	// A legenda geral na coluna lateral não informa a situação desta MR.
 	if !strings.Contains(row, "pipeline") || !strings.Contains(row, "aprovação") || strings.Count(row, "desconhecido") < 2 {
 		t.Errorf("linha da MR não informa pipeline e aprovação individualmente, nem indica desconhecido: %s", row)
 	}
@@ -144,17 +140,19 @@ func TestRegressaoCacheFalhouEAposPrazo(t *testing.T) {
 	co, _ := c.coord("alfa", "wA:p1", "proj", 7, "")
 	u := refs.US{Projeto: "proj", Ref: 7}
 	c.taiga(u, "Título", "New")
+	_, _, err := c.st.AtualizarStatus(c.ctx, &co, u, central.MudancaStatus{Status: "exec", Pane: ptr("wA:p9")})
+	c.ok(err)
 	url := "https://github.com/Exemplo/repo/pull/20"
-	_, _, err := c.st.AdicionarMR(c.ctx, &co, u, url)
+	_, _, err = c.st.AdicionarMR(c.ctx, &co, u, url)
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta"}, nil))
-	c.herdr(map[string]central.PaneHerdr{"wA:p1": {Status: "working"}})
+	c.herdr(map[string]central.PaneHerdr{"wA:p9": {Status: "working"}})
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{}, &central.Erro{Codigo: "falha_comando"}))
 	future := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return future }
 	_, html := c.get("/central")
-	contem(t, html, "pronta", "falhou: falha_comando", "agente working", "vencido")
-	if n := strings.Count(html, "idade-vencida"); n < 5 {
+	contem(t, html, ">pronta<", "falhou: falha_comando", "trabalhando", "Dados vencidos")
+	if n := strings.Count(html, `title="o cache passou do prazo da fonte"`); n < 5 {
 		t.Errorf("só %d fontes/valores marcados", n)
 	}
 }
@@ -168,10 +166,10 @@ func TestMRMostraPipelineEAprovacaoDoCache(t *testing.T) {
 		valor        central.ValorMR
 		quer, naoTem []string
 	}{
-		{20, central.ValorMR{Estado: "aberta", Pipeline: "falhou", Aprovacao: "pendente"}, []string{"selo-pipe-falhou", ">falhou<", "selo-aprov-pendente", ">pendente<"}, []string{"desconhecido"}},
-		{21, central.ValorMR{Estado: "pronta", Pipeline: "sucesso", Aprovacao: "nao_exigida"}, []string{"selo-pipe-sucesso", "selo-aprov-nao_exigida", "não exigida"}, []string{"desconhecido"}},
-		{22, central.ValorMR{Estado: "aberta", Pipeline: "sem", Aprovacao: "aprovada"}, []string{"sem pipeline", "selo-aprov-aprovada"}, []string{"desconhecido"}},
-		{23, central.ValorMR{Estado: "aberta"}, []string{"selo-pipe-desconhecido", "selo-aprov-desconhecido"}, nil}, // forja antiga: campos ausentes
+		{20, central.ValorMR{Estado: "aberta", Pipeline: "falhou", Aprovacao: "pendente"}, []string{"selo-erro", ">falhou<", "selo-aviso", ">pendente<"}, []string{"desconhecido"}},
+		{21, central.ValorMR{Estado: "pronta", Pipeline: "sucesso", Aprovacao: "nao_exigida"}, []string{"selo-ok", ">sucesso<", "não exigida"}, []string{"desconhecido"}},
+		{22, central.ValorMR{Estado: "aberta", Pipeline: "sem", Aprovacao: "aprovada"}, []string{"sem pipeline", ">aprovada<"}, []string{"desconhecido"}},
+		{23, central.ValorMR{Estado: "aberta"}, []string{"selo-tracejado", "desconhecido"}, nil}, // forja antiga: campos ausentes
 	}
 	for _, k := range casos {
 		url := fmt.Sprintf("https://github.com/Exemplo/repo/pull/%d", k.pr)
@@ -180,15 +178,13 @@ func TestMRMostraPipelineEAprovacaoDoCache(t *testing.T) {
 		c.ok(c.st.GravarMR(c.ctx, url, k.valor, nil))
 	}
 	_, html := c.get("/central")
-	for i, k := range casos {
-		_, resto, _ := strings.Cut(html, fmt.Sprintf("pull/%d\"", k.pr))
-		linha, _, _ := strings.Cut(resto, "</div></div>")
+	for _, k := range casos {
+		_, resto, _ := strings.Cut(html, fmt.Sprintf("repo#%d</b>", k.pr))
+		linha, _, _ := strings.Cut(resto, "</li>")
 		contem(t, linha, k.quer...)
 		naoContem(t, linha, k.naoTem...)
-		_ = i
 	}
 	// A legenda não promete aprovação para "pronta".
-	contem(t, html, "não quer dizer que alguém aprovou")
 	naoContem(t, html, "pipeline e aprovação em dia")
 }
 
@@ -270,12 +266,8 @@ func TestCentralMostraFalhaDaConsultaExtra(t *testing.T) {
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta", Pipeline: "sucesso", Aprovacao: "aprovada"}, nil))
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
 	_, html := c.get("/central")
-	_, row, ok := strings.Cut(html, `<div class="mr">`)
-	if !ok {
-		t.Fatal("sem MR")
-	}
-	row, _, _ = strings.Cut(row, "</div></div>")
-	for _, quer := range []string{"selo-pipe-sucesso", "selo-aprov-aprovada", "consulta extra falhou: falha_comando"} {
+	row := linhaMR(t, html)
+	for _, quer := range []string{">sucesso<", ">aprovada<", "consulta extra falhou: falha_comando"} {
 		if !strings.Contains(row, quer) {
 			t.Errorf("falta %q em %s", quer, row)
 		}

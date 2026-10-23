@@ -1,40 +1,107 @@
-{{define "idade"}}{{if .Nunca}}<span class="idade idade-nunca">sem dado</span>{{else}}<span class="idade{{if .Vencido}} idade-vencida{{end}}">{{.Idade}}{{if .Vencido}} · vencido{{end}}</span>{{end}}{{if .Erro}} <span class="selo selo-erro">falhou: {{.Erro}}</span>{{end}}{{end}}
+{{define "ic"}}<svg class="ic" aria-hidden="true"><use href="#i-{{.}}"/></svg>{{end}}
+{{define "chev"}}<svg class="ic chev" aria-hidden="true"><use href="#i-chev"/></svg>{{end}}
+{{define "sel"}}<span class="selo selo-{{.Cls}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Icone}}{{template "ic" .Icone}}{{end}}{{.Texto}}</span>{{end}}
+{{define "vencido"}}<span class="selo selo-aviso" title="o cache passou do prazo da fonte">{{template "ic" "relogio"}}vencido</span>{{end}}
+{{define "proj"}}<span class="proj"><i class="tom tom-{{.Tom}}" aria-hidden="true"></i>{{.Slug}}</span>{{end}}
+{{define "agente"}}<span class="agente agente-{{.Cls}}" title="{{.Title}}"><i aria-hidden="true"></i>{{.Texto}}</span>{{if .Vencido}} {{template "vencido"}}{{end}}{{end}}
+
+{{define "c-mr"}}<li class="mr">
+<a class="mr-link" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{template "ic" "pr"}}<span><b>{{.Rotulo}}</b> <span class="mr-path">{{.Caminho}}</span></span><svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>
+<span class="mr-selos">{{template "sel" .Estado}}{{if .IaC}} <span class="selo selo-neutro">iac</span>{{end}}
+<span class="par"><span class="rot">pipeline</span> {{template "sel" .Pipeline}}</span>
+<span class="par"><span class="rot">aprovação</span> {{template "sel" .Aprovacao}}</span>
+{{if .Vencido}}{{template "vencido"}}{{end}}
+{{if .Erro}}<span class="selo selo-erro">{{template "ic" "alerta"}}falhou: {{.Erro}}</span>{{end}}
+{{if .ExtraFalhou}}<span class="rot">valores lidos: {{.ValoresLidos}}</span> <span class="selo selo-aviso" title="mantém o último valor bom de pipeline e aprovação">{{template "ic" "alerta"}}consulta extra falhou: {{.ExtraFalhou}}</span>{{end}}</span></li>{{end}}
+
+{{define "us-barra"}}<summary class="us-sum" id="{{.Anchor}}-barra"{{if .Oob}} hx-swap-oob="true"{{end}}>
+{{template "chev"}}
+<span class="us-titulo" title="{{.Titulo}}"><b class="us-id">{{.ID}}</b> {{if .Titulo}}{{.Titulo}}{{else}}<span class="apagado">sem título no cache do Taiga</span>{{end}}</span>
+<span class="us-selos">{{template "sel" .Status}} {{template "agente" .Agente}}</span>
+<span class="us-mrs">{{if .SemMRs}}<span class="apagado">sem MR</span>{{else}}<span class="mr-res">{{template "ic" "pr"}}{{.MRsQtd}} {{if eq .MRsQtd 1}}MR{{else}}MRs{{end}}</span>{{range .ResumoMRs}} {{template "sel" .}}{{end}}{{end}}</span>
+<span class="conta-wrap">{{if .Esperam}}<span class="selo selo-aviso" title="pendências esperando você">{{template "ic" "user"}}{{.Esperam}} {{if eq .Esperam 1}}espera você{{else}}esperam você{{end}}</span>{{end}}</span>
+</summary>{{end}}
+
+{{define "c-us"}}<details class="us" id="{{.Anchor}}">{{template "us-barra" .}}
+<div class="us-corpo">
+<dl class="us-dl">
+<div><dt>No Taiga</dt><dd>{{if .TaigaNunca}}<span class="apagado">sem dado</span>{{else}}{{if .TaigaURL}}<a href="{{.TaigaURL}}" target="_blank" rel="noopener noreferrer">{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}<svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>{{else}}{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}{{end}} <span class="apagado idade">{{.TaigaIdade}}</span>{{end}}{{if .TaigaVencido}} {{template "vencido"}}{{end}}{{if .TaigaErro}} <span class="selo selo-erro">{{template "ic" "alerta"}}falhou: {{.TaigaErro}}</span>{{end}}</dd></div>
+<div><dt>Projeto</dt><dd>{{template "proj" .Projeto}}</dd></div>
+<div><dt>Depende de</dt><dd>{{range .Dependencias}}<span class="dep">{{.}}</span> {{else}}<span class="apagado">nenhuma</span>{{end}}</dd></div>
+{{if .Papel}}<div><dt>Papel</dt><dd>{{.Papel}}</dd></div>{{end}}
+</dl>
+<h3 class="sec">Merge requests</h3>
+{{if .MRs}}<ul class="mrs">{{range .MRs}}{{template "c-mr" .}}{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma MR ligada a esta US.</p>{{end}}
+<h3 class="sec">Pendências</h3>
+{{if .Pendencias}}<ul class="pends">{{range .Pendencias}}<li><a class="pend-id" href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span> {{if eq .Estado "respondida"}}<span class="selo selo-ok">{{template "ic" "check"}}respondida</span>{{else}}<span class="selo selo-aviso">{{template "ic" "user"}}espera você</span>{{end}}</li>
+{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma pendência.</p>{{end}}
+</div></details>{{end}}
+
+{{define "onda-barra"}}<summary class="onda-sum" id="{{.BarraID}}"{{if .Oob}} hx-swap-oob="true"{{end}}>
+{{template "chev"}}
+<span class="onda-titulo" title="{{.Titulo}}"><b class="onda-id">#{{.ID}}</b> <span class="onda-nome">{{.Titulo}}</span></span>
+<span class="onda-coord"><span class="coord">{{template "ic" "user"}}{{.Coordenador}}</span><span class="projs">{{range .Projetos}}{{template "proj" .}}{{end}}</span></span>
+<span class="onda-lim" title="até onde a onda vai · ordem das US">{{.Limite}}</span>
+<span class="prog" title="US prontas / total"><b>{{.Feitas}}/{{.Total}}</b><progress class="progress progress-primary prog-bar" value="{{.Feitas}}" max="{{.MaxProg}}" aria-label="{{.Feitas}} de {{.Total}} US prontas"></progress></span>
+<span class="onda-sinais">{{range .Sinais}}{{template "sel" .}}{{end}}</span>
+</summary>{{end}}
+
+{{define "c-onda"}}<details class="onda" id="{{.Anchor}}">{{template "onda-barra" .}}
+<div class="onda-corpo">
+<p class="onda-meta"><span>Coordenador <b>{{.Coordenador}}</b></span><span>Criada {{.Criada}}</span><a href="{{.Href}}">{{template "ic" "arquivo"}}Diário da onda</a></p>
+<div class="us-lista">{{range .US}}{{template "c-us" .}}{{end}}</div>
+</div></details>{{end}}
+
+{{define "situacao"}}<section id="situacao" class="situacao" aria-label="Situação"{{if .Oob}} hx-swap-oob="true"{{end}}>
+<p class="situacao-l"><b>{{.Ondas}}</b> {{.OndasRot}}</p>
+<ul class="situacao-lista">{{range .Itens}}<li class="s-{{.Cls}}">{{if .Href}}<a href="{{.Href}}">{{template "ic" .Icone}}{{.Texto}}</a>{{else}}{{template "ic" .Icone}}{{.Texto}}{{end}}</li>{{end}}</ul>
+{{if .Vencidas}}<p class="situacao-venc">{{template "ic" "relogio"}}<span>Dados vencidos: {{.Vencidas}}. O que depende deles pode estar desatualizado.</span></p>{{end}}
+</section>{{end}}
+
+{{define "fontes"}}<section id="fontes" class="rail-bloco" aria-labelledby="t-fontes"{{if .FontesOob}} hx-swap-oob="true"{{end}}>
+<h2 id="t-fontes" class="rail-t">Idade dos dados</h2>
+<ul class="fontes">{{range .Fontes}}<li><span class="fonte-nome">{{.Nome}}</span><span class="fonte-idade">{{if .Nunca}}sem dado{{else}}{{.Idade}}{{end}}</span>{{if .Vencido}}{{template "vencido"}}{{else if .Nunca}}<span class="selo selo-tracejado">{{template "ic" "duvida"}}desconhecido</span>{{else}}<span class="selo selo-ok">{{template "ic" "check"}}em dia</span>{{end}}{{if .Erro}}<span class="selo selo-erro">falhou: {{.Erro}}</span>{{end}}</li>{{end}}</ul>
+<p class="rail-nota">Atualiza sozinha a cada 30 s; o que está aberto ou digitado não é trocado.</p>
+</section>{{end}}
+
+{{define "rail"}}<aside class="rail" aria-label="Apoio">
+{{template "fontes" .}}
+<section class="rail-bloco" aria-labelledby="t-leg">
+<h2 id="t-leg" class="rail-t">Como ler</h2>
+<dl class="legenda">
+<div><dt><span class="selo selo-aviso-forte">{{template "ic" "user"}}esperam você</span></dt><dd>pendências que só você responde</dd></div>
+<div><dt><span class="selo selo-erro">{{template "ic" "x"}}pipeline falhou</span></dt><dd>MR aberta com pipeline que falhou (o mesmo texto na onda, na US e na MR)</dd></div>
+<div><dt><span class="selo selo-info">{{template "ic" "merge"}}MR espera merge</span></dt><dd>MR mesclável em onda até merge; o merge é do coordenador</dd></div>
+<div><dt><span class="selo selo-info">{{template "ic" "merge"}}MR pronta</span></dt><dd>MR mesclável em onda que não autoriza merge: espera a revisão humana</dd></div>
+<div><dt><span class="selo selo-ok">{{template "ic" "check"}}concluída</span></dt><dd>pronta para encerrar</dd></div>
+<div><dt><span class="selo selo-aviso">{{template "ic" "relogio"}}vencido</span></dt><dd>cache velho: não é o estado de agora</dd></div>
+<div><dt><span class="selo selo-tracejado">{{template "ic" "duvida"}}desconhecido</span></dt><dd>a forja ainda não disse</dd></div>
+</dl>
+<p class="rail-nota">A web só lê e responde pendências. Merge, status, encerramento e despacho continuam com o coordenador.</p>
+</section>
+</aside>{{end}}
 
 {{define "central"}}{{template "topo" .}}
-<h1 class="t-pagina">Central</h1>
-<p class="nota">Somente leitura. Gerada {{.Gerado}}; esta página recarrega a cada 30 s.</p>
-<section class="fontes" aria-label="Idade do cache">
-{{range .Fontes}}<div class="fonte"><strong>{{.Nome}}</strong> {{template "idade" .Frescor}}</div>
-{{end}}
-</section>
-
-{{range .Coords}}
-<section class="coord">
-<h2>{{.Nome}}{{if .Agente}} <span class="selo selo-agente selo-{{.Agente}}">agente {{.Agente}}</span>{{if .AgenteVencido}} <span class="selo selo-vencido">vencido</span>{{end}}{{end}}</h2>
-<p class="meta">pendências: <strong>{{.Abertas}}</strong> abertas · <strong>{{.Respondidas}}</strong> respondidas</p>
-{{range .Ondas}}
-<article class="onda">
-<header>
-<a class="onda-titulo" href="{{.Href}}">{{if .Titulo}}{{.Titulo}}{{else}}onda {{.ID}}{{end}}</a>
-<div class="meta">onda {{.ID}} · até {{.Ate}} · ordem {{.Ordem}} · {{.Feitas}}/{{len .US}} prontas
-{{if .Concluida}} <span class="selo selo-respondida">concluída</span>{{end}}{{if .Encerrada}} <span class="selo selo-resolvida">encerrada</span>{{end}}</div>
-</header>
-{{range .US}}
-<div class="us">
-<div class="linha1"><strong>{{.ID}}</strong> <span class="selo selo-st-{{.Status}}">{{.Status}}</span>{{if .Agente}} <span class="selo selo-agente">agente {{.Agente}}{{if .AgenteVencido}} · vencido{{end}}</span>{{end}}</div>
-{{if .Titulo}}<div class="titulo">{{if .TaigaURL}}<a href="{{.TaigaURL}}" rel="noopener noreferrer">{{.Titulo}}</a>{{else}}{{.Titulo}}{{end}}</div>{{end}}
-<div class="meta">Taiga: {{if .StatusTaiga}}{{.StatusTaiga}}{{else}}sem status{{end}} · {{template "idade" .Taiga}}</div>
-{{if .Dependencias}}<div class="meta">depende de {{range $i, $d := .Dependencias}}{{if $i}}, {{end}}{{$d}}{{end}}</div>{{end}}
-{{range .MRs}}<div class="mr"><a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a> {{if .Estado}}<span class="selo selo-mr-{{.Estado}}">{{.Estado}}</span>{{else}}<span class="selo selo-aviso">sem estado</span>{{end}} {{template "idade" .Frescor}}
-<div class="situacao"><span>pipeline <span class="selo selo-pipe-{{.PipelineCls}}">{{.Pipeline}}</span></span> <span>aprovação <span class="selo selo-aprov-{{.AprovacaoCls}}">{{.Aprovacao}}</span></span>{{if .Situacao.Erro}} <span class="meta">dos valores lidos {{if .Situacao.Nunca}}(nunca lidos){{else}}{{.Situacao.Idade}}{{if .Situacao.Vencido}} · vencido{{end}}{{end}}</span> <span class="selo selo-erro">consulta extra falhou: {{.Situacao.Erro}}</span>{{end}}</div></div>
-{{end}}
-{{range .Pendencias}}<div class="pend"><a href="{{.Href}}">{{.ID}}</a> <span class="selo selo-tipo">{{.Tipo}}</span>{{if eq .Estado "respondida"}} <span class="selo selo-respondida">respondida</span>{{else}} <span class="selo selo-aberta">aberta</span>{{end}}</div>
+<div class="colunas"><div class="principal">
+{{template "situacao" .Situacao}}
+<div id="aviso-lista" class="aviso-lista" role="status"></div>
+{{if .Ondas}}
+<h1 class="t-pagina">{{.H1}}</h1>
+<p class="ordem-nota">Ordenadas pelo que pede atenção: pendência esperando você, pipeline que falhou, MR pronta.</p>
+<div class="ondas">{{range .Ondas}}{{template "c-onda" .}}{{end}}</div>
+{{else}}
+<h1 class="t-pagina">Ondas abertas</h1>
+{{template "vazio" .}}
 {{end}}
 </div>
-{{end}}
-</article>
-{{else}}<p class="vazio">Sem ondas abertas.</p>{{end}}
-</section>
-{{else}}{{template "vazio" .}}{{end}}
-<p class="nota">Estado da MR: <em>pronta</em> = aberta, fora de rascunho e mesclável para a forja (não quer dizer que alguém aprovou: repositório sem exigência de revisão fica pronto sem aprovação); <em>aberta</em> = algo ainda bloqueia o merge. O pipeline e a aprovação de cada MR vêm da forja; <em>desconhecido</em> é dado que a forja não deu ou que ainda não foi consultado.</p>
+{{template "rail" .}}
+</div>
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-trigger="every 30s" hx-swap="none" hidden></div>
 {{template "rodape" .}}{{end}}
+
+{{define "vivo"}}{{template "situacao" .Situacao}}
+{{template "fontes" .}}
+{{range .Abas}}{{template "aba-n" .}}{{end}}
+{{range .Ondas}}{{template "onda-barra" .}}{{range .US}}{{template "us-barra" .}}{{end}}{{end}}
+{{if not .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
+{{end}}{{end}}

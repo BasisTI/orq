@@ -159,6 +159,163 @@ a.btn-primary, .btn-primary { color: var(--color-primary-content); }
 .selo-mr-draft, .selo-mr-fechada, .selo-resolvida { background: transparent; color: var(--suave); border-color: var(--linha); font-weight: 400; }
 .selo-pipe-desconhecido, .selo-aprov-desconhecido { background: transparent; color: #3F4E5C; border: 1px dashed #5B6B7A; }
 
+/* ===== Story #23: a Central nova (/central, /projeto/{slug}). Blocos próprios, para o conflito
+   com a #25 no CSS gerado ficar só no estatico/. Tokens e regras: DESIGN.md. ===== */
+
+/* selos que a Central acrescenta aos de cima */
+.selo-aviso-forte { background: #8F5A00; color: #fff; }
+.selo-marca { background: #E2E9F2; color: #0A2E5C; }
+.selo-tracejado { background: transparent; color: #3F4E5C; border: 1px dashed #5B6B7A; }
+.selo-apagado { background: transparent; color: var(--suave); border-color: var(--linha); font-weight: 400; }
+
+/* ponto do agente e do projeto */
+.agente { display: inline-flex; align-items: center; gap: .4rem; font-size: .88rem; color: #2B3A48; white-space: nowrap; }
+.agente i { width: .6rem; height: .6rem; border-radius: 9999px; background: #5B6B7A; flex: none; }
+.agente-info i { background: #0A6E9E; animation: pulsa 1.6s ease-in-out infinite; }
+.agente-ok i { background: #137547; }
+.agente-aviso i { background: #8F5A00; }
+.agente-apagado { color: var(--suave); }
+.agente-apagado i { background: transparent; border: 1.5px solid #5B6B7A; }
+@keyframes pulsa { 50% { opacity: .35; } }
+.tom { display: inline-block; width: .6rem; height: .6rem; border-radius: 9999px; flex: none; }
+.tom-0 { background: #2B6CB0; }
+.tom-1 { background: #B7791F; }
+.tom-2 { background: #2F855A; }
+.tom-3 { background: #9B2C86; }
+.proj { display: inline-flex; align-items: center; gap: .35rem; font-size: .88rem; }
+
+/* abas: contagem, projeto e a borda esmaecida de quem rola (o app.js marca data-esq e data-dir) */
+.abas-n { font-weight: 400; color: var(--suave); background: var(--color-base-200); border-radius: 9999px; padding: 0 .5rem; font-size: .85rem; min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.abas-n-aviso { background: #8F5A00; color: #fff; font-weight: 700; }
+.abas-in[data-dir] { mask-image: linear-gradient(to right, #000 calc(100% - 2.25rem), transparent); }
+.abas-in[data-esq] { mask-image: linear-gradient(to left, #000 calc(100% - 2.25rem), transparent); }
+.abas-in[data-esq][data-dir] { mask-image: linear-gradient(to right, transparent, #000 2.25rem, #000 calc(100% - 2.25rem), transparent); }
+
+/* layout: ondas e coluna lateral */
+.colunas { display: grid; gap: 24px; }
+@media (min-width: 1280px) { .colunas { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; } .rail { position: sticky; top: 4.5rem; } }
+@media (min-width: 1280px) and (max-width: 1480px) { .colunas { grid-template-columns: minmax(0, 1fr) 280px; } }
+.principal { min-width: 0; }
+.ordem-nota { color: var(--suave); font-size: .92rem; margin-bottom: .9rem; max-width: 70ch; }
+.aviso-lista { margin-top: .75rem; }
+.aviso-lista:empty { display: none; }
+.aviso-lista:not(:empty) { background: #E0EEF6; color: #0A4A6C; border-radius: var(--radius-field); padding: .6rem .8rem; }
+.aviso-lista a { color: inherit; font-weight: 700; }
+
+/* linha de situação */
+.situacao { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .75rem 1rem; }
+.situacao-l { font-size: 1.05rem; }
+.situacao-lista { display: flex; flex-wrap: wrap; gap: .35rem 1.25rem; list-style: none; margin-top: .25rem; }
+.situacao-lista:empty { display: none; }
+.situacao-lista li { display: inline-flex; align-items: center; gap: .35rem; font-weight: 700; }
+.situacao-lista .s-aviso { color: #7A4D00; }
+.situacao-lista .s-erro { color: #9C1F18; }
+.situacao-lista .s-info { color: #0A5E88; }
+.situacao-lista .s-ok { color: #0E5C38; }
+/* o link "N pendências esperam você" precisa parecer link */
+.situacao-lista a { display: inline-flex; align-items: center; gap: .35rem; color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: .2em; min-height: 2.25rem; }
+.situacao-venc { margin-top: .5rem; padding-top: .5rem; border-top: 1px solid var(--linha); display: flex; gap: .4rem; align-items: baseline; color: #7A4D00; font-size: .92rem; }
+
+/* accordions: marcador próprio */
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+.chev { transition: rotate 180ms ease-out; color: var(--suave); }
+details[open] > summary .chev { rotate: 90deg; }
+
+/* barra da onda: celular em três linhas, a partir de 1100 px em uma só */
+.ondas { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+.onda { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); }
+.onda[open] { border-color: color-mix(in oklab, var(--color-primary) 45%, var(--linha)); }
+.onda-sum { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; grid-template-areas: "chev titulo titulo" ". coord coord" ". lim prog" ". sinais sinais"; column-gap: .6rem; row-gap: .5rem; padding: .85rem .9rem; align-items: start; border-radius: var(--radius-box); }
+.onda-sum:hover, .us-sum:hover { background: color-mix(in oklab, var(--color-base-200) 55%, #fff); }
+.onda-sum > .chev { grid-area: chev; margin-top: .3rem; }
+.onda-titulo { grid-area: titulo; display: flex; gap: .5rem; align-items: baseline; min-width: 0; }
+.onda-coord { grid-area: coord; display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; }
+.onda-lim { grid-area: lim; font-size: .9rem; color: #2B3A48; white-space: nowrap; }
+.prog { grid-area: prog; display: inline-flex; align-items: center; gap: .5rem; font-size: .92rem; font-variant-numeric: tabular-nums; }
+.onda-sinais { grid-area: sinais; display: flex; flex-wrap: wrap; gap: .35rem; }
+.onda-id { font-family: var(--font-display); color: var(--suave); }
+/* Título longo (decisão da story #23): corta na barra fechada, em 3 linhas no celular e 2 a
+   partir de 760 px, e mostra inteiro quando a onda abre; o title da barra traz o texto todo. */
+.onda-nome { font-family: var(--font-display); letter-spacing: -0.01em; color: var(--color-secondary); font-size: 1.05rem; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; margin: 0; }
+.onda[open] .onda-nome { -webkit-line-clamp: unset; }
+@media (min-width: 760px) { .onda-nome { -webkit-line-clamp: 2; } }
+.coord { display: inline-flex; align-items: center; gap: .3rem; font-weight: 700; overflow-wrap: anywhere; }
+.projs { display: inline-flex; gap: .6rem; flex-wrap: wrap; }
+/* progresso: <progress> nativo (a CSP não aceita style=) */
+.prog-bar { width: 4.5rem; height: .4rem; }
+@media (min-width: 1100px) {
+  .onda-sum { grid-template-columns: 1.25rem minmax(14rem, 1.4fr) 8rem 11rem 6.5rem 10.5rem; grid-template-areas: "chev titulo coord lim prog sinais"; align-items: center; column-gap: .75rem; }
+  .onda-coord { flex-direction: column; align-items: flex-start; gap: .15rem; }
+  .onda-sinais { justify-content: flex-end; }
+  .onda-sum > .chev { margin-top: 0; }
+}
+.onda-corpo { border-top: 1px solid var(--linha); }
+.onda-meta { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; padding: .6rem .9rem; font-size: .9rem; color: #2B3A48; background: var(--color-base-200); align-items: center; }
+.onda-meta a { display: inline-flex; gap: .3rem; align-items: center; margin-left: auto; font-weight: 700; min-height: 2.25rem; }
+
+/* linha da US */
+.us { border-top: 1px solid var(--linha); }
+.us:first-child { border-top: 0; }
+.us-sum { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; grid-template-areas: "chev tit conta" ". selos selos" ". mrs mrs"; gap: .35rem .6rem; padding: .7rem .75rem .7rem 1rem; align-items: center; }
+.us-sum > .chev { grid-area: chev; }
+.us-titulo { grid-area: tit; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.3; }
+.us[open] > .us-sum .us-titulo { -webkit-line-clamp: unset; }
+.us-selos { grid-area: selos; }
+.us-mrs { grid-area: mrs; }
+.conta-wrap { grid-area: conta; justify-self: end; }
+.us-selos, .us-mrs { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
+.us-id { font-family: var(--font-display); font-size: .92rem; margin-right: .25rem; color: var(--color-secondary); }
+.mr-res { display: inline-flex; gap: .3rem; align-items: center; font-size: .9rem; }
+@media (min-width: 1100px) {
+  .us-sum { grid-template-columns: 1.25rem minmax(10rem, 1fr) 15rem 16.5rem 7.8rem; grid-template-areas: "chev tit selos mrs conta"; column-gap: .9rem; }
+}
+@media (min-width: 1280px) and (max-width: 1480px) {
+  .us-sum { grid-template-columns: 1.25rem minmax(8rem, 1fr) 12.5rem 13.5rem 7.8rem; column-gap: .6rem; }
+}
+.us-corpo { padding: .25rem .75rem 1rem .75rem; background: color-mix(in oklab, var(--color-base-200) 35%, #fff); border-top: 1px dashed var(--linha); }
+@media (min-width: 760px) { .us-corpo { padding: .25rem .9rem 1rem 1.6rem; } }
+.us-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .6rem 1rem; margin: .75rem 0; }
+.us-dl dt { font-size: .82rem; color: var(--suave); }
+.us-dl dd { font-weight: 700; overflow-wrap: anywhere; }
+.us-dl dd .idade { font-weight: 400; font-size: .88rem; }
+.us-dl dd a { display: inline-flex; align-items: center; gap: .3rem; }
+.us-dl dd .ic-p { margin-left: 0; }
+.dep { background: #E8EDF2; border-radius: var(--radius-selector); padding: 0 .4rem; font-size: .88rem; }
+.sec { font-size: .95rem; font-weight: 700; margin: 1rem 0 .4rem; }
+.vazio-linha { color: var(--suave); font-size: .92rem; }
+.pends { list-style: none; display: grid; gap: .4rem; }
+.pends li { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; }
+.pend-id { font-family: var(--font-display); font-weight: 700; font-size: .95rem; display: inline-flex; align-items: center; min-height: 2.25rem; }
+
+/* MR */
+.mrs { list-style: none; display: grid; gap: .5rem; }
+.mr { display: grid; gap: .35rem; padding: .55rem 0; border-top: 1px solid var(--linha); }
+.mr:first-child { border-top: 0; }
+.mr-link { display: inline-flex; gap: .4rem; align-items: center; font-weight: 700; text-decoration: none; min-height: 2.25rem; }
+.mr-link:hover { text-decoration: underline; }
+.mr-path { font-weight: 400; color: #2B3A48; overflow-wrap: anywhere; }
+.mr-selos { display: flex; flex-wrap: wrap; gap: .35rem .85rem; align-items: center; }
+.par { display: inline-flex; gap: .35rem; align-items: center; }
+.rot { font-size: .85rem; color: var(--suave); }
+@media (min-width: 760px) { .mr { grid-template-columns: minmax(12rem, 18rem) 1fr; align-items: center; } }
+
+/* coluna lateral */
+.rail { display: grid; gap: 1rem; }
+.rail-bloco { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .85rem 1rem; }
+.rail-t { font-size: .98rem; font-weight: 700; margin-bottom: .5rem; }
+.fontes { list-style: none; display: grid; gap: .4rem; }
+.fontes li { display: grid; grid-template-columns: 3.5rem 1fr auto; align-items: center; gap: .5rem; }
+.fonte-nome { font-weight: 700; }
+.fonte-idade { color: #2B3A48; }
+.legenda { display: grid; gap: .55rem; }
+.legenda > div { display: grid; gap: .15rem; }
+.legenda dd { font-size: .88rem; color: #2B3A48; }
+.rail-nota { margin-top: .65rem; font-size: .88rem; color: var(--suave); }
+.acoes { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; }
+
+/* ===== fim da story #23 ===== */
+
 /* ---------- listas e cartões das páginas atuais ---------- */
 .lista { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); overflow: hidden; }
 .cartao { display: block; padding: .7rem .9rem; border-top: 1px solid var(--linha); color: inherit; text-decoration: none; min-height: 3rem; }
@@ -205,19 +362,7 @@ a.btn-primary, .btn-primary { color: var(--color-primary-content); }
 .historico { list-style: none; display: grid; gap: .6rem; }
 .historico li { overflow-wrap: anywhere; }
 
-/* ---------- Central e diário das páginas atuais ---------- */
-.fontes { display: flex; flex-wrap: wrap; gap: .35rem 1.25rem; background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .6rem .9rem; font-size: .9rem; }
-.idade { color: var(--suave); font-size: .9rem; }
-.idade-vencida { color: #7A4D00; background: #FBEFD6; border-radius: var(--radius-selector); padding: 0 .4rem; font-weight: 700; }
-.idade-nunca { font-style: italic; }
-.selo-agente { background: #E8EDF2; color: #2B3A48; }
-.coord h2 { font-size: 1.05rem; margin: 1.5rem 0 .25rem; overflow-wrap: anywhere; }
-.onda { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .85rem .9rem; margin: .75rem 0; }
-.onda-titulo { font-family: var(--font-display); font-weight: 700; overflow-wrap: anywhere; }
-.us { border-top: 1px solid var(--linha); margin-top: .7rem; padding-top: .7rem; }
-.us .titulo { margin: .15rem 0; overflow-wrap: anywhere; }
-.mr, .pend { margin-top: .35rem; overflow-wrap: anywhere; }
-.situacao { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin-top: .15rem; font-size: .9rem; color: #2B3A48; }
+/* ---------- diário das páginas atuais ---------- */
 .evento { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .65rem .9rem; margin: 0 0 .5rem; }
 .evdet { margin: .4rem 0 0; padding: .5rem; background: var(--color-base-200); border-radius: var(--radius-field); font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 

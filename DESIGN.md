@@ -328,12 +328,16 @@ Lista branca de 1px (`ol` sem marcador), um evento por linha: quando (esmaecido,
 
 Confirmadas pela pessoa: ondas ordenadas por atenção (3 pendência esperando, 2 pipeline falhou, 1 MR pronta, 0 o resto); a respondida sai de "esperam você" mas segura o `concluída`; estados do agente em português com o código no `title`; cor por projeto só no ponto, em 4 tons; só tema claro; estrutura em abas (Todos, projetos, Pendências) com accordion de onda e de US e a pendência respondida nos dois lugares; filtros em cascata.
 
-## Em aberto no protótipo (não resolvido; não copiar como regra)
+## Resolvido na implementação (story #23)
 
-- Títulos de onda ainda truncam em 2 e 3 linhas para os mais longos.
-- A coluna "limite · ordem" quebra em duas linhas em 1440px para "até mr-pronta · estrita".
-- O link "N pendências esperam você" da situação ainda não tem sublinhado nem outro indício de link (herda cor da linha, 700).
-- A faixa de abas no celular não indica que rola.
+- **Título de onda longo:** corta na barra fechada (3 linhas no celular, 2 a partir de 760px) e aparece inteiro quando a onda abre; o `title` da barra traz o texto todo. Decidido por corte, não por 3 linhas fixas, para a barra fechada manter altura previsível.
+- **Coluna "limite · ordem":** `white-space: nowrap` numa coluna de 11rem a partir de 1100px (abaixo disso a barra usa o layout do celular, em três linhas); o teste de navegador confere uma linha só a 1440px.
+- **Link "N pendências esperam você":** sublinhado.
+- **Faixa de abas no celular:** borda esmaecida (máscara) do lado em que há aba escondida, e a aba ativa é rolada para a vista (`app.js`).
+- **Barra de progresso:** `<progress value max>` nativo, sem `style=`.
+
+## Em aberto
+
 - Multiusuário e papéis continuam "a decidir". A ordem das ondas por atenção e a contagem de "respondida" (sai do "esperam você", segura o `concluída`) estão **confirmadas pela pessoa** (2026-10-22) e valem como regra.
 
 Desvios da construção não canonizados: `style="width:%"` na barra de progresso (a CSP da implementação o proíbe: use classe por faixa ou `<progress>`); cores de texto dos selos e do secundário escritas como hex soltos em vez de tokens do tema; `.selo-neutro` sem regra própria (cai no padrão).

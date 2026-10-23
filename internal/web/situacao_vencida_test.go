@@ -40,12 +40,8 @@ func TestSituacaoPrimeiraFalhaSemValorAnteriorNaPagina(t *testing.T) {
 	c.ok(err)
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "pronta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
 	_, html := c.get("/central")
-	_, row, ok := strings.Cut(html, `<div class="situacao">`)
-	if !ok {
-		t.Fatal("linha de situação ausente")
-	}
-	row, _, _ = strings.Cut(row, "</div>")
-	contem(t, row, "(nunca lidos)", "consulta extra falhou: falha_comando")
+	row := linhaMR(t, html)
+	contem(t, row, "valores lidos: nunca", "consulta extra falhou: falha_comando")
 	if n := strings.Count(row, ">desconhecido<"); n != 2 {
 		t.Errorf("desconhecido ×%d, quer 2: %s", n, row)
 	}
@@ -66,13 +62,8 @@ func TestSituacaoUltimoBomVelhoApareceComoVencido(t *testing.T) {
 	depois := time.Now().Add(time.Hour)
 	c.f.srv.Agora = func() time.Time { return depois }
 	_, html := c.get("/central")
-	_, row, ok := strings.Cut(html, `<div class="situacao">`)
-	if !ok {
-		t.Fatal("linha de situação ausente")
-	}
-	row, _, _ = strings.Cut(row, "</div>")
-	contem(t, row, "dos valores lidos", "há 1 h", "consulta extra falhou: falha_comando")
-	contem(t, row, "vencido")
+	row := linhaMR(t, html)
+	contem(t, row, "valores lidos: há 1 h", "consulta extra falhou: falha_comando", "vencido")
 }
 
 // Cache no formato do binário anterior (com pipeline e aprovação, sem situacao_em): a página
@@ -89,11 +80,7 @@ func TestSituacaoMesclaComCacheAntigoNaoDizNuncaLidos(t *testing.T) {
 	}, nil))
 	c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: "aberta", SituacaoErro: &central.Erro{Codigo: "falha_comando", Mensagem: "rede"}}, nil))
 	_, html := c.get("/central")
-	_, row, ok := strings.Cut(html, `<div class="situacao">`)
-	if !ok {
-		t.Fatal("linha de situação ausente")
-	}
-	row, _, _ = strings.Cut(row, "</div>")
-	contem(t, row, "selo-pipe-sucesso", "selo-aprov-aprovada", "consulta extra falhou: falha_comando")
-	naoContem(t, row, "(nunca lidos)")
+	row := linhaMR(t, html)
+	contem(t, row, ">sucesso<", ">aprovada<", "consulta extra falhou: falha_comando")
+	naoContem(t, row, "valores lidos: nunca")
 }
