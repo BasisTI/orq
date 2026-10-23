@@ -209,7 +209,7 @@ type eventoVista struct {
 func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != r.PathValue("id") {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Endereço de onda inválido.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Endereço de onda inválido.", "/central")
 		return
 	}
 	ctx := r.Context()
@@ -229,7 +229,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if alvo == nil {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Não há onda com esse número.", "/central")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Não há onda com esse número.", "/central")
 		return
 	}
 	pagina, _ := strconv.Atoi(r.FormValue("pagina"))
