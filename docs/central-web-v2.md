@@ -160,7 +160,7 @@ scripts/build-frontend.sh   # o único ponto de regeneração
 
 ### 4.3 O JS próprio
 
-Um arquivo, `estatico/app.js`, sem inline e sem dependência: abre os `<details>` ancestrais de `location.hash` (na carga e em `hashchange`) e rola até o alvo. Nada mais. A confirmação, a troca de contagens e o filtro são do htmx e do servidor.
+Um arquivo, `estatico/app.js`, sem inline e sem dependência: abre os `<details>` ancestrais de `location.hash` (na carga e em `hashchange`) e rola até o alvo; e, na faixa de abas, rola a aba ativa para a vista e marca `data-esq`/`data-dir` onde há aba escondida (o CSS esmaece a borda; story 2, item d). Nada mais. A confirmação, a troca de contagens e o filtro são do htmx e do servidor.
 
 ### 4.4 Como regenerar
 

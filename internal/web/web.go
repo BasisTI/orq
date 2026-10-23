@@ -41,6 +41,8 @@ const (
 // desenha, em HTML escapado, as pendências e a Central (somente leitura).
 type Servidor struct {
 	St *central.Store
+	// Leitura, se definida, substitui o St nas leituras (Fonte); a escrita é sempre do St.
+	Leitura Fonte
 	// Unix: a requisição veio do socket Unix, atrás do Caddy; o usuário vem do cabeçalho
 	// CabecalhoUsuario, e sem ele a requisição é recusada. Em TCP (loopback) o cabeçalho é
 	// ignorado e quem responde é "local".
@@ -83,6 +85,8 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("POST /p/{projeto}/{ref}/{n}/responder", s.responder)
 	mux.HandleFunc("GET /historico", s.historico)
 	mux.HandleFunc("GET /central", s.central)
+	mux.HandleFunc("GET /projeto/{slug}", s.projeto)
+	mux.HandleFunc("GET /vivo", s.vivo)
 	mux.HandleFunc("GET /onda/{id}", s.onda)
 	mux.HandleFunc("GET /saude", s.saude)
 	mux.HandleFunc("GET /estatico/{caminho...}", s.servirEstatico)
@@ -195,11 +199,26 @@ type base struct {
 	Titulo     string
 	Usuario    string
 	Recarregar bool
-	// Ativa marca a aba da barra com aria-current: "pendencias", "central" ou "historico"; vazio
-	// nas páginas de erro.
-	Ativa string
-	// Larga usa a coluna de 900 px em vez da de 760 px.
+	// Abas é a faixa do topo (a aba atual leva aria-current); vazia nas páginas de erro.
+	Abas []Aba
+	// Larga usa a coluna de 900 px em vez da de 760 px; Cheia, a largura toda da página (a Central).
 	Larga bool
+	Cheia bool
+}
+
+// comAbas põe a faixa de abas na base de uma página, lendo as contagens do snapshot. Sem
+// snapshot (banco ocupado) as abas saem sem contagem: a página não cai por causa delas.
+func (s *Servidor) comAbas(r *http.Request, b base, ativa string) base {
+	snap, err := s.fonte().Snapshot(r.Context(), false)
+	if err != nil {
+		b.Abas = []Aba{
+			{Rotulo: "Todos", Href: "/central", ID: "aba-n-todos", SemN: true, Atual: ativa == abaTodos},
+			{Rotulo: "Pendências", Href: "/", ID: "aba-n-pendencias", SemN: true, Atual: ativa == abaPendencias, Fim: true},
+		}
+		return b
+	}
+	b.Abas = abasDe(snap, ativa)
+	return b
 }
 
 func (s *Servidor) pagina(w http.ResponseWriter, status int, nome string, dados any) {
@@ -280,7 +299,7 @@ type filtro struct{ Coord, Projeto, Onda string }
 
 func (s *Servidor) indice(w http.ResponseWriter, r *http.Request) {
 	f := filtro{Coord: r.FormValue("coord"), Projeto: r.FormValue("projeto"), Onda: r.FormValue("onda")}
-	todas, err := s.St.ListarPendencias(r.Context(), central.FiltroPendencias{Abertas: true})
+	todas, err := s.fonte().ListarPendencias(r.Context(), central.FiltroPendencias{Abertas: true})
 	if err != nil {
 		s.falha(w, r, err, "/")
 		return
@@ -309,7 +328,7 @@ func (s *Servidor) indice(w http.ResponseWriter, r *http.Request) {
 		Coords, Projetos     []string
 		Ondas                []int64
 		Abertas, Respondidas []itemLista
-	}{base{Titulo: "Pendências", Usuario: usuarioDe(r), Recarregar: true, Ativa: "pendencias"}, f, chaves(coords), chaves(projetos), od, abertas, respondidas})
+	}{s.comAbas(r, base{Titulo: "Pendências", Usuario: usuarioDe(r), Recarregar: true}, abaPendencias), f, chaves(coords), chaves(projetos), od, abertas, respondidas})
 }
 
 func chaves(m map[string]bool) []string {
@@ -327,7 +346,7 @@ func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 		pagina = 1
 	}
 	f := central.FiltroPendencias{Resolvidas: true}
-	total, err := s.St.ContarPendencias(r.Context(), f)
+	total, err := s.fonte().ContarPendencias(r.Context(), f)
 	if err != nil {
 		s.falha(w, r, err, "/")
 		return
@@ -335,7 +354,7 @@ func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 	paginas := max((total+itensPorPagina-1)/itensPorPagina, 1)
 	pagina = min(pagina, paginas)
 	f.Limite, f.Deslocamento = itensPorPagina, (pagina-1)*itensPorPagina
-	ps, err := s.St.ListarPendencias(r.Context(), f)
+	ps, err := s.fonte().ListarPendencias(r.Context(), f)
 	if err != nil {
 		s.falha(w, r, err, "/")
 		return
@@ -352,7 +371,7 @@ func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 		Itens             []itemLista
 		Pagina, Paginas   int
 		Anterior, Proxima string
-	}{base: base{Titulo: "Histórico", Usuario: usuarioDe(r), Ativa: "historico"}, Itens: itens, Pagina: pagina, Paginas: paginas}
+	}{base: s.comAbas(r, base{Titulo: "Histórico", Usuario: usuarioDe(r)}, abaPendencias), Itens: itens, Pagina: pagina, Paginas: paginas}
 	if pagina > 1 {
 		d.Anterior = "/historico?pagina=" + strconv.Itoa(pagina-1)
 	}
@@ -389,12 +408,12 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		return
 	}
 	ctx := r.Context()
-	p, err := s.St.VerPendencia(ctx, nil, ref)
+	p, err := s.fonte().VerPendencia(ctx, nil, ref)
 	if err != nil {
 		s.falha(w, r, err, "/")
 		return
 	}
-	hist, err := s.St.HistoricoRespostas(ctx, ref)
+	hist, err := s.fonte().HistoricoRespostas(ctx, ref)
 	if err != nil {
 		s.falha(w, r, err, "/")
 		return
@@ -412,7 +431,7 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		Registrada                  bool
 		Erro                        string
 		LimiteTexto                 int
-	}{base: base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r), Ativa: "pendencias"}, P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
+	}{base: s.comAbas(r, base{Titulo: p.ID + " " + p.Texto, Usuario: usuarioDe(r)}, abaPendencias), P: p, Aberta: s.quando(p.AbertaEm), Acao: refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero) + "/responder",
 		Registrada: r.FormValue("registrada") == "1", Erro: msg, LimiteTexto: LimiteTexto}
 	if p.Detalhe != nil {
 		d.Detalhe = RenderizarMarkdown(*p.Detalhe)
@@ -424,7 +443,7 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		d.RespondidaEm = s.quando(*p.RespondidaEm)
 		d.RespostaAtual = textoDaResposta(p.RespostaOpcao, p.Opcoes, p.Resposta)
 	}
-	if u, err := s.St.LerUS(ctx, ref.US); err == nil {
+	if u, err := s.fonte().LerUS(ctx, ref.US); err == nil {
 		if u.Taiga.URL != nil {
 			d.TaigaURL = *u.Taiga.URL
 		}

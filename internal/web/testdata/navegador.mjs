@@ -13,12 +13,48 @@ const [base, ...pedidos] = process.argv.slice(2);
 // Unix real).
 const caminhos = pedidos.map((x) => { const [c, st] = x.split('='); return [c, Number(st) || 200]; });
 const capturas = process.env.ORQ_CAPTURAS;
+const prefixo = process.env.ORQ_CAPTURA_PREFIXO ?? '';
 if (capturas) mkdirSync(capturas, { recursive: true });
 
 // Os dois console.error de cada 4xx provocado de propósito (spec §5.1, S6). Só as páginas de erro
 // pedidas com "=<status>" (ex.: /onda/999=404) os admitem, e só eles: qualquer outra mensagem
 // reprova.
 const PERMITIDOS_4XX = ['Failed to load resource', 'Response Status Error Code'];
+
+
+// Os itens abertos da revisão final do protótipo (spec §11, M15) viram verificação aqui.
+async function checarCentral(pagina, nome, falhas) {
+  const m = await pagina.evaluate(() => {
+    const linhaUnica = (el) => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight || '0') * 1.3 + 1;
+    const barras = [...document.querySelectorAll('details.onda > summary')];
+    const lim = [...document.querySelectorAll('.onda-lim')];
+    const link = document.querySelector('.situacao-lista a');
+    const faixa = document.querySelector('.abas-in');
+    const atual = faixa?.querySelector('a[aria-current="page"]');
+    const rA = atual?.getBoundingClientRect(), rF = faixa?.getBoundingClientRect();
+    return {
+      ondas: barras.length,
+      progressos: document.querySelectorAll('details.onda progress.prog-bar').length,
+      barrasDeProgressoSemProgress: document.querySelectorAll('.prog-bar:not(progress)').length,
+      comStyle: document.querySelectorAll('[style]').length,
+      limiteEmUmaLinha: lim.every(linhaUnica),
+      limiteMaisLongo: lim.map((e) => e.textContent).sort((a, b) => b.length - a.length)[0] ?? null,
+      linkSublinhado: link ? getComputedStyle(link).textDecorationLine.includes('underline') : null,
+      faixaRola: faixa ? faixa.scrollWidth > faixa.clientWidth + 1 : false,
+      faixaEsmaecida: faixa ? (faixa.hasAttribute('data-dir') || faixa.hasAttribute('data-esq')) && getComputedStyle(faixa).maskImage !== 'none' : false,
+      abaAtivaNaVista: rA && rF ? rA.left >= rF.left - 1 && rA.right <= rF.right + 1 : false,
+      sobreposicao: barras.some((b) => b.scrollWidth > b.clientWidth + 1),
+    };
+  });
+  if (m.ondas && !m.progressos) falhas.push('barra de progresso: nenhum <progress> nas ondas');
+  if (m.barrasDeProgressoSemProgress) falhas.push('barra de progresso que não é <progress>');
+  if (m.comStyle) falhas.push(`${m.comStyle} elemento(s) com style=`);
+  if (nome === '1440' && !m.limiteEmUmaLinha) falhas.push(`coluna "limite · ordem" quebra em 1440 px (${m.limiteMaisLongo})`);
+  if (m.linkSublinhado === false) falhas.push('o link "N pendências esperam você" não tem sublinhado');
+  if (nome === '390' && m.faixaRola && !m.faixaEsmaecida) falhas.push('a faixa de abas rola no celular e não indica (borda esmaecida)');
+  if (!m.abaAtivaNaVista) falhas.push('a aba ativa não está inteira na vista da faixa');
+  if (m.sobreposicao) falhas.push('barra de onda com conteúdo para fora da própria largura');
+}
 
 const navegador = await chromium.launch({ executablePath: process.env.ORQ_CHROMIUM, args: ['--no-sandbox'] });
 const problemas = [];
@@ -77,18 +113,31 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
     if (estado.fundoCabecalho !== 'rgb(7, 26, 46)') falhas.push(`cabeçalho sem o navy do tema: ${estado.fundoCabecalho}`);
     if (estado.larguraRolavel > 0) falhas.push(`rolagem horizontal da página: ${estado.larguraRolavel}px`);
 
+    const ehCentral = esperado === 200 && (caminho === '/central' || caminho.startsWith('/projeto/'));
+    if (ehCentral) await checarCentral(pagina, nome, falhas);
+
+    const slug = (caminho + (esperado === 200 ? '' : `_${esperado}`)).replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'raiz';
     if (capturas) {
-      const slug = (process.env.ORQ_CAPTURA_PREFIXO || '') + (caminho + (esperado === 200 ? '' : `_${esperado}`)).replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'raiz';
       if (caminho === '/') {
-        await pagina.screenshot({ path: join(capturas, `cabecalho-abas-${nome}.png`), clip: { x: 0, y: 0, width: largura, height: 150 } });
+        await pagina.screenshot({ path: join(capturas, `${prefixo}cabecalho-abas-${nome}.png`), clip: { x: 0, y: 0, width: largura, height: 150 } });
       }
-      await pagina.screenshot({ path: join(capturas, `pagina-${slug}-${nome}.png`), fullPage: true });
-      if (esperado === 200 && /^\/onda\/\d+$/.test(caminho)) {
-        // a segunda página do diário (o paginador com os dois botões)
-        await pagina.goto(`${base}${caminho}?pagina=2`, { waitUntil: 'networkidle' });
-        await pagina.evaluate(() => document.fonts.ready);
-        await pagina.screenshot({ path: join(capturas, `pagina-${slug}_pagina2-${nome}.png`), fullPage: true });
+      await pagina.screenshot({ path: join(capturas, `${prefixo}pagina-${slug}-${nome}${ehCentral ? '-fechado' : ''}.png`), fullPage: true });
+      if (ehCentral) {
+        // Aberto: a primeira onda e as duas primeiras US dela (a spec §8.2 pede aberto e fechado).
+        await pagina.evaluate(() => {
+          const onda = document.querySelector('details.onda');
+          if (!onda) return;
+          onda.open = true;
+          onda.querySelectorAll('details.us').forEach((u, i) => { if (i < 2) u.open = true; });
+        });
+        await pagina.screenshot({ path: join(capturas, `${prefixo}pagina-${slug}-${nome}-aberto.png`), fullPage: true });
       }
+    }
+    if (capturas && esperado === 200 && /^\/onda\/\d+$/.test(caminho)) {
+      // a segunda página do diário (o paginador com os dois botões)
+      await pagina.goto(`${base}${caminho}?pagina=2`, { waitUntil: 'networkidle' });
+      await pagina.evaluate(() => document.fonts.ready);
+      await pagina.screenshot({ path: join(capturas, `${prefixo}pagina-${slug}_pagina2-${nome}.png`), fullPage: true });
     }
     resumo.push({ aqui, abaAtiva: estado.abaAtiva, falhas });
     for (const f of falhas) problemas.push(`${aqui}: ${f}`);
