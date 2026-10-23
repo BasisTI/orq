@@ -205,9 +205,9 @@ Só com o coordenador `idle` ou `done` (`herdr agent get`); senão, tenta no cic
 | `GET /central` | a Central somente leitura (veja [Central pela web](#central-pela-web)); recarrega a cada 30 s |
 | `GET /onda/<id>?pagina=N` | o diário da onda (`orq diario --onda`), do mais recente ao mais antigo, 25 por página; recarrega a cada 30 s |
 | `GET /saude` | `ok` se o banco responde e aceita escrita deste `orq` |
-| `GET /estilo.css` | o CSS embutido (a CSP só aceita `style-src 'self'`) |
+| `GET /estatico/<arquivo>` | o CSS (`app.css`), o `htmx.min.js`, o `app.js`, as fontes e as imagens embutidos no binário; `/estilo.css` deixou de existir. Só `GET`; diretório e o que não está no embed dão 404 |
 
-As páginas são renderizadas no servidor (`html/template`), tema claro, pensadas para a largura de um celular; os formulários são POST e não pedem JS. O CSS e os modelos vão embutidos no binário; a web não serve arquivo do disco nem o JSON do `snapshot`.
+As páginas são renderizadas no servidor (`html/template`), tema claro, pensadas para a largura de um celular; os formulários são POST e não pedem JS. O CSS (Tailwind + daisyUI, tema `basis-interno`), o htmx, as fontes e os modelos vão embutidos no binário; a web não serve arquivo do disco nem o JSON do `snapshot`. O CSS é gerado por `scripts/build-frontend.sh` (Node 24, só para quem edita o frontend; `go install` e o plugin seguem sem Node) e commitado em `internal/web/estatico/`; o job `frontend` do CI falha se o commitado não bate com o gerado. Spec: [docs/central-web-v2.md](docs/central-web-v2.md).
 
 #### Central pela web
 
@@ -229,7 +229,8 @@ A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos c
 - *Quem responde.* Atrás do Caddy, no socket Unix, o usuário autenticado chega no cabeçalho `X-Orq-User` (`--web-cabecalho` troca o nome) e vira `respondida_por`. No socket Unix, **requisição sem o cabeçalho é recusada** (401; só `/saude` passa), porque quer dizer que não passou pela autenticação. Em TCP o cabeçalho é ignorado (qualquer processo local o forjaria) e `respondida_por = local`; o `Host` precisa ser `127.0.0.1`, `localhost` ou `[::1]` com a porta certa (421 senão). O chat grava `chat`.
 - *Origem.* `http.CrossOriginProtection`: POST de outra origem é recusado (403). O formulário só aceita `application/x-www-form-urlencoded`.
 - *Conteúdo.* O markdown vai pelo goldmark sem `WithUnsafe`: HTML bruto sai escapado (visível, nunca ativo), e só links `http`, `https`, `mailto`, âncora e caminho relativo sobrevivem (`javascript:`, `data:` e `//host` viram `#`); imagem perde o endereço. Título, opções e respostas são escapados pelo `html/template`.
-- *Cabeçalhos.* `Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+- *Cabeçalhos.* `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'` (sem `unsafe-inline`: nenhum `<script>` nem `style=` nas páginas), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+- *Cache.* Páginas: `no-store`. Estáticos, nunca `public` (a web fica atrás de `basic_auth`): `app.css`, `htmx.min.js` e `app.js` pedidos com `?v=<hash do conteúdo embutido>` levam `private, max-age=31536000, immutable`; fontes, imagens e o que vem sem hash, `private, max-age=86400`. Não testado atrás do Caddy.
 - *Limites.* Corpo do POST até 16 KiB (413), resposta até 8 KiB (413), caracteres de controle recusados (400; a quebra de linha e a tabulação passam).
 - *Log.* Só método, rota (o padrão, `/p/{projeto}/{ref}/{n}`, sem o caminho nem a query) e status.
 

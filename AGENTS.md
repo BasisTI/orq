@@ -11,7 +11,9 @@ go test -race ./...
 gofmt -l .        # tem de sair vazio
 ```
 
-O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`internal/cli`) sobe o próprio binário de teste como segundo processo; `go test -short` o pula.
+O CI (`.github/workflows/ci.yml`) roda os três no job `unit`, que não instala Node. O job `frontend` refaz o build do CSS e falha se `internal/web/estatico/` não bate, e roda `npm run contraste`. O teste de concorrência (`internal/cli`) sobe o próprio binário de teste como segundo processo; `go test -short` o pula.
+
+**Node só para quem edita o frontend da web** (`internal/web/tmpl/` ou `internal/web/frontend/input.css`): Node 24 (`internal/web/frontend/.nvmrc`; o determinismo do build só foi provado nele). Rode `scripts/build-frontend.sh` e commite `internal/web/estatico/`. `go build`, `go install` e `scripts/build-plugin.sh` seguem sem Node.
 
 ## Layout
 
@@ -22,7 +24,7 @@ O CI (`.github/workflows/ci.yml`) roda os três. O teste de concorrência (`inte
 - `internal/tui`: o `orq tui` (bubbletea v2 + lipgloss v2, de `charm.land`). Não volte ao bubbletea v1: o `init` dele consulta o fundo do terminal (OSC 11) em todo processo, e qualquer comando `orq` num tty que não responde esperava 5 s. `tela.go` desenha a partir do snapshot, sem terminal, e é o que os testes conferem (texto, estilos, OSC 8); `modelo.go` é o laço, o teclado e o mouse.
 - `internal/limpeza`: `recursos.json` da US, `orq limpar` (panes, worktree, branches, pastas, Docker por rótulo) e a limpeza automática do daemon (`auto.go`). Plano e execução usam os mesmos itens: o `--dry-run` é o plano sem executar.
 - `internal/pendencias`: o arquivo de pendência (`arquivo.go`), a importação do daemon e de `orq pend importar` (`importar.go`) e o `Avisador` que avisa o coordenador (`avisador.go`, com a implementação do Herdr e a nula). O daemon o chama pelo campo `Pendencias`, como a limpeza, para `enriquecer` não importá-lo.
-- `internal/web`: o servidor das pendências dentro do daemon (`orq daemon --web`): socket Unix ou loopback, `html/template`, markdown pelo goldmark sem `WithUnsafe`. Escreve só pela `Store` (`ResponderPendencia`).
+- `internal/web`: o servidor das pendências dentro do daemon (`orq daemon --web`): socket Unix ou loopback, `html/template`, markdown pelo goldmark sem `WithUnsafe`. Escreve só pela `Store` (`ResponderPendencia`). `estatico/` (CSS, htmx, fontes, imagens) é gerado por `scripts/build-frontend.sh` a partir de `frontend/` e embutido por `//go:embed estatico`; a CSP não aceita `<script>` nem `style=` inline. Spec em `docs/central-web-v2.md`.
 - `internal/herdrcfg`: edição do `config.toml` do Herdr para `orq plugin configurar|desconfigurar` (lexer que preserva o texto, backup, `herdr config check` e restauração).
 - `herdr-plugin.toml` e `scripts/build-plugin.sh`: o plugin do Herdr e o build dele.
 - `internal/herdrfalso`: herdr falso dos testes de `orq central abrir` (árvore de splits em JSON, regras do Herdr 0.9.3) e dos avisos (`agent get`/`agent prompt`, com o status do agente em cada pane). Os testes o compilam uma vez (`go build`; `falsotest` monta um por teste); não entra no binário `orq`.

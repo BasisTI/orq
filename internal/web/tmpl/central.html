@@ -1,7 +1,7 @@
 {{define "idade"}}{{if .Nunca}}<span class="idade idade-nunca">sem dado</span>{{else}}<span class="idade{{if .Vencido}} idade-vencida{{end}}">{{.Idade}}{{if .Vencido}} · vencido{{end}}</span>{{end}}{{if .Erro}} <span class="selo selo-erro">falhou: {{.Erro}}</span>{{end}}{{end}}
 
 {{define "central"}}{{template "topo" .}}
-<h1>Central</h1>
+<h1 class="t-pagina">Central</h1>
 <p class="nota">Somente leitura. Gerada {{.Gerado}}; esta página recarrega a cada 30 s.</p>
 <section class="fontes" aria-label="Idade do cache">
 {{range .Fontes}}<div class="fonte"><strong>{{.Nome}}</strong> {{template "idade" .Frescor}}</div>
