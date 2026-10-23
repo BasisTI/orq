@@ -272,7 +272,7 @@ func TestCorpoDaPendencia(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d\n%s", w.Code, html)
 	}
-	contem(t, html, `<form class="resposta" method="post" action="/p/orq/15/1/responder" hx-post="/p/orq/15/1/responder" hx-target="closest .pend" hx-swap="outerHTML">`,
+	contem(t, html, `<form class="resposta" method="post" action="/p/orq/15/1/responder" hx-post="/p/orq/15/1/responder" hx-sync="closest #principal:queue all" hx-target="closest .pend" hx-swap="outerHTML">`,
 		`<div class="erro" role="alert"></div>`, `name="texto"`, `name="opcao" value="1"`, `name="opcao" value="2"`, "recomendada", "Enviar resposta", `href="/p/orq/15/1"`)
 	// O markdown do agente nunca vira HTML: o <script> e o <img onerror> saem escapados.
 	naoContem(t, html, "<script", "<img", "javascript:", "<details", "hx-include")
@@ -395,7 +395,7 @@ func TestPostComHXRequestNaAbaPendencias(t *testing.T) {
 		t.Errorf("o #comp da resposta (%v) não é a composição de agora (%s)", m, novo.Get("comp"))
 	}
 	naoContem(t, html, `id="vivo"`)
-	if _, h, _ := c.vivo(novo, atual); strings.Contains(h, "aviso-lista") {
+	if _, h, _ := c.vivo(novo, atual); strings.Contains(h, "A lista mudou") {
 		t.Errorf("o ciclo seguinte à resposta avisa lista mudada:\n%s", h)
 	}
 	// Trocar a resposta fica no lugar: sem embrulho, sem contadores.
@@ -543,7 +543,9 @@ func TestVivoDaAbaPendencias(t *testing.T) {
 	}
 	contem(t, html, `id="fontes"`, `id="aba-n-pendencias"`, `id="grupo-n-esp"`, `id="grupo-n-resp"`)
 	// Nunca toca o corpo aberto nem o texto digitado, nem a lista.
-	naoContem(t, html, "<form", "<textarea", "<input", "<select", "pend-corpo", "<details", "<body", "<main", `id="vivo"`, `id="situacao"`, `id="lista-`, `id="aviso-lista"`)
+	naoContem(t, html, "<form", "<textarea", "<input", "<select", "pend-corpo", "<details", "<body", "<main", `id="vivo"`, `id="situacao"`, `id="lista-`, "A lista mudou")
+	// Lista igual: limpa o aviso que um ciclo anterior deixou (M1, story 28).
+	contem(t, html, `<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true"></div>`)
 	// Lista diferente da da página: não mexe nos grupos e avisa.
 	q.Set("v", "0000")
 	_, html, _ = c.vivo(q, "/pendencias")

@@ -26,6 +26,7 @@
 {{range .Abas}}<li{{if .Fim}} class="abas-fim"{{end}}><a href="{{.Href}}"{{if .Atual}} aria-current="page"{{end}}>{{if .TemTom}}<i class="tom tom-{{.Tom}}" aria-hidden="true"></i>{{end}}{{.Rotulo}}{{template "aba-n" .}}</a></li>
 {{end}}</ul></nav>{{end}}
 <main id="principal" class="pagina"><div class="{{if .Cheia}}cheia{{else}}estreita{{if .Larga}} larga{{end}}{{end}}">
+<div id="espera" class="aviso-lista" role="status" aria-live="polite"></div>
 {{end}}
 
 {{define "rodape"}}</div></main>
