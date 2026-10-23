@@ -1,5 +1,29 @@
+{{/* O banner fica dentro de um cartão provisório (.banner-cartao, §10 da spec): a arte nova, da
+     story 5, vai direto sobre a página e a classe some. O cartão só entra em 401 e 404; os demais
+     erros são um aviso, sem a arte. */}}
+{{define "banner-img"}}<img class="banner-img" src="/estatico/orq-banner-light.png" width="880" height="440" alt="orq: um orc de jaqueta preta equilibrando três esferas luminosas sobre a mão" loading="lazy">{{end}}
+
 {{define "erro"}}{{template "topo" .}}
+{{if .Banner}}<section class="banner-cartao">
+{{template "banner-img"}}
+<div class="banner-txt">
 <h1 class="t-pagina">{{.Titulo}}</h1>
-<p class="aviso erro" role="alert">{{.Mensagem}}</p>
-<p class="voltar"><a href="{{.Voltar}}"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Voltar</a></p>
+<p role="alert">{{.Mensagem}} <span class="apagado">Código {{.Codigo}}.</span></p>
+{{if .Dica}}<p class="meta">{{.Dica}}</p>{{end}}
+{{if .Voltar}}<p class="acoes"><a class="btn btn-primary" href="{{.Voltar}}">Voltar</a></p>{{end}}
+</div>
+</section>
+{{else}}<h1 class="t-pagina">{{.Titulo}}</h1>
+<p class="aviso erro" role="alert"><svg class="ic" aria-hidden="true"><use href="#i-alerta"/></svg><span>{{.Mensagem}} <span class="codigo">Código {{.Codigo}}.</span></span></p>
+{{if .Voltar}}<p class="acoes"><a class="btn btn-primary" href="{{.Voltar}}">Voltar</a></p>{{end}}
+{{end}}
 {{template "rodape" .}}{{end}}
+
+{{define "vazio"}}<section class="banner-cartao">
+{{template "banner-img"}}
+<div class="banner-txt">
+<h2 class="t-pagina">Nenhuma onda aberta</h2>
+<p>Nenhum coordenador registrado. As ondas aparecem aqui quando um coordenador cria uma com <code>orq onda criar</code>. As encerradas ficam no diário de cada onda.</p>
+<p class="acoes"><a class="btn btn-primary" href="/">Ver pendências</a><a class="btn" href="/central">Atualizar</a></p>
+</div>
+</section>{{end}}

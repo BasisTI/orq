@@ -162,7 +162,9 @@ func (s *Servidor) comUsuario(next http.Handler) http.Handler {
 				return
 			}
 			if usuario == "" || len(usuario) > 100 || strings.ContainsFunc(usuario, output.UnsafeRune) {
-				http.Error(w, "sem usuário autenticado: o proxy precisa enviar o cabeçalho "+s.cabecalho(), http.StatusUnauthorized)
+				s.paginaErro(w, r, http.StatusUnauthorized, "Acesso não autenticado",
+					"A requisição não passou pela autenticação do proxy, então a Central não sabe quem você é. Entre pelo endereço de sempre.",
+					"O proxy precisa enviar o cabeçalho "+s.cabecalho()+".", "")
 				return
 			}
 		} else if !s.hostPermitido(r.Host) {
@@ -209,10 +211,18 @@ func (s *Servidor) pagina(w http.ResponseWriter, status int, nome string, dados 
 }
 
 func (s *Servidor) erro(w http.ResponseWriter, r *http.Request, status int, titulo, msg, voltar string) {
+	s.paginaErro(w, r, status, titulo, msg, "", voltar)
+}
+
+// paginaErro desenha a página de erro. O banner (num cartão provisório, spec §10) é só do 401 e
+// do 404: os outros erros são um aviso, sem a arte. dica é uma linha a mais, esmaecida.
+func (s *Servidor) paginaErro(w http.ResponseWriter, r *http.Request, status int, titulo, msg, dica, voltar string) {
 	s.pagina(w, status, "erro", struct {
 		base
-		Mensagem, Voltar string
-	}{base{Titulo: titulo, Usuario: usuarioDe(r)}, msg, voltar})
+		Mensagem, Dica, Voltar string
+		Codigo                 int
+		Banner                 bool
+	}{base{Titulo: titulo, Usuario: usuarioDe(r)}, msg, dica, voltar, status, status == http.StatusUnauthorized || status == http.StatusNotFound})
 }
 
 // falha traduz o erro da Central no status HTTP; o que não é do usuário vira 500 sem detalhe.
@@ -220,7 +230,7 @@ func (s *Servidor) falha(w http.ResponseWriter, r *http.Request, err error, volt
 	e := output.AsError(err)
 	switch {
 	case e.Exit == output.ExitNotFound:
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", e.Cause, "/")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", e.Cause, "/")
 	case e.Code == "pendencia_resolvida":
 		s.erro(w, r, http.StatusConflict, "Já resolvida", e.Cause, voltar)
 	case e.Exit == output.ExitUsage:
@@ -375,7 +385,7 @@ func (s *Servidor) detalhe(w http.ResponseWriter, r *http.Request) {
 func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	ref, ok := pendDe(r)
 	if !ok {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Endereço de pendência inválido.", "/")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Endereço de pendência inválido.", "/")
 		return
 	}
 	ctx := r.Context()
@@ -476,7 +486,7 @@ func textoDoHistorico(h central.RespostaRegistrada) string {
 func (s *Servidor) responder(w http.ResponseWriter, r *http.Request) {
 	ref, ok := pendDe(r)
 	if !ok {
-		s.erro(w, r, http.StatusNotFound, "Não encontrada", "Endereço de pendência inválido.", "/")
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", "Endereço de pendência inválido.", "/")
 		return
 	}
 	voltar := refs.RotaPendencia(ref.US.Projeto, ref.US.Ref, ref.Numero)

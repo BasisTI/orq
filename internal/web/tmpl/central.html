@@ -35,6 +35,6 @@
 </article>
 {{else}}<p class="vazio">Sem ondas abertas.</p>{{end}}
 </section>
-{{else}}<p class="vazio">Nenhum coordenador registrado.</p>{{end}}
+{{else}}{{template "vazio" .}}{{end}}
 <p class="nota">Estado da MR: <em>pronta</em> = aberta, fora de rascunho e mesclável para a forja (não quer dizer que alguém aprovou: repositório sem exigência de revisão fica pronto sem aprovação); <em>aberta</em> = algo ainda bloqueia o merge. O pipeline e a aprovação de cada MR vêm da forja; <em>desconhecido</em> é dado que a forja não deu ou que ainda não foi consultado.</p>
 {{template "rodape" .}}{{end}}
