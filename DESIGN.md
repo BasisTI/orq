@@ -28,8 +28,6 @@ colors:
   selo-info-texto: "#0A5E88"
   selo-marca-fundo: "#E2E9F2"
   selo-neutro-fundo: "#E8EDF2"
-  banner-creme: "#FEFAF2"
-  banner-creme-borda: "#EADFC7"
   tom-0: "#2B6CB0"
   tom-1: "#B7791F"
   tom-2: "#2F855A"
@@ -140,9 +138,6 @@ components:
     textColor: "#FFFFFF"
     rounded: "{rounded.field}"
     padding: "0.7rem 1rem"
-  cartao-banner-provisorio:
-    backgroundColor: "{colors.banner-creme}"
-    rounded: "{rounded.box}"
 ---
 
 # Design System: orq Central web v2
@@ -295,9 +290,8 @@ Visível ≥1280px, sticky. Dois blocos brancos de 1px: "Idade dos dados" (fonte
 Lista branca de 1px (`ol` sem marcador), um evento por linha: quando (esmaecido, 5.5rem), tipo (700) e detalhe; a partir de 760px, três colunas. Paginador abaixo. Nada de pane.
 
 ### Banner e telas de vazio e erro
-`orq-banner-light.png` (880×440, orc com três esferas luminosas) aparece **só** na tela vazia ("nenhuma onda aberta") e nas páginas de erro (401, 404).
-- **Hoje (provisório):** dentro de um cartão creme (`#FEFAF2`, borda `#EADFC7`, 0.5rem), com o texto abaixo; na implementação, atrás de uma só classe (`.banner-cartao`).
-- **Regra vigente com a arte nova:** a pessoa está refazendo a arte com fundo `#EDF1F5` (`base-200`) ou transparente. Quando o arquivo chegar, o banner vai **direto sobre a página, sem cartão creme**; o fundo da arte e o da página são o mesmo token. Arquivo novo pendente da pessoa.
+`orq-banner-light.png` (880×440, orc com três esferas luminosas, fundo cinza-frio) aparece **só** na tela vazia ("nenhuma onda aberta") e nas páginas de erro (401, 404).
+- **Regra vigente:** o banner vai **direto sobre a página, sem cartão**, com o texto abaixo; o fundo da arte e o da página são o mesmo token (`base-200`, `#EDF1F5`). A arte tem as quatro bordas esfumadas até esse tom exato, só nos pixels de fundo, para não haver emenda; na implementação é `.banner` (margem) + `.banner-img` + `.banner-txt`.
 - O banner escuro não entra. O banner nunca aparece em tela com dados.
 
 ## Do's and Don'ts
@@ -321,7 +315,7 @@ Lista branca de 1px (`ol` sem marcador), um evento por linha: quando (esmaecido,
 - **Don't** transmitir estado só por cor, nem usar a cor do projeto fora do ponto, nem passar de 4 tons.
 - **Don't** usar texto laranja `#F68B1F` nem esmaecer texto abaixo de 70%.
 - **Don't** mostrar nome, pane ou workspace do Herdr; **don't** mostrar dado vencido como atual.
-- **Don't** pôr o banner em tela com dados, nem o banner escuro; **don't** manter o cartão creme depois que a arte nova chegar.
+- **Don't** pôr o banner em tela com dados, nem o banner escuro; **don't** pôr cartão (nem o creme) atrás do banner.
 - **Don't** trocar o que está aberto ou digitado na atualização de 30 s.
 
 ## Decisões de produto que viraram regra visual

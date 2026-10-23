@@ -273,7 +273,7 @@ Status devolvidos, como hoje: 400, 409 `pendencia_resolvida`, 413, 415, 503.
 - **O que nunca é trocado:** o `<details>` (e portanto se está aberto), o corpo de uma pendência, o formulário e o que foi digitado nele. Nada com `<form>`, `<textarea>`, `<input>` ou `.pend-corpo` está na resposta do `/vivo`. **Teste:** um teste de `httptest` garante que o corpo do `/vivo` não contém essas marcas (§8.1).
 - **Mudança de composição (onda nova, onda encerrada, ordem por atenção que muda depois de uma resposta, pendência nova ou resolvida numa US exibida):** o hash do servidor (ids e ordem das ondas, US de cada uma, ids das pendências exibidas e abas) difere do `v` da página. Aí o `/vivo` **não insere, remove nem reordena nada** e continua atualizando **no lugar** só os alvos que a página tem (barras das ondas e linhas das US de `o`/`u`, contagens de `a`, situação, idade dos dados), e acrescenta `<div id="aviso-lista" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>`. A pessoa decide quando recarregar (aprovado em 2026-10-22). **A tela nunca reordena sozinha embaixo da mão de quem está lendo, e nunca fica parada: o que está na página segue vivo.** Provado no navegador (`vivo.mjs`): prioridade que muda após resposta, onda nova e onda encerrada (accordion aberto e texto digitado intactos, zero erro de console). `v` inválido/ausente vale como lista diferente; listas inválidas, como vazias.
 - **Aba em segundo plano:** o navegador já reduz os temporizadores a cerca de 1 por minuto; a spec **não** usa filtro de gatilho de visibilidade, porque, com `allowEval:false`, a condição vira sempre verdadeira (§5.1).
-- **Temporizador e benchmark (M17).** Como o `#vivo` não é trocado, o ciclo é de 30 s de relógio entre pedidos (o htmx rearma depois de cada resposta). O `BenchmarkVivo` da story 2 mede a duração de **uma** resposta do `/vivo` (o `Snapshot` mais a renderização) e o tamanho dela, não ciclos por relógio de parede.
+- **Temporizador e benchmark (M17).** Como o `#vivo` não é trocado, o ciclo é de 30 s de relógio (o temporizador é rearmado após cada disparo; a spec não promete intervalo exato entre pedidos sob resposta lenta, fila ou redução de temporizadores pelo navegador). O `BenchmarkVivo` da story 2 mede a duração de **uma** resposta do `/vivo` (o `Snapshot` mais a renderização) e o tamanho dela, não ciclos por relógio de parede.
 - **Custo no daemon:** o `/vivo` roda no processo do daemon (`orq daemon --web`) e custa **um `Snapshot`**: uma transação de leitura do SQLite (WAL) sobre o cache que o daemon já gravou, sem chamar Herdr, forja nem Taiga (S). Uma pessoa por máquina (P) e algumas abas abertas dão uma leitura a cada 30 s por aba. A story 2 mede o tempo do `Snapshot` com a Central do protótipo (9 ondas) num `BenchmarkVivo` e registra o número no relatório; se passar de 50 ms, o `/vivo` ganha um cache de 5 s por processo (a chave é a versão do banco). **Isso é uma proposta de limite, não uma medição.**
 - **Diário e erros** não fazem `/vivo`; o diário de hoje recarrega por `<meta refresh>`, e o v2 o troca pelo `/vivo` da onda só se a story 4 provar que a lista de eventos cabe num oob; senão fica sem recarga automática e o README é atualizado.
 
@@ -316,11 +316,10 @@ Status devolvidos, como hoje: 400, 409 `pendencia_resolvida`, 413, 415, 503.
 
 ## 10. O banner
 
-A arte do `orq-banner-light.png` está sendo refeita pela pessoa, com **fundo `#EDF1F5` (`base-200`), do mesmo tamanho (880×440 depois da redução), ou transparente**. Regra:
+A arte do `orq-banner-light.png` é a refeita pela pessoa (880×440 depois da redução), com o fundo esfumado até **`#EDF1F5` (`base-200`)** nas bordas. Regra vigente:
 
-- **Com o banner novo, ele vai direto sobre a página, sem o cartão creme**, na tela vazia ("nenhuma onda aberta") e nas páginas de erro (401, 404). O fundo cinza-frio da arte e o da página têm de ser o mesmo token.
-- **Até a arte chegar**, a implementação mantém o banner atual dentro de um cartão com o creme `#FEFAF2`, o que o protótipo mostra. O cartão é **provisório** e fica atrás de uma classe só (`.banner-cartao`), para a story 5 removê-lo sem mexer nas telas.
-- **Arquivo pendente da pessoa.** Quem acompanha a entrega do arquivo é o coordenador; a story 5 só começa quando ele existir em `referencias/` (ver §11).
+- **O banner vai direto sobre a página, sem cartão**, na tela vazia ("nenhuma onda aberta") e nas páginas de erro (401, 404). O fundo cinza-frio da arte e o da página têm de ser o mesmo token.
+- O cartão creme provisório (`#FEFAF2`) foi removido na story 5 (#26).
 - O banner escuro (`orq-banner.png`) **não entra** (P, tema só claro).
 
 ## 11. Proposta de stories
@@ -345,11 +344,11 @@ Cada uma cabe numa rodada de executor e tem revisão independente. Títulos no i
 - **Aceite:** `POST` com `HX-Request` devolve o item e as contagens; sem `HX-Request` redireciona; 401 sem cabeçalho no socket Unix; 413, 415, 409 viram alerta **dentro do formulário, sem perder o texto** (teste de navegador); combinação impossível na URL é normalizada; o `/vivo` não toca o corpo aberto; **Voltar depois de dois filtros mantém a página inteira**; o item muda de grupo e o grupo vazio mostra a frase; capturas 390/1440 da cascata em uso e de uma pendência respondida (contagens atualizadas).
 
 **4. Redesenhar o diário da onda e as páginas de erro.** *(depende da 1; pode andar junto da 2 ou da 3)*
-- `/onda/{id}` em lista, com o paginador e a regra de nada de pane; vazio, 401 e 404 com o banner provisório (§10); mensagens de erro do `falha` no visual novo.
+- `/onda/{id}` em lista, com o paginador e a regra de nada de pane; vazio, 401 e 404 com o banner (§10); mensagens de erro do `falha` no visual novo.
 - **Aceite:** os testes da #16 do diário passam sem mudar a lista `camposDoDiario`; 404 para onda inexistente e id mal formado; capturas 390/1440 do diário, do vazio e dos erros.
 
 **5. Trocar o banner pela arte nova, sem o cartão creme.** *(depende da 4 e da arte da pessoa)*
-- Substitui `orq-banner-light.png` pela arte nova, remove `.banner-cartao`, confere que o fundo da arte é o `base-200`. Atualiza o `DESIGN.md` e o `PRODUCT.md` (regra do banner: de "provisório" para "vigente").
+- Substitui `orq-banner-light.png` pela arte nova, remove o cartão provisório, confere que o fundo da arte é o `base-200`. Atualiza o `DESIGN.md` e o `PRODUCT.md` (regra do banner: de "provisório" para "vigente").
 - **Aceite:** capturas 390/1440 da tela vazia e do 404 sem emenda visível entre a arte e a página; o peso da imagem ≤ 400 KB.
 
 **Ordem:** 1 → 2 → 3, com a 4 em paralelo à 2 ou à 3, e a 5 por último e só com a arte. **Revisão independente em todas.** A story 1 é a de maior risco (CSP e CI do frontend); se a revisão achar que o build não é determinístico entre máquinas, a 2 espera. **Ações fora do repositório, do coordenador:** atualizar a skill `orquestrador` depois da story 3; conferir a regra por caminho do Caddy para `/` e `/estilo.css`, se existir.

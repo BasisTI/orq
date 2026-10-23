@@ -15,7 +15,7 @@ func TestPaginasDeErroUsamOBannerProvisorio(t *testing.T) {
 		if code != 404 {
 			t.Fatalf("GET %s = %d, quer 404", p, code)
 		}
-		contem(t, html, `class="banner-cartao"`, "/estatico/orq-banner-light.png", "Página não encontrada", "Código 404.", `role="alert"`, `href="`)
+		contem(t, html, `class="banner"`, "/estatico/orq-banner-light.png", "Página não encontrada", "Código 404.", `role="alert"`, `href="`)
 		if temInline(html) {
 			t.Errorf("%s tem script ou estilo inline", p)
 		}
@@ -30,7 +30,7 @@ func TestErrosDoFalhaSemBanner(t *testing.T) {
 	}
 	html := corpo(w)
 	contem(t, html, "Formato não aceito", "Código 415.", `class="aviso erro"`, `role="alert"`)
-	naoContem(t, html, "banner-cartao", "orq-banner-light.png")
+	naoContem(t, html, `class="banner"`, "orq-banner-light.png")
 }
 
 func TestSemUsuarioNoSocketUnixDevolve401EmHTML(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSemUsuarioNoSocketUnixDevolve401EmHTML(t *testing.T) {
 			t.Errorf("%s: Content-Type %q", p, ct)
 		}
 		html := corpo(w)
-		contem(t, html, `class="banner-cartao"`, "Acesso não autenticado", "Código 401.", "X-Orq-User")
+		contem(t, html, `class="banner"`, "Acesso não autenticado", "Código 401.", "X-Orq-User")
 		naoContem(t, html, "alfa", "Onda de alfa")
 		if temInline(html) {
 			t.Errorf("%s tem script ou estilo inline", p)
@@ -59,12 +59,12 @@ func TestCentralVaziaMostraOBanner(t *testing.T) {
 	if code != 200 {
 		t.Fatal(code)
 	}
-	contem(t, html, `class="banner-cartao"`, "Nenhuma onda aberta", "Nenhum coordenador registrado")
+	contem(t, html, `class="banner"`, "Nenhuma onda aberta", "Nenhum coordenador registrado")
 	_, o := c.coord("alfa", "wA:p1", "proj", 7, "")
 	_, html = c.get("/central")
-	naoContem(t, html, "banner-cartao", "orq-banner-light.png")
+	naoContem(t, html, `class="banner"`, "orq-banner-light.png")
 	_, html = c.get(fmt.Sprintf("/onda/%d", o.ID))
-	naoContem(t, html, "banner-cartao", "orq-banner-light.png") // o banner nunca aparece com dados
+	naoContem(t, html, `class="banner"`, "orq-banner-light.png") // o banner nunca aparece com dados
 }
 
 func TestDiarioEmListaComPaginador(t *testing.T) {
