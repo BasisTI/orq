@@ -272,7 +272,7 @@ func TestCorpoDaPendencia(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d\n%s", w.Code, html)
 	}
-	contem(t, html, `<form class="resposta" method="post" action="/p/orq/15/1/responder" hx-post="/p/orq/15/1/responder" hx-target="closest .pend" hx-swap="outerHTML">`,
+	contem(t, html, `<form class="resposta" method="post" action="/p/orq/15/1/responder" hx-post="/p/orq/15/1/responder" hx-sync="closest #principal:queue all" hx-target="closest .pend" hx-swap="outerHTML">`,
 		`<div class="erro" role="alert"></div>`, `name="texto"`, `name="opcao" value="1"`, `name="opcao" value="2"`, "recomendada", "Enviar resposta", `href="/p/orq/15/1"`)
 	// O markdown do agente nunca vira HTML: o <script> e o <img onerror> saem escapados.
 	naoContem(t, html, "<script", "<img", "javascript:", "<details", "hx-include")

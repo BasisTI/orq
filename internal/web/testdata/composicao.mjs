@@ -152,6 +152,104 @@ if (caso === 'M2') {
   await c.ctx.close();
 }
 
+// M3 (#28): dois envios na mesma aba antes de a primeira resposta voltar. A rota segura cada
+// resposta até os dois POSTs terem saído (ou 1,5 s, quando o segundo só sai depois da primeira
+// resposta, que é o que a serialização faz) e a entrega na ordem. Depois das duas, #comp e os
+// contadores batem com as linhas, o ciclo seguinte não avisa à toa, as duas respostas estão
+// gravadas (recarregar mostra as duas em Respondidas) e o segundo POST levou o #comp já atualizado.
+if (caso === 'concorrente') {
+  const c = await abrir();
+  const { pagina } = c;
+  const posts = [];
+  let saidos = 0;
+  await pagina.route('**/responder', async (rota) => {
+    const corpo = new URLSearchParams(rota.request().postData() ?? '');
+    posts.push({ url: rota.request().url(), comp: corpo.get('comp'), opcao: corpo.get('opcao') });
+    saidos++;
+    const resposta = await rota.fetch();
+    const fim = Date.now() + 1500;
+    while (saidos < 2 && Date.now() < fim) await new Promise((r) => setTimeout(r, 25));
+    await rota.fulfill({ response: resposta });
+  });
+  await pagina.goto(base + '/pendencias?projeto=nuvem', { waitUntil: 'networkidle' });
+  await abrirItem(pagina, 'nuvem-78-1');
+  await abrirItem(pagina, 'nuvem-78-2');
+  await pagina.fill('#pend-nuvem-78-2 textarea', 'segunda resposta');
+  await pagina.fill('#pend-nuvem-78-1 textarea', 'comentário que fica');
+  await pagina.check('#pend-nuvem-78-1 input[name=opcao][value="1"]');
+  if (await pagina.locator('#pend-nuvem-78-2 input[name=opcao]').count()) await pagina.check('#pend-nuvem-78-2 input[name=opcao][value="1"]');
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  await pagina.waitForFunction(() => document.querySelectorAll('#lista-resp .pend-ok').length >= 2, null, { timeout: 8000 }).catch(() => {});
+  await pagina.waitForTimeout(400);
+  const e = await estado(pagina);
+  coerente(e, 'concorrente');
+  if (posts.length !== 2) falha(`concorrente: ${posts.length} POSTs, esperava 2`);
+  if (posts.length === 2 && posts[0].comp === posts[1].comp) falha(`concorrente: os dois POSTs levaram o mesmo comp (${posts[0].comp})`);
+  if (!e.resp.includes('pend-nuvem-78-1') || !e.resp.includes('pend-nuvem-78-2')) falha(`concorrente: os dois itens não estão em Respondidas (${e.esp} | ${e.resp})`);
+  if (e.esp.includes('pend-nuvem-78-1') || e.esp.includes('pend-nuvem-78-2')) falha(`concorrente: item ainda em Esperando (${e.esp})`);
+  const compEsp = e.comp.split(';')[0].replace(/^e:/, '').split(',').filter(Boolean).length;
+  const compResp = e.comp.split(';')[1]?.replace(/^r:/, '').split(',').filter(Boolean).length ?? 0;
+  const nEsp = e.esp ? e.esp.split(',').length : 0, nResp = e.resp ? e.resp.split(',').length : 0;
+  if (compEsp !== nEsp || compResp !== nResp) falha(`concorrente: #comp ${e.comp} com ${nEsp}/${nResp} linhas`);
+  if (e.aviso) falha(`concorrente: aviso espúrio antes do ciclo (${e.aviso})`);
+  const o = await pagina.evaluate(() => document.querySelectorAll('#aviso').length);
+  if (o !== 1) falha(`concorrente: ${o} #aviso`);
+  await ciclo(pagina);
+  const d = await estado(pagina);
+  coerente(d, 'concorrente (depois do ciclo)');
+  if (d.aviso) falha(`concorrente: "A lista mudou" espúrio depois do ciclo (${d.aviso}); #comp=${d.comp}`);
+  // As duas gravadas: uma página nova (outro contexto, sem relógio falso) mostra as duas respondidas.
+  const c2 = await abrir();
+  await c2.pagina.goto(base + '/pendencias?projeto=nuvem', { waitUntil: 'networkidle' });
+  const r = await estado(c2.pagina);
+  for (const id of ['pend-nuvem-78-1', 'pend-nuvem-78-2']) if (!r.resp.includes(id)) falha(`concorrente: ${id} não foi gravada (${r.esp} | ${r.resp})`);
+  await saude(c, 'concorrente');
+  await saude(c2, 'concorrente (recarga)');
+  await c2.ctx.close();
+  await c.ctx.close();
+}
+
+// O mesmo caso na US dentro da Central: as contagens são as do servidor (idempotentes), então não há
+// composição a combinar; as duas respostas voltam em ordem e nada fica fora do lugar.
+if (caso === 'concorrente na Central') {
+  const c = await abrir();
+  const { pagina } = c;
+  let saidos = 0;
+  await pagina.route('**/responder', async (rota) => {
+    saidos++;
+    const resposta = await rota.fetch();
+    const fim = Date.now() + 1500;
+    while (saidos < 2 && Date.now() < fim) await new Promise((r) => setTimeout(r, 25));
+    await rota.fulfill({ response: resposta });
+  });
+  await pagina.goto(base + '/', { waitUntil: 'networkidle' });
+  await pagina.evaluate(() => {
+    const us = document.querySelector('#us-nuvem-78');
+    for (let e = us; e; e = e.parentElement?.closest('details')) e.open = true;
+  });
+  await abrirItem(pagina, 'nuvem-78-1');
+  await abrirItem(pagina, 'nuvem-78-2');
+  await pagina.fill('#pend-nuvem-78-1 textarea', 'primeira');
+  await pagina.fill('#pend-nuvem-78-2 textarea', 'segunda');
+  for (const n of [1, 2]) if (await pagina.locator(`#pend-nuvem-78-${n} input[name=opcao]`).count()) await pagina.check(`#pend-nuvem-78-${n} input[name=opcao][value="1"]`);
+  await pagina.click('#pend-nuvem-78-1 button[type=submit]');
+  await pagina.click('#pend-nuvem-78-2 button[type=submit]');
+  await pagina.waitForFunction(() => document.querySelectorAll('#us-nuvem-78 .pend-ok').length >= 2, null, { timeout: 8000 }).catch(() => {});
+  await pagina.waitForTimeout(400);
+  const e = await pagina.evaluate(() => ({
+    ok: document.querySelectorAll('#us-nuvem-78 .pend-ok').length,
+    total: document.querySelectorAll('#us-nuvem-78 .pend').length,
+    selo: document.querySelector('#us-nuvem-78-barra .selo-aviso')?.textContent.trim() ?? null,
+    avisos: document.querySelectorAll('#aviso').length,
+  }));
+  if (e.ok !== e.total || e.total < 2) falha(`Central: ${e.ok} respondidas de ${e.total} pendências na US`);
+  if (e.selo) falha(`Central: a US ainda diz "${e.selo}" com tudo respondido`);
+  if (e.avisos !== 1) falha(`Central: ${e.avisos} #aviso`);
+  await saude(c, 'concorrente na Central');
+  await c.ctx.close();
+}
+
 await navegador.close();
 console.log(JSON.stringify({ problemas }));
 process.exit(problemas.length ? 1 : 0);

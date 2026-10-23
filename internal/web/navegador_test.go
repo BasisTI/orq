@@ -260,7 +260,7 @@ func TestNavegadorPendencias(t *testing.T) {
 func TestNavegadorComposicao(t *testing.T) {
 	pw, chrome := ferramentasDoNavegador(t)
 	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
-	for _, caso := range []string{"pendência nova", "pendência resolvida por outro", "onda nova", "onda encerrada", "sem mudança alheia", "M1", "M2"} {
+	for _, caso := range []string{"pendência nova", "pendência resolvida por outro", "onda nova", "onda encerrada", "sem mudança alheia", "M1", "M2", "concorrente", "concorrente na Central"} {
 		t.Run(caso, func(t *testing.T) {
 			st := abrirStore(t)
 			semear(t, context.Background(), st)
