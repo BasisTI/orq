@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -201,8 +202,9 @@ type Pendencias struct {
 	Abas []Aba
 	Cascata
 	Esperam, Respondidas []PendItem
-	// Hash identifica a lista exibida (filtro, opções e itens com o estado): o /vivo compara o que
-	// a página tem com o do servidor e, se mudou, avisa em vez de mexer na lista.
+	// Hash identifica o filtro, as opções dos selects e as abas; Composicao, os itens de cada grupo.
+	// O /vivo compara os dois com o que a página diz ter (hx-vals estático e o campo #comp) e, se
+	// mudou, avisa em vez de mexer na lista.
 	Hash string
 	// Fontes e FontesOob alimentam a coluna lateral ("Idade dos dados").
 	Fontes    []FonteVista
@@ -248,8 +250,8 @@ func vistaPendencias(snap central.Snapshot, agora time.Time, f FiltroPend) Pende
 	return p
 }
 
-// hashPendencias é o começo do SHA-256 do filtro, das opções, das abas e dos itens com o estado,
-// sem depender da ordem.
+// hashPendencias é o começo do SHA-256 do filtro, das opções e das abas: o que a resposta de um
+// POST nunca muda na página. Os itens e o grupo de cada um vão na Composicao.
 func hashPendencias(p Pendencias) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "f%s\n", p.Filtro.Query())
@@ -259,21 +261,52 @@ func hashPendencias(p Pendencias) string {
 		}
 		h.Write([]byte{'\n'})
 	}
-	var itens []string
-	for _, it := range p.Esperam {
-		itens = append(itens, it.Anchor+":a")
-	}
-	for _, it := range p.Respondidas {
-		itens = append(itens, it.Anchor+":r")
-	}
-	sort.Strings(itens)
-	for _, it := range itens {
-		fmt.Fprintf(h, "%s\n", it)
-	}
 	for _, a := range p.Abas {
 		fmt.Fprintf(h, "a%s\n", a.ID)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// Composicao é a lista de itens de cada grupo, sem depender da ordem: "e:a,b;r:c". É o que a página
+// diz ter renderizado (campo #comp). O POST a atualiza com a mudança que ele mesmo aplicou ao DOM
+// (o item que passou de grupo) e nada além: a pendência que chegou depois da carga continua
+// diferente do que a página tem, e o /vivo avisa.
+func (p Pendencias) Composicao() string {
+	var e, r []string
+	for _, it := range p.Esperam {
+		e = append(e, it.Anchor)
+	}
+	for _, it := range p.Respondidas {
+		r = append(r, it.Anchor)
+	}
+	return montarComp(e, r)
+}
+
+func montarComp(e, r []string) string {
+	sort.Strings(e)
+	sort.Strings(r)
+	return "e:" + strings.Join(e, ",") + ";r:" + strings.Join(r, ",")
+}
+
+var compValida = regexp.MustCompile(`^e:[a-z0-9_,-]*;r:[a-z0-9_,-]*$`)
+
+// lerComp lê a composição que a página mandou (campo #comp). Inválida ou grande demais: ok falso.
+func lerComp(s string) (e, r []string, ok bool) {
+	if len(s) > 8192 || !compValida.MatchString(s) {
+		return nil, nil, false
+	}
+	pe, pr, _ := strings.Cut(s, ";r:")
+	for _, x := range strings.Split(strings.TrimPrefix(pe, "e:"), ",") {
+		if x != "" {
+			e = append(e, x)
+		}
+	}
+	for _, x := range strings.Split(pr, ",") {
+		if x != "" {
+			r = append(r, x)
+		}
+	}
+	return e, r, true
 }
 
 // Vals é o hx-vals estático do #vivo da aba Pendências: o hash da lista e as abas que a página

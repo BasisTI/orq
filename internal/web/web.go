@@ -397,6 +397,7 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		LimiteTexto                 int
 		// Os campos do formulário compartilhado com o corpo da pendência (modelo "form-resp").
 		HX         bool
+		ComComp    bool
 		Trocar     bool
 		Href       string
 		AtualOpcao int

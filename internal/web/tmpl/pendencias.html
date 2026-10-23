@@ -4,7 +4,7 @@
      ou hx-post declara o próprio hx-target e hx-swap (o hx-swap é herdado). */}}
 {{define "pend"}}<details class="pend{{if .Respondida}} pend-ok{{end}}{{if .Nova}} pend-nova{{end}}" id="{{.Anchor}}" data-estado="{{.Estado}}" hx-get="{{.CorpoHref}}" hx-trigger="toggle once" hx-target="find .pend-corpo" hx-swap="innerHTML"><summary class="pend-sum">{{template "chev"}}<span class="pend-chave">{{.ID}}</span><span class="selo selo-tipo">{{if .Icone}}{{template "ic" .Icone}}{{end}}{{.Tipo}}</span><span class="pend-idade">{{.Idade}}</span><span class="pend-titulo">{{.Titulo}}</span><span class="pend-estado">{{if .Respondida}}<span class="selo selo-ok">{{template "ic" "check"}}respondida</span>{{end}}{{if .SemDetalhe}}<span class="selo selo-apagado">[sem detalhe]</span>{{end}}{{if .SemCoordenador}}<span class="selo selo-aviso">sem coordenador</span>{{end}}</span></summary><div class="pend-corpo"><p class="vazio-linha">Abra para ler o contexto e responder. <a href="{{.Href}}">Abrir só esta pendência</a></p></div></details>{{end}}
 
-{{define "form-resp"}}<form class="resposta" method="post" action="{{.Acao}}"{{if .HX}} hx-post="{{.Acao}}" hx-target="closest .pend" hx-swap="outerHTML"{{end}}>
+{{define "form-resp"}}<form class="resposta" method="post" action="{{.Acao}}"{{if .HX}} hx-post="{{.Acao}}"{{if .ComComp}} hx-include="#comp"{{end}} hx-target="closest .pend" hx-swap="outerHTML"{{end}}>
 {{if .P.Opcoes}}<fieldset class="opcoes"><legend>{{if .Trocar}}Sua nova escolha{{else}}Sua escolha{{end}}</legend>
 {{range .P.Opcoes}}<label class="opcao"><input type="radio" class="radio radio-primary radio-sm" name="opcao" value="{{.ID}}"{{if eq .ID $.AtualOpcao}} checked{{end}} required><span class="opcao-texto"><span class="opcao-titulo">{{.ID}} · {{.Titulo}}{{if .Recomendada}} <span class="selo selo-recomendada">{{template "ic" "check"}}recomendada</span>{{end}}</span>{{if .Descricao}}<span class="opcao-desc">{{.Descricao}}</span>{{end}}</span></label>
 {{end}}</fieldset>{{end}}
@@ -38,7 +38,8 @@
 <section class="grupo" aria-labelledby="t-resp"><h2 id="t-resp" class="grupo-t">Respondidas <span class="grupo-n" id="grupo-n-resp">{{.NResp}}</span></h2>
 <div id="lista-resp" class="pend-lista">{{range .Respondidas}}{{template "pend" .}}{{end}}</div>
 <p id="vazio-resp" class="vazio-linha vazio-caixa"{{if .Respondidas}} hidden{{end}}>Nenhuma pendência respondida para este filtro.</p></section>
-<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-trigger="every 30s" hx-swap="none" hidden></div>
+<input type="hidden" id="comp" name="comp" value="{{.Composicao}}">
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-include="#comp" hx-trigger="every 30s" hx-swap="none" hidden></div>
 </section>{{end}}
 
 {{define "pendencias"}}{{template "topo" .}}
@@ -65,11 +66,11 @@
      grupo de baixo pelo oob com embrulho: o afterbegin insere o conteúdo do elemento, não ele. */}}
 {{define "resposta"}}{{if .Principal}}{{template "pend" .Item}}{{end}}
 {{if .Mover}}<div hx-swap-oob="afterbegin:#lista-resp">{{template "pend" .Item}}</div>
-<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.Pend.NEsp}}</span>
-<span class="grupo-n" id="grupo-n-resp" hx-swap-oob="true">{{.Pend.NResp}}</span>
-<p id="vazio-esp" class="vazio-linha vazio-caixa"{{if .Pend.Esperam}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência esperando para este filtro.</p>
-<p id="vazio-resp" class="vazio-linha vazio-caixa"{{if .Pend.Respondidas}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência respondida para este filtro.</p>
-<div id="vivo" hx-get="/vivo" hx-vals="{{.Pend.Vals}}" hx-trigger="every 30s" hx-swap="none" hx-swap-oob="true" hidden></div>
+<span class="grupo-n" id="grupo-n-esp" hx-swap-oob="true">{{.NEsp}}</span>
+<span class="grupo-n" id="grupo-n-resp" hx-swap-oob="true">{{.NResp}}</span>
+<p id="vazio-esp" class="vazio-linha vazio-caixa"{{if .NEsp}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência esperando para este filtro.</p>
+<p id="vazio-resp" class="vazio-linha vazio-caixa"{{if .NResp}} hidden{{end}} hx-swap-oob="true">Nenhuma pendência respondida para este filtro.</p>
+{{end}}{{if .Comp}}<input type="hidden" id="comp" name="comp" value="{{.Comp}}" hx-swap-oob="true">
 {{end}}{{if .AbaPend}}{{template "aba-n" .AbaPend}}
 {{end}}{{if .Situacao}}{{template "situacao" .Situacao}}
 {{end}}{{if .Onda}}{{template "onda-barra" .Onda}}

@@ -101,8 +101,14 @@ func queryDaPagina(t *testing.T, c *cena, caminho string) url.Values {
 		t.Fatalf("%s não tem o #vivo", caminho)
 	}
 	q, _ := url.ParseQuery(valsParaQuery(m[1]))
+	// A aba Pendências manda também a composição que renderizou (hx-include="#comp").
+	if cm := compRe.FindStringSubmatch(h); cm != nil {
+		q.Set("comp", html.UnescapeString(cm[1]))
+	}
 	return q
 }
+
+var compRe = regexp.MustCompile(`id="comp" name="comp" value="([^"]*)"`)
 
 func (c *cena) vivo(q url.Values, atual string) (int, string, http.Header) {
 	c.t.Helper()

@@ -96,6 +96,7 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
       allowEval: window.htmx?.config?.allowEval,
       historyRestoreAsHxRequest: window.htmx?.config?.historyRestoreAsHxRequest,
       historyCacheSize: window.htmx?.config?.historyCacheSize,
+      settle: window.htmx?.config?.attributesToSettle?.join(','),
       carlito: document.fonts.check('16px Carlito') && [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'Carlito' && f.status === 'loaded'),
       interTight: [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'Inter Tight' && f.status === 'loaded'),
       fundoCabecalho: (document.querySelector('.cab') ? getComputedStyle(document.querySelector('.cab')).backgroundColor : null),
@@ -109,6 +110,7 @@ for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 14
     if (estado.htmx !== 'object' || estado.allowEval !== false || estado.historyRestoreAsHxRequest !== false || estado.historyCacheSize !== 0) {
       falhas.push(`htmx/meta: ${JSON.stringify({ htmx: estado.htmx, allowEval: estado.allowEval, h: estado.historyRestoreAsHxRequest, c: estado.historyCacheSize })}`);
     }
+    if (estado.settle !== 'class,width,height') falha(`htmx attributesToSettle: ${estado.settle}`);
     if (!estado.carlito || !estado.interTight) falhas.push(`fontes não carregadas: ${JSON.stringify({ c: estado.carlito, i: estado.interTight })}`);
     if (estado.fundoCabecalho !== 'rgb(7, 26, 46)') falhas.push(`cabeçalho sem o navy do tema: ${estado.fundoCabecalho}`);
     if (estado.larguraRolavel > 0) falhas.push(`rolagem horizontal da página: ${estado.larguraRolavel}px`);

@@ -1,6 +1,7 @@
 package web
 
 import (
+	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -274,8 +275,12 @@ func TestCorpoDaPendencia(t *testing.T) {
 	contem(t, html, `<form class="resposta" method="post" action="/p/orq/15/1/responder" hx-post="/p/orq/15/1/responder" hx-target="closest .pend" hx-swap="outerHTML">`,
 		`<div class="erro" role="alert"></div>`, `name="texto"`, `name="opcao" value="1"`, `name="opcao" value="2"`, "recomendada", "Enviar resposta", `href="/p/orq/15/1"`)
 	// O markdown do agente nunca vira HTML: o <script> e o <img onerror> saem escapados.
-	naoContem(t, html, "<script", "<img", "javascript:", "<details")
+	naoContem(t, html, "<script", "<img", "javascript:", "<details", "hx-include")
 	contem(t, html, "&lt;script&gt;")
+	// Na aba Pendências o formulário inclui o #comp (na Central o campo não existe e o htmx reclamaria).
+	if h := corpo(f.hx("GET", "/p/orq/15/1/corpo", "/pendencias", "")); !strings.Contains(h, `hx-include="#comp"`) {
+		t.Errorf("o formulário da aba Pendências não inclui o #comp:\n%s", h)
+	}
 	if w.Header().Get("HX-Retarget") != "" || w.Header().Get("HX-Reswap") != "" {
 		t.Errorf("o /corpo não pode mandar HX-Retarget nem HX-Reswap: %v", w.Header())
 	}
@@ -339,11 +344,13 @@ func TestPostComHXRequestNaUS(t *testing.T) {
 	if err != nil || p.Estado != central.EstadoRespondida || derefStr(p.Resposta) != "autorizado" || derefStr(p.RespondidaPor) != "local" {
 		t.Fatalf("pendência = %+v %v", p, err)
 	}
-	// Trocar a resposta não muda as contagens: o item no lugar, sem situação nem aba.
+	// Trocar a resposta: o item no lugar; as contagens são as do servidor e não mudam.
 	w = c.f.hx("POST", "/p/catalogo/405/1/responder", "/", form(url.Values{"opcao": {"1"}, "texto": {"autorizado de novo"}}))
 	html = corpo(w)
 	contem(t, html, `id="pend-catalogo-405-1"`, "Resposta trocada: TG-405#P1")
-	naoContem(t, html, `id="situacao"`, `id="aba-n-pendencias"`, `id="onda-1-barra"`)
+	if m := regexp.MustCompile(`id="aba-n-pendencias"[^>]*>(\d+)<`).FindStringSubmatch(html); m == nil || m[1] != "4" {
+		t.Errorf("a troca mudou a contagem da aba: %v", m)
+	}
 }
 
 func TestPostComHXRequestNaAbaPendencias(t *testing.T) {
@@ -362,6 +369,7 @@ func TestPostComHXRequestNaAbaPendencias(t *testing.T) {
 		`<span [^>]*hx-swap-oob="true">[^<]*</span>`,
 		`<p id="vazio-[a-z]+"[^>]*hx-swap-oob="true">[^<]*</p>`,
 		`<div id="[a-z]+"[^>]*hx-swap-oob="true"[^>]*>[^<]*</div>`,
+		`<input type="hidden" id="comp"[^>]*>`,
 	} {
 		principal = regexp.MustCompile(re).ReplaceAllString(principal, "")
 	}
@@ -379,20 +387,64 @@ func TestPostComHXRequestNaAbaPendencias(t *testing.T) {
 	if m := regexp.MustCompile(`<p id="vazio-resp"[^>]*>`).FindString(html); !strings.Contains(m, "hidden") {
 		t.Errorf("o grupo respondidas tem item e a frase aparece: %q", m)
 	}
-	// O #vivo é rearmado com o hash novo: senão o próximo ciclo avisaria "A lista mudou" à toa.
-	contem(t, html, `id="vivo"`)
+	// A página passa a ter a composição dela com o item no outro grupo (#comp, oob), e só isso: o
+	// #vivo não é rearmado e o ciclo seguinte não avisa lista mudada.
 	novo := queryDaPagina(t, c, "/pendencias?onda=3")
-	if !strings.Contains(html, html2(`"v":"`+novo.Get("v")+`"`)) {
-		t.Errorf("o #vivo não leva o hash da lista de agora (%s)", novo.Get("v"))
+	m := compRe.FindStringSubmatch(html)
+	if m == nil || html2(novo.Get("comp")) != m[1] {
+		t.Errorf("o #comp da resposta (%v) não é a composição de agora (%s)", m, novo.Get("comp"))
 	}
+	naoContem(t, html, `id="vivo"`)
 	if _, h, _ := c.vivo(novo, atual); strings.Contains(h, "aviso-lista") {
-		t.Errorf("o ciclo seguinte ao rearme avisa lista mudada:\n%s", h)
+		t.Errorf("o ciclo seguinte à resposta avisa lista mudada:\n%s", h)
 	}
 	// Trocar a resposta fica no lugar: sem embrulho, sem contadores.
 	w = c.f.hx("POST", "/p/faturamento/513/1/responder", atual, form(url.Values{"texto": {"sim, de novo"}}))
 	html = corpo(w)
 	contem(t, html, `id="pend-faturamento-513-1"`)
 	naoContem(t, html, "afterbegin", "grupo-n-")
+}
+
+// S1: o POST aplica só a mudança dele à composição que a página mandou; pendência que chegou depois
+// da carga continua diferente e o /vivo avisa. M1: quem decide mover é a página, não a versão.
+func TestPostPublicaSoAComposicaoDaPagina(t *testing.T) {
+	c := semeada(t)
+	atual := "/pendencias?projeto=nuvem"
+	pagina := queryDaPagina(t, c, atual) // a página de antes de a P3 chegar
+	_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: refsUS("nuvem", 78), Tipo: "duvida", Titulo: "chegou depois", Autor: "w", Detalhe: "d", Slug: "p3", Hash: "p3"})
+	c.ok(err)
+	w := c.f.hx("POST", "/p/nuvem/78/1/responder", atual, form(url.Values{"opcao": {"1"}, "comp": {pagina.Get("comp")}}))
+	html := corpo(w)
+	m := compRe.FindStringSubmatch(html)
+	if w.Code != 200 || m == nil {
+		t.Fatalf("POST = %d\n%s", w.Code, html)
+	}
+	if strings.Contains(m[1], "pend-nuvem-78-3") {
+		t.Fatalf("o #comp publicou a pendência que a página nunca recebeu: %s", m[1])
+	}
+	contem(t, html, `afterbegin:#lista-resp`, `id="grupo-n-esp" hx-swap-oob="true">1<`, `id="grupo-n-resp" hx-swap-oob="true">1<`)
+	// O ciclo seguinte, com a composição que o POST deixou, avisa.
+	q := pagina
+	q.Set("comp", stdhtml.UnescapeString(m[1]))
+	_, h, _ := c.vivo(q, atual)
+	contem(t, h, "A lista mudou")
+	naoContem(t, h, "grupo-n-")
+	// M1: a aba antiga, com o item ainda em Esperando, responde uma pendência que já estava
+	// respondida: o item muda de grupo (RespostaVersao > 1 não decide).
+	c.ok2(c.st.ResponderPendencia(c.ctx, nil, refsPend("faturamento", 513, 1), central.Resposta{Texto: "outra aba", Por: "ana"}))
+	old := queryDaPagina(t, c, "/pendencias?onda=3")
+	old.Set("comp", "e:pend-faturamento-513-1;r:")
+	w = c.f.hx("POST", "/p/faturamento/513/1/responder", "/pendencias?onda=3", form(url.Values{"texto": {"de novo"}, "comp": {old.Get("comp")}}))
+	h = corpo(w)
+	contem(t, h, `afterbegin:#lista-resp`, `id="grupo-n-esp" hx-swap-oob="true">0<`, `id="grupo-n-resp" hx-swap-oob="true">1<`, "Resposta trocada")
+	// Item que a página já tem em Respondidas: fica no lugar.
+	w = c.f.hx("POST", "/p/faturamento/513/1/responder", "/pendencias?onda=3", form(url.Values{"texto": {"mais uma"}, "comp": {"e:;r:pend-faturamento-513-1"}}))
+	naoContem(t, corpo(w), "afterbegin", "grupo-n-")
+	// Composição inválida é ignorada, sem erro.
+	w = c.f.hx("POST", "/p/faturamento/513/1/responder", "/pendencias?onda=3", form(url.Values{"texto": {"x"}, "comp": {"<script>"}}))
+	if w.Code != 200 {
+		t.Errorf("comp inválida: %d", w.Code)
+	}
 }
 
 // html2 escapa um trecho como o html/template o escreve num atributo.
@@ -498,11 +550,11 @@ func TestVivoDaAbaPendencias(t *testing.T) {
 	contem(t, html, `id="aviso-lista"`, "A lista mudou", `id="fontes"`, `id="aba-n-pendencias"`)
 	naoContem(t, html, "grupo-n-")
 	// Pendência nova muda o hash.
-	antes := queryDaPagina(t, c, "/pendencias").Get("v")
+	antes := queryDaPagina(t, c, "/pendencias").Get("comp")
 	_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: refsUS("agenda", 221), Tipo: "duvida", Titulo: "nova", Autor: "w", Detalhe: "d", Slug: "n", Hash: "n"})
 	c.ok(err)
-	if depois := queryDaPagina(t, c, "/pendencias").Get("v"); depois == antes {
-		t.Error("pendência nova não muda o hash da aba Pendências")
+	if depois := queryDaPagina(t, c, "/pendencias").Get("comp"); depois == antes {
+		t.Error("pendência nova não muda a composição da aba Pendências")
 	}
 	// O filtro entra no hash: a mesma lista, filtrada, tem outro hash; e o /vivo lê o filtro do HX-Current-URL.
 	filtrado := queryDaPagina(t, c, "/pendencias?projeto=nuvem")

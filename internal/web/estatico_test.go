@@ -92,7 +92,7 @@ func TestPaginaReferenciaOsEstaticosComHashEServeComCacheCerto(t *testing.T) {
 	if len(achados) != 3 {
 		t.Fatalf("a página deveria referenciar app.css, htmx.min.js e app.js com ?v=: %v", achados)
 	}
-	for _, quer := range []string{`<link rel="icon" type="image/png" href="/estatico/orq-icon-64.png">`, `<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>`, `data-theme="basis-interno"`, `aria-current="page"`} {
+	for _, quer := range []string{`<link rel="icon" type="image/png" href="/estatico/orq-icon-64.png">`, `<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false,"attributesToSettle":["class","width","height"],"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>`, `data-theme="basis-interno"`, `aria-current="page"`} {
 		if !strings.Contains(html, quer) {
 			t.Errorf("a página não tem %s", quer)
 		}

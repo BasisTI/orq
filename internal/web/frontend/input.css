@@ -451,8 +451,12 @@ details[open] > summary .chev { rotate: 90deg; }
 .hist-item .ic:first-child { color: #0E5C38; }
 
 /* a confirmação da resposta: uma região role="status" que some sozinha (animação de CSS, sem JS).
-   Só opacidade e visibilidade: vale também com prefers-reduced-motion. */
+   Com prefers-reduced-motion some de uma vez, sem fade, depois do mesmo tempo (aviso-corte). */
 .aviso-flash { position: fixed; left: 50%; bottom: 1rem; translate: -50% 0; max-width: min(92vw, 28rem); background: var(--navy); color: #fff; padding: .7rem 1rem; border-radius: var(--radius-field); box-shadow: 0 6px 20px rgba(0, 0, 0, .25); z-index: 60; }
 .aviso-flash:empty { display: none; }
 .aviso-flash:not(:empty) { animation: aviso-some 6s linear 1 forwards; }
 @keyframes aviso-some { 0%, 85% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes aviso-corte { 0% { visibility: visible; } 100% { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .aviso-flash:not(:empty) { animation: aviso-corte 6s step-end 1 forwards !important; }
+}

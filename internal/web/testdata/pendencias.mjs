@@ -22,6 +22,7 @@ const falha = (m) => problemas.push(m);
 // Os dois console.error de cada 4xx que o próprio teste provoca (spec §5.1, S6), e só eles.
 const PERMITIDOS_4XX = ['Failed to load resource', 'Response Status Error Code'];
 let esperando4xx = 0;
+let passo = '';
 
 async function abrir(largura, altura = 900, escala = 1) {
   const ctx = await navegador.newContext({ viewport: { width: largura, height: altura }, deviceScaleFactor: escala, reducedMotion: 'reduce' });
@@ -30,7 +31,7 @@ async function abrir(largura, altura = 900, escala = 1) {
   pagina.on('console', (m) => {
     if (m.type() !== 'error' && m.type() !== 'warning') return;
     if (esperando4xx > 0 && PERMITIDOS_4XX.some((p) => m.text().includes(p))) return;
-    falha(`console.${m.type()} em ${aqui()}: ${m.text()}`);
+    falha(`console.${m.type()} em ${aqui()} [${passo}]: ${m.text().slice(0, 90)} @ ${JSON.stringify(m.location())}`);
   });
   pagina.on('pageerror', (e) => falha(`pageerror em ${aqui()}: ${e.message}`));
   pagina.on('requestfailed', (r) => falha(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
@@ -78,7 +79,7 @@ const filtrar = async (pagina, seletor, valor, esperaUrl) => {
   await pagina.waitForTimeout(120);
 };
 
-const cenario = async (nome, fn) => { try { await fn(); } catch (e) { falha(`${nome}: ${String(e.message).split('\n')[0]}`); } };
+const cenario = async (nome, fn) => { passo = nome; try { await fn(); } catch (e) { falha(`${nome}: ${String(e.message).split('\n')[0]}`); } };
 
 // ---------- A) cascata em uso, a URL guardando o filtro e o botão Voltar ----------
 if (!celular) await cenario('A', async () => {
@@ -101,6 +102,7 @@ if (!celular) await cenario('A', async () => {
   await verificarSaude(pagina, 'A(cascata)');
   if (capturas) await pagina.screenshot({ path: join(capturas, 'cascata-1440.png'), fullPage: true });
 
+  passo = 'A voltar';
   // Voltar depois de dois filtros mantém a página inteira (B3).
   for (const [alvo, esperado] of [['/pendencias?projeto=nuvem', 'nuvem'], ['/pendencias', '']]) {
     await pagina.goBack();
@@ -117,6 +119,7 @@ if (!celular) await cenario('A', async () => {
   const fa = await foto(pagina);
   if (!fa.cab || !fa.conteudo || fa.selProjeto !== 'nuvem') falha(`A: Avançar: ${JSON.stringify(fa)}`);
 
+  passo = 'A trocar';
   // Trocar um filtro de cima limpa os de baixo.
   await filtrar(pagina, '#f-coord', 'cais', '/pendencias?coord=cais&projeto=nuvem');
   await filtrar(pagina, '#f-onda', '5', '/pendencias?coord=cais&onda=5&projeto=nuvem');

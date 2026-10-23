@@ -111,7 +111,7 @@ func (s *Servidor) vivoPendencias(w http.ResponseWriter, snap central.Snapshot, 
 		}
 	}
 	v.Abas, v.FontesOob = as, true
-	v.Igual = q.Get("v") == v.Hash
+	v.Igual = q.Get("v") == v.Hash && q.Get("comp") == v.Composicao()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.modelos.ExecuteTemplate(w, "vivo-pend", struct {
 		Pendencias
@@ -138,6 +138,8 @@ type corpoPend struct {
 	LimiteTexto                 int
 	// HX: o formulário envia por hx-post (no corpo do accordion); na página /p/… é um formulário comum.
 	HX bool
+	// ComComp: a página tem o campo #comp (aba Pendências) e o POST o inclui.
+	ComComp bool
 	// Trocar: o formulário abre com a resposta atual indicada.
 	Trocar      bool
 	AtualOpcao  int
@@ -194,7 +196,9 @@ func (s *Servidor) corpo(w http.ResponseWriter, r *http.Request) {
 		s.falha(w, r, err, "/")
 		return
 	}
-	s.pagina(w, http.StatusOK, "pend-corpo", s.dadosCorpo(p, ref, r.URL.Query().Get("trocar") == "1"))
+	d := s.dadosCorpo(p, ref, r.URL.Query().Get("trocar") == "1")
+	d.ComComp = abaDe(r.Header.Get("HX-Current-URL")).Tipo == abaDePend
+	s.pagina(w, http.StatusOK, "pend-corpo", d)
 }
 
 // respostaDados é o que o modelo "resposta" recebe: o item respondido e as contagens que mudaram
@@ -205,12 +209,16 @@ type respostaDados struct {
 	// senão a resposta principal é vazia, o item sai de cima e entra no grupo de baixo (Mover).
 	Principal bool
 	Mover     bool
-	Pend      *Pendencias
-	AbaPend   *Aba
-	Situacao  *SituacaoVista
-	Onda      *OndaVista
-	US        *USVista
-	Aviso     string
+	// Comp é a composição que a página passa a ter (a que ela mandou, com o item no outro grupo) e
+	// NEsp/NResp as contagens dos grupos dela: o que a página mostra, não o que o banco tem.
+	Comp        string
+	NEsp, NResp int
+	Pend        *Pendencias
+	AbaPend     *Aba
+	Situacao    *SituacaoVista
+	Onda        *OndaVista
+	US          *USVista
+	Aviso       string
 }
 
 // respostaFragmento responde o POST com HX-Request: o item respondido e as contagens, escolhidas
@@ -226,31 +234,56 @@ func (s *Servidor) respostaFragmento(w http.ResponseWriter, r *http.Request, p c
 		d.Aviso = "Resposta trocada: " + p.ID + ". O coordenador é avisado."
 	}
 	aba := abaDe(r.Header.Get("HX-Current-URL"))
-	if snap, err := s.fonte().Snapshot(r.Context(), false); err == nil && !trocou {
-		switch aba.Tipo {
-		case abaDeTodos, abaDeProjeto:
-			c := vistaCentral(snap, agora, Filtro{Projeto: aba.Projeto})
-			d.AbaPend = abaPendencias(c.Abas)
-			c.Situacao.Oob = true
-			d.Situacao = &c.Situacao
-			for _, o := range c.Ondas {
-				if o.ID != p.OndaID {
-					continue
-				}
-				o.Oob = true
-				d.Onda = &o
-				anchor := "us-" + p.RefUS().Projeto + "-" + strconv.Itoa(p.RefUS().Ref)
-				for _, u := range o.US {
-					if u.Anchor == anchor {
-						u.Oob = true
-						d.US = &u
-					}
+	snap, err := s.fonte().Snapshot(r.Context(), false)
+	switch {
+	case err != nil:
+	case aba.Tipo == abaDeTodos || aba.Tipo == abaDeProjeto:
+		// Contagem do servidor, idempotente: serve também à troca de resposta.
+		c := vistaCentral(snap, agora, Filtro{Projeto: aba.Projeto})
+		d.AbaPend = abaPendencias(c.Abas)
+		c.Situacao.Oob = true
+		d.Situacao = &c.Situacao
+		for _, o := range c.Ondas {
+			if o.ID != p.OndaID {
+				continue
+			}
+			o.Oob = true
+			d.Onda = &o
+			anchor := "us-" + p.RefUS().Projeto + "-" + strconv.Itoa(p.RefUS().Ref)
+			for _, u := range o.US {
+				if u.Anchor == anchor {
+					u.Oob = true
+					d.US = &u
 				}
 			}
-		case abaDePend:
-			v := vistaPendencias(snap, agora, filtroDe(aba.Query))
-			d.AbaPend = abaPendencias(v.Abas)
-			d.Principal, d.Mover, d.Pend = false, true, &v
+		}
+	case aba.Tipo == abaDePend:
+		v := vistaPendencias(snap, agora, filtroDe(aba.Query))
+		d.AbaPend = abaPendencias(v.Abas)
+		// Quem decide se o item muda de grupo é a página que fez o pedido (a composição que ela
+		// mandou), não o banco: a versão da resposta não diz em que grupo o item está na tela.
+		e, rs, ok := lerComp(r.PostForm.Get("comp"))
+		if !ok && !trocou {
+			// Sem composição (cliente sem o campo): o primeiro envio move o item, a troca não.
+			rs = nil
+			for _, it := range v.Respondidas {
+				if it.Anchor != d.Item.Anchor {
+					rs = append(rs, it.Anchor)
+				}
+			}
+			e = []string{d.Item.Anchor}
+			for _, it := range v.Esperam {
+				e = append(e, it.Anchor)
+			}
+			ok = true
+		}
+		if ok && contemStr(e, d.Item.Anchor) {
+			e = tirarStr(e, d.Item.Anchor)
+			rs = append(rs, d.Item.Anchor)
+			d.Principal, d.Mover = false, true
+			d.Comp, d.NEsp, d.NResp = montarComp(e, rs), len(e), len(rs)
+		} else if ok {
+			d.Comp = montarComp(e, rs)
 		}
 	}
 	if d.AbaPend != nil {
@@ -270,4 +303,23 @@ func abaPendencias(abas []Aba) *Aba {
 		}
 	}
 	return nil
+}
+
+func contemStr(l []string, x string) bool {
+	for _, y := range l {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}
+
+func tirarStr(l []string, x string) []string {
+	var out []string
+	for _, y := range l {
+		if y != x {
+			out = append(out, y)
+		}
+	}
+	return out
 }

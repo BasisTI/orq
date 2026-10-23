@@ -36,6 +36,11 @@ func vazia(t *testing.T, unix bool) *cena {
 	return &cena{t: t, ctx: ctx, st: st, f: f}
 }
 
+func (c *cena) ok2(_ any, err error) {
+	c.t.Helper()
+	c.ok(err)
+}
+
 func (c *cena) ok(err error) {
 	c.t.Helper()
 	if err != nil {
