@@ -366,7 +366,7 @@ details[open] > summary .chev { rotate: 90deg; }
 .evento { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); padding: .65rem .9rem; margin: 0 0 .5rem; }
 .evdet { margin: .4rem 0 0; padding: .5rem; background: var(--color-base-200); border-radius: var(--radius-field); font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* ===== story 4 (#25): diário da onda, banner provisório e páginas de erro ===== */
+/* ===== story 4 (#25): diário da onda, banner e páginas de erro ===== */
 .onda-id { font-family: var(--font-display); color: var(--suave); }
 .p-meta { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center; margin: .25rem 0 1rem; color: #2B3A48; }
 .p-meta > span { display: inline-flex; gap: .3rem; align-items: center; }
@@ -386,9 +386,8 @@ details[open] > summary .chev { rotate: 90deg; }
 .aviso.erro .ic { margin-top: .3em; }
 .aviso .codigo { color: var(--suave); }
 
-/* Banner provisório (§10): o cartão creme é uma classe só, .banner-cartao. A story 5 troca a arte
-   e remove esta regra; o resto do bloco (.banner-img, .banner-txt) fica. */
-.banner-cartao { background: #FEFAF2; border: 1px solid #EADFC7; border-radius: var(--radius-box); overflow: hidden; margin: 1rem 0; }
+/* Banner (§10): direto sobre a página, sem cartão; o fundo da arte é o base-200. */
+.banner { margin: 1rem 0; }
 .banner-img { width: 100%; height: auto; display: block; }
 .banner-txt { padding: .5rem 1.25rem 1.5rem; display: grid; gap: .6rem; }
 .banner-txt .t-pagina { margin-top: .5rem; }

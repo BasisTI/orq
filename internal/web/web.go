@@ -233,7 +233,7 @@ func (s *Servidor) erro(w http.ResponseWriter, r *http.Request, status int, titu
 	s.paginaErro(w, r, status, titulo, msg, "", voltar)
 }
 
-// paginaErro desenha a página de erro. O banner (num cartão provisório, spec §10) é só do 401 e
+// paginaErro desenha a página de erro. O banner (direto sobre a página, spec §10) é só do 401 e
 // do 404: os outros erros são um aviso, sem a arte. dica é uma linha a mais, esmaecida.
 func (s *Servidor) paginaErro(w http.ResponseWriter, r *http.Request, status int, titulo, msg, dica, voltar string) {
 	s.pagina(w, status, "erro", struct {

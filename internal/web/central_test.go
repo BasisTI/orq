@@ -93,7 +93,7 @@ func TestCentralSemCoordenadores(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	contem(t, html, "Nenhuma onda aberta", "banner-cartao", `id="vivo"`, `hx-swap="none"`, "Idade dos dados", "sem dado", "<b>0</b> ondas abertas")
+	contem(t, html, "Nenhuma onda aberta", `class="banner"`, `id="vivo"`, `hx-swap="none"`, "Idade dos dados", "sem dado", "<b>0</b> ondas abertas")
 	naoContem(t, html, "Dados vencidos", `title="o cache passou do prazo da fonte"`, `http-equiv="refresh"`)
 }
 
@@ -366,10 +366,10 @@ func TestCentralVaziaComCoordenadorRegistrado(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	contem(t, html, `class="banner-cartao"`, "orq-banner-light.png", "Nenhuma onda aberta", "Coordenadores registrados, sem onda aberta: <strong>alfa</strong>", `id="vivo"`)
+	contem(t, html, `class="banner"`, "orq-banner-light.png", "Nenhuma onda aberta", "Coordenadores registrados, sem onda aberta: <strong>alfa</strong>", `id="vivo"`)
 	naoContem(t, html, "Nenhum coordenador registrado")
 	// Com uma onda, o banner some.
 	c.coord("beta", "wA:p2", "proj", 7, "")
 	_, html = c.get("/central")
-	naoContem(t, html, "banner-cartao")
+	naoContem(t, html, `class="banner"`)
 }

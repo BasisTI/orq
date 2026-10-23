@@ -43,7 +43,7 @@ A Central enxerga ao mesmo tempo as ondas, as US, os agentes (Herdr), as MRs (pi
 ## Brand Commitments
 
 - Tema `basis-interno` (skill `basis-web-frontend`), fixado pela pessoa: ação primária navy, laranja só como marca (ativo, foco, espera), conteúdo claro e frio, contraste WCAG medido. Só tema claro.
-- Arte do orq fornecida pelo Cedric: `orq-icon.png` no cabeçalho (com "orq" em texto) e como favicon; `orq-banner-light.png` só na tela vazia e na página de erro, e nunca com tela de dados. O banner escuro não entra. **O cartão creme (`#FEFAF2`) é provisório, não compromisso de marca:** a pessoa está refazendo a arte com fundo `#EDF1F5` (o do tema) ou transparente, e com ela o banner vai direto sobre a página, sem cartão; até lá, o creme em cartão mantém a arte atual.
+- Arte do orq fornecida pelo Cedric: `orq-icon.png` no cabeçalho (com "orq" em texto) e como favicon; `orq-banner-light.png` só na tela vazia e na página de erro, e nunca com tela de dados. O banner escuro não entra. **Vigente: o banner vai direto sobre a página (`base-200`), sem cartão.** A arte nova (fundo cinza-frio do tema, bordas esfumadas até `#EDF1F5`) substituiu a antiga; o cartão creme (`#FEFAF2`) saiu.
 
 ## Evidence on Hand
 

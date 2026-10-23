@@ -1,10 +1,9 @@
-{{/* O banner fica dentro de um cartão provisório (.banner-cartao, §10 da spec): a arte nova, da
-     story 5, vai direto sobre a página e a classe some. O cartão só entra em 401 e 404; os demais
-     erros são um aviso, sem a arte. */}}
+{{/* O banner vai direto sobre a página (.banner, §10 da spec), sem cartão: o fundo da arte é o
+     base-200. Só entra em 401 e 404; os demais erros são um aviso, sem a arte. */}}
 {{define "banner-img"}}<img class="banner-img" src="/estatico/orq-banner-light.png" width="880" height="440" alt="orq: um orc de jaqueta preta equilibrando três esferas luminosas sobre a mão" loading="lazy">{{end}}
 
 {{define "erro"}}{{template "topo" .}}
-{{if .Banner}}<section class="banner-cartao">
+{{if .Banner}}<section class="banner">
 {{template "banner-img"}}
 <div class="banner-txt">
 <h1 class="t-pagina">{{.Titulo}}</h1>
@@ -19,7 +18,7 @@
 {{end}}
 {{template "rodape" .}}{{end}}
 
-{{define "vazio"}}<section class="banner-cartao">
+{{define "vazio"}}<section class="banner">
 {{template "banner-img"}}
 <div class="banner-txt">
 <h2 class="t-pagina">Nenhuma onda aberta</h2>
