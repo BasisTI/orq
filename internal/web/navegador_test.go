@@ -271,3 +271,21 @@ func TestNavegadorComposicao(t *testing.T) {
 		})
 	}
 }
+
+// TestNavegadorRede: o envio que não chega ao servidor (rede caída, resposta que nunca vem, timeout
+// do formulário) escreve a mensagem no .erro do formulário, solta os campos e deixa a fila seguir;
+// o 409 do servidor não ganha aviso duplicado (spec §5.3).
+func TestNavegadorRede(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	for _, caso := range []string{"rede", "rede-primeiro", "pendurado", "pendurado com filtro", "409 sem aviso duplicado"} {
+		t.Run(caso, func(t *testing.T) {
+			st := abrirStore(t)
+			semear(t, context.Background(), st)
+			r := rodarNode(t, append(env, "ORQ_CASO="+caso), "rede.mjs", servirNoNavegador(t, st, nil))
+			for _, p := range r.Problemas {
+				t.Error(p)
+			}
+		})
+	}
+}
