@@ -9,7 +9,7 @@
 //    (#espera, aria-busy). Cada formulário envia uma vez só e leva o que estava escolhido no
 //    clique. Sair da página de vez (beforeunload) pede confirmação.
 // 4) Envio que não chega ao servidor (rede caiu, aborto, timeout do formulário): o htmx só dá o
-//    evento, então o .erro do próprio formulário diz que a resposta não foi enviada; o texto fica
+//    evento, então o .erro do próprio formulário diz que não foi possível confirmar o envio; o texto fica
 //    e o formulário está solto para reenviar. Erro 4xx/5xx já chega pelo HX-Retarget, sem aviso aqui.
 (function () {
   'use strict';
@@ -117,7 +117,7 @@
       liberar();
     });
     // O htmx dispara htmx:afterRequest antes destes três: o formulário já está solto e a fila segue.
-    var FALHA = 'A resposta não foi enviada. Verifique a conexão e envie de novo. O texto continua aqui.';
+    var FALHA = 'Não foi possível confirmar o envio. Confira se a resposta já aparece como respondida antes de enviar de novo. O texto continua aqui.';
     function falhou(e) {
       var f = deResposta(e.detail.elt), erro = f && f.isConnected && f.querySelector('.erro');
       if (!erro) return;

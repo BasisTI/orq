@@ -13,7 +13,7 @@ const caso = process.env.ORQ_CASO;
 const problemas = [];
 const falha = (m) => problemas.push(m);
 const navegador = await chromium.launch({ executablePath: process.env.ORQ_CHROMIUM, args: ['--no-sandbox'] });
-const MSG = 'A resposta não foi enviada';
+const MSG = 'Não foi possível confirmar o envio';
 // O htmx registra no console o evento de erro (htmx:afterRequest) e o navegador, o recurso que falhou.
 const ESPERADOS = /^console.error: htmx:(afterRequest|sendError|timeout|sendAbort)$|Failed to load resource|ERR_CONNECTION_FAILED/;
 const IDS = ['nuvem-78-1', 'nuvem-78-2', 'catalogo-405-1'];
