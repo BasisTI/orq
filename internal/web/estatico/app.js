@@ -8,6 +8,9 @@
 //    restaura o histórico (Voltar): os dois esperam o último envio terminar, e a página diz isso
 //    (#espera, aria-busy). Cada formulário envia uma vez só e leva o que estava escolhido no
 //    clique. Sair da página de vez (beforeunload) pede confirmação.
+// 4) Envio que não chega ao servidor (rede caiu, aborto, timeout do formulário): o htmx só dá o
+//    evento, então o .erro do próprio formulário diz que não foi possível confirmar o envio; o texto fica
+//    e o formulário está solto para reenviar. Erro 4xx/5xx já chega pelo HX-Retarget, sem aviso aqui.
 (function () {
   'use strict';
   function abrirAlvo() {
@@ -92,6 +95,8 @@
       if (!f) return;
       if (abertos.has(f)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       abertos.add(f);
+      var erro = f.querySelector('.erro');
+      if (erro) erro.replaceChildren();
       fixar(f);
     }, true);
     document.addEventListener('htmx:configRequest', function (e) {
@@ -111,6 +116,16 @@
       encerrar(deResposta(e.detail.elt));
       liberar();
     });
+    // O htmx dispara htmx:afterRequest antes destes três: o formulário já está solto e a fila segue.
+    var FALHA = 'Não foi possível confirmar o envio. Confira se a resposta já aparece como respondida antes de enviar de novo. O texto continua aqui.';
+    function falhou(e) {
+      var f = deResposta(e.detail.elt), erro = f && f.isConnected && f.querySelector('.erro');
+      if (!erro) return;
+      var p = document.createElement('p');
+      p.textContent = FALHA;
+      erro.replaceChildren(p);
+    }
+    ['htmx:sendError', 'htmx:timeout', 'htmx:sendAbort'].forEach(function (ev) { document.addEventListener(ev, falhou); });
     document.addEventListener('htmx:validation:halted', function (e) { encerrar(deResposta(e.detail.elt)); });
     // O htmx só envia o pedido do histórico se o evento não for cancelado: guardamos o pedido e o
     // enviamos quando o último envio terminar.
