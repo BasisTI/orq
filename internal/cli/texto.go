@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/output"
 )
 
@@ -29,7 +32,7 @@ func textoOndaResumo(w io.Writer, o central.Onda) error {
 	}
 	estado := ""
 	if o.EncerradaEm != nil {
-		estado = "  encerrada " + *o.EncerradaEm
+		estado = "  encerrada " + hora.DataHoraRFC(*o.EncerradaEm)
 	}
 	_, err := fmt.Fprintf(w, "onda %d  %s  [%s · até %s · %s]  %d/%d done%s\n", o.ID, q(o.Titulo), q(o.Coordenador), o.AutorizacaoAte, o.Ordem, feitas, len(o.US), estado)
 	return err
@@ -182,7 +185,7 @@ func respostaCurta(p central.Pendencia) string {
 }
 
 func textoEvento(w io.Writer, e central.Evento) error {
-	_, err := fmt.Fprintf(w, "%s  %s  %s  %s  %s\n", e.TS, ou(e.Coordenador), e.Tipo, ou(e.US), q(string(e.Detalhe)))
+	_, err := fmt.Fprintf(w, "%s  %s  %s  %s  %s\n", hora.DataHoraRFC(e.TS), ou(e.Coordenador), e.Tipo, ou(e.US), q(detalheLegivel(e.Detalhe)))
 	return err
 }
 
@@ -198,4 +201,20 @@ func ou(s *string) string {
 		return "-"
 	}
 	return q(*s)
+}
+
+// detalheLegivel troca, no detalhe de um evento, o instante RFC 3339 gravado
+// pelo sistema (anterior.em) por DD/MM/YYYY HH:MM em BRT. O resto vai como veio.
+func detalheLegivel(raw json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil || !hora.Anterior(m) {
+		return string(raw)
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(m) != nil {
+		return string(raw)
+	}
+	return strings.TrimSpace(b.String())
 }

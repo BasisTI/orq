@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 )
 
 // A tela sai do snapshot (spec §2.1): vistaCentral não abre banco, não chama ferramenta e não lê
@@ -393,9 +394,7 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 		ID: o.ID, Anchor: "onda-" + id, BarraID: "onda-" + id + "-barra", Titulo: o.Titulo, Coordenador: o.Coordenador,
 		Limite: "até " + o.AutorizacaoAte + " · " + o.Ordem, Href: "/onda/" + id, Total: len(o.US), Esperam: esperam,
 	}
-	if len(o.CriadaEm) >= 10 {
-		ov.Criada = o.CriadaEm[:10]
-	}
+	ov.Criada = hora.DataRFC(o.CriadaEm)
 	if ov.Titulo == "" {
 		ov.Titulo = "onda " + id
 	}

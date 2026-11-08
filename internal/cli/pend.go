@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/pendencias"
@@ -252,7 +253,7 @@ func textoPendVer(w io.Writer, v PendVer) error {
 		{Key: "tipo", Value: p.Tipo},
 		{Key: "título", Value: p.Texto},
 		{Key: "estado", Value: est},
-		{Key: "aberta em", Value: p.AbertaEm},
+		{Key: "aberta em", Value: hora.DataHoraRFC(p.AbertaEm)},
 		{Key: "autor", Value: ouStr(p.Autor, "-")},
 		{Key: "página", Value: v.URL},
 	}
@@ -289,7 +290,7 @@ func textoPendVer(w io.Writer, v PendVer) error {
 		if escolha == "" {
 			escolha = "só texto"
 		}
-		fmt.Fprintf(w, "\nresposta de %s em %s: %s\n", q(ouStr(p.RespondidaPor, "?")), *p.RespondidaEm, q(escolha))
+		fmt.Fprintf(w, "\nresposta de %s em %s: %s\n", q(ouStr(p.RespondidaPor, "?")), hora.DataHoraRFC(*p.RespondidaEm), q(escolha))
 		// Aqui a resposta vai inteira; só a listagem a abrevia.
 		if p.Resposta != nil && *p.Resposta != "" {
 			for _, l := range strings.Split(*p.Resposta, "\n") {
@@ -300,7 +301,7 @@ func textoPendVer(w io.Writer, v PendVer) error {
 	if len(v.Historico) > 1 {
 		fmt.Fprintln(w, "\nhistórico de respostas:")
 		for _, h := range v.Historico {
-			fmt.Fprintf(w, "  %s  %s  %s\n", h.Em, q(h.Por), q(respostaDoHistorico(h)))
+			fmt.Fprintf(w, "  %s  %s  %s\n", hora.DataHoraRFC(h.Em), q(h.Por), q(respostaDoHistorico(h)))
 		}
 	}
 	if !p.TemDetalhe {

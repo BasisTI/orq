@@ -13,6 +13,7 @@ import (
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/herdrcfg"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -290,7 +291,7 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 				case x.AtualizadoEm == nil:
 					add("fonte "+fo, "aviso", "nunca consultada")
 				default:
-					add("fonte "+fo, "ok", "atualizada em "+*x.AtualizadoEm)
+					add("fonte "+fo, "ok", "atualizada em "+hora.DataHoraRFC(*x.AtualizadoEm))
 				}
 			}
 		}
