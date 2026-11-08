@@ -210,6 +210,7 @@ func (a *App) ondaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			a.avisarPendenciasAbertas(ctx, st, o.ID, "")
 			return a.emit(o, func(w io.Writer) error { return textoOndaResumo(w, o) })
 		},
 	}
@@ -282,6 +283,9 @@ func (a *App) usCmd() *cobra.Command {
 			u, alterada, err := st.AtualizarStatus(ctx, coord, ref, m)
 			if err != nil {
 				return err
+			}
+			if alterada && u.Status == "done" {
+				a.avisarPendenciasAbertas(ctx, st, u.OndaID, u.Chave)
 			}
 			res := struct {
 				Alterada bool       `json:"alterada"`
