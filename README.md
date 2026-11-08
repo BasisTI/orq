@@ -93,8 +93,8 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
 | `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. Com todas as US no limite, `encerramento` diz o próximo passo (veja [Encerrar a onda](#encerrar-a-onda)). |
-| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). |
-| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. |
+| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). Avisa no stderr, uma linha por pendência ainda aberta ou só respondida da onda (chave e estado, sem o texto); não resolve nada nem muda o exit. |
+| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. Ao mudar para `done`, avisa no stderr das pendências abertas da US, como o `onda encerrar`. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. |
 | `orq pend importar <arquivo>` | Importa o arquivo de pendência (veja [Pendências com contexto](#pendências-com-contexto-e-resposta-pela-web)), como o daemon faz a cada 5 s; para quando o daemon está parado. |
 | `orq pend ver <ref>#P<n>` | A pendência inteira: detalhe, opções, resposta e quem a deu, histórico e origem. Aceita `projeto/312#P2`. |
