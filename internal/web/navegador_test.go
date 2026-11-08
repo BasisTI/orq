@@ -198,6 +198,15 @@ func controle(t *testing.T, st *central.Store) string {
 		_, err := st.RegistrarPendencia(ctx, central.NovaPendencia{US: refs.US{Projeto: r.URL.Query().Get("proj"), Ref: ref}, Tipo: "duvida", Titulo: "Chegou depois da carga", Autor: "w", Detalhe: "d", Slug: fmt.Sprintf("np%d", nPend), Hash: fmt.Sprintf("np%d", nPend)})
 		falha(w, err)
 	})
+	// O status da US (do coordenador) e o status do Taiga (do cache do daemon) mudam embaixo da página.
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		_, _, err := st.AtualizarStatus(ctx, nil, pend(r).US, central.MudancaStatus{Status: r.URL.Query().Get("status")})
+		falha(w, err)
+	})
+	mux.HandleFunc("/taiga", func(w http.ResponseWriter, r *http.Request) {
+		u := pend(r).US
+		falha(w, st.GravarCache(ctx, central.FonteTaiga, u.Chave(), central.ValorTaiga{Titulo: "Titulo", Status: r.URL.Query().Get("status"), URL: fmt.Sprintf("https://taiga.exemplo.invalid/project/%s/us/%d", u.Projeto, u.Ref)}, nil))
+	})
 	mux.HandleFunc("/resolver", func(w http.ResponseWriter, r *http.Request) {
 		_, err := st.ResolverPendencia(ctx, nil, pend(r), "resolvida pelo coordenador")
 		falha(w, err)
@@ -224,6 +233,19 @@ func TestNavegadorVivo(t *testing.T) {
 		env = append(env, "ORQ_CAPTURAS="+c)
 	}
 	r := rodarNode(t, env, "vivo.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+	for _, p := range r.Problemas {
+		t.Error(p)
+	}
+}
+
+// TestNavegadorVivoUS (US #41): estado, status do Taiga e pendência nova aparecem sem recarregar,
+// inclusive partindo de "Nenhuma pendência.", e a contagem do título concorda com a lista.
+func TestNavegadorVivoUS(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	st := abrirStore(t)
+	semear(t, context.Background(), st)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	r := rodarNode(t, env, "usvivo.mjs", servirNoNavegador(t, st, nil), controle(t, st))
 	for _, p := range r.Problemas {
 		t.Error(p)
 	}

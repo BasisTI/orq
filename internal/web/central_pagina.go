@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -155,6 +156,7 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	c := vistaCentral(snap, s.agora(), Filtro{Projeto: aba.Projeto})
 	igual := q.Get("v") == c.Hash
 	ondas, us, abas := conjunto(q.Get("o")), conjunto(q.Get("u")), conjunto(q.Get("a"))
+	tem := pendDaPagina(q["pi"])
 	c.Situacao.Oob, c.FontesOob = true, true
 	var as []Aba
 	for _, a := range c.Abas {
@@ -174,6 +176,7 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 		for _, u := range o.US {
 			if us[u.Anchor] {
 				u.Oob = true
+				u.PendMuda = pendMuda(u, tem)
 				uu = append(uu, u)
 			}
 		}
@@ -189,4 +192,49 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	if err != nil && s.Log != nil {
 		s.Log("web: modelo vivo: %v", err)
 	}
+}
+
+// pendDaPagina lê os "pi" (anchor:estado) das pendências que a página tem. Valor que não tem a
+// forma esperada é ignorado.
+func pendDaPagina(pi []string) map[string]string {
+	m := map[string]string{}
+	for i, v := range pi {
+		if i >= 2000 {
+			break
+		}
+		if a, e, ok := strings.Cut(v, ":"); ok && len(v) < 200 && pendAnchorValido.MatchString(a) && listaValida.MatchString(e) {
+			m[a] = e
+		}
+	}
+	return m
+}
+
+var pendAnchorValido = regexp.MustCompile(`^pend-[a-z0-9_-]+-[0-9]+-[0-9]+$`)
+
+// pendMuda compara a lista de pendências da US com a que a página tem (tem: anchor -> estado).
+// Só mexe no que mudou: insere a nova, troca a que mudou de estado e remove a que saiu da lista;
+// o que não mudou (aberto, com texto digitado) não vai na resposta.
+func pendMuda(u USVista, tem map[string]string) []PendMuda {
+	var out []PendMuda
+	alvo := u.Anchor + "-pend"
+	prefixo := "pend-" + strings.TrimPrefix(u.Anchor, "us-") + "-"
+	vistas := map[string]bool{}
+	for _, p := range u.Pendencias {
+		vistas[p.Anchor] = true
+		estado, na := tem[p.Anchor]
+		switch {
+		case !na:
+			out = append(out, PendMuda{Acao: "inserir", Alvo: alvo, Item: p})
+		case estado != p.Estado:
+			p.Oob = true
+			out = append(out, PendMuda{Acao: "trocar", Item: p})
+		}
+	}
+	for a := range tem {
+		if strings.HasPrefix(a, prefixo) && !vistas[a] {
+			out = append(out, PendMuda{Acao: "remover", Item: PendItem{Anchor: a}})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Item.Anchor < out[j].Item.Anchor })
+	return out
 }

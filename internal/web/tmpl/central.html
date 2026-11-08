@@ -22,18 +22,25 @@
 <span class="conta-wrap">{{if .Esperam}}<span class="selo selo-aviso" title="pendências esperando você">{{template "ic" "user"}}{{.Esperam}} {{if eq .Esperam 1}}espera você{{else}}esperam você{{end}}</span>{{end}}</span>
 </summary>{{end}}
 
+{{define "us-taiga"}}<dd id="{{.Anchor}}-taiga"{{if .Oob}} hx-swap-oob="true"{{end}}>{{if .TaigaNunca}}<span class="apagado">sem dado</span>{{else}}{{if .TaigaURL}}<a href="{{.TaigaURL}}" target="_blank" rel="noopener noreferrer">{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}<svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>{{else}}{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}{{end}} <span class="apagado idade">{{.TaigaIdade}}</span>{{end}}{{if .TaigaVencido}} {{template "vencido"}}{{end}}{{if .TaigaErro}} <span class="selo selo-erro">{{template "ic" "alerta"}}falhou: {{.TaigaErro}}</span>{{end}}</dd>{{end}}
+
+{{define "us-mrs"}}<div id="{{.Anchor}}-mrs"{{if .Oob}} hx-swap-oob="true"{{end}}>{{if .MRs}}<ul class="mrs">{{range .MRs}}{{template "c-mr" .}}{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma MR ligada a esta US.</p>{{end}}</div>{{end}}
+
+{{define "us-vazio"}}<p id="{{.Anchor}}-vazio" class="vazio-linha"{{if .Pendencias}} hidden{{end}}{{if .Oob}} hx-swap-oob="true"{{end}}>Nenhuma pendência.</p>{{end}}
+
 {{define "c-us"}}<details class="us" id="{{.Anchor}}">{{template "us-barra" .}}
 <div class="us-corpo">
 <dl class="us-dl">
-<div><dt>No Taiga</dt><dd>{{if .TaigaNunca}}<span class="apagado">sem dado</span>{{else}}{{if .TaigaURL}}<a href="{{.TaigaURL}}" target="_blank" rel="noopener noreferrer">{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}<svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>{{else}}{{if .TaigaStatus}}{{.TaigaStatus}}{{else}}sem status{{end}}{{end}} <span class="apagado idade">{{.TaigaIdade}}</span>{{end}}{{if .TaigaVencido}} {{template "vencido"}}{{end}}{{if .TaigaErro}} <span class="selo selo-erro">{{template "ic" "alerta"}}falhou: {{.TaigaErro}}</span>{{end}}</dd></div>
+<div><dt>No Taiga</dt>{{template "us-taiga" .}}</div>
 <div><dt>Projeto</dt><dd>{{template "proj" .Projeto}}</dd></div>
 <div><dt>Depende de</dt><dd>{{range .Dependencias}}<span class="dep">{{.}}</span> {{else}}<span class="apagado">nenhuma</span>{{end}}</dd></div>
 {{if .Papel}}<div><dt>Papel</dt><dd>{{.Papel}}</dd></div>{{end}}
 </dl>
 <h3 class="sec">Merge requests</h3>
-{{if .MRs}}<ul class="mrs">{{range .MRs}}{{template "c-mr" .}}{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma MR ligada a esta US.</p>{{end}}
+{{template "us-mrs" .}}
 <h3 class="sec">Pendências</h3>
-{{if .Pendencias}}<div class="pend-lista pend-lista-us">{{range .Pendencias}}{{template "pend" .}}{{end}}</div>{{else}}<p class="vazio-linha">Nenhuma pendência.</p>{{end}}
+<div class="pend-lista pend-lista-us" id="{{.Anchor}}-pend">{{range .Pendencias}}{{template "pend" .}}{{end}}</div>
+{{template "us-vazio" .}}
 </div></details>{{end}}
 
 {{define "onda-barra"}}<summary class="onda-sum" id="{{.BarraID}}"{{if .Oob}} hx-swap-oob="true"{{end}}>
@@ -95,12 +102,12 @@
 </div>
 {{template "rail" .}}
 </div>
-<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-trigger="every 30s" hx-swap="none" hidden></div>
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-include=".us-corpo input[name=pi]" hx-trigger="every 30s" hx-swap="none" hidden></div>
 {{template "rodape" .}}{{end}}
 
 {{define "vivo"}}{{template "situacao" .Situacao}}
 {{template "fontes" .}}
 {{range .Abas}}{{template "aba-n" .}}{{end}}
-{{range .Ondas}}{{template "onda-barra" .}}{{range .US}}{{template "us-barra" .}}{{end}}{{end}}
+{{range .Ondas}}{{template "onda-barra" .}}{{range .US}}{{template "us-barra" .}}{{template "us-taiga" .}}{{template "us-mrs" .}}{{template "us-vazio" .}}{{range .PendMuda}}{{template "pend-muda" .}}{{end}}{{end}}{{end}}
 {{if not .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
 {{end}}{{end}}
