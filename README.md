@@ -139,7 +139,7 @@ As ferramentas (`herdr`, `glab`, `gh`, `taiga`, `git`, `docker` e `go`) são cha
 Tokens de sidebar (`herdr pane|workspace report-metadata --source orq`), conferidos a cada tick contra o que o Herdr mostra — os tokens somem quando o servidor do Herdr reinicia, e o daemon republica:
 
 - `orq`, no pane de cada coordenador: as US das ondas abertas por status e as pendências abertas, ex. `2 Exec·1 Rev·1 pend`, com `⚠ ` na frente quando algum pane de US está `blocked`. Até 80 caracteres.
-- `orq_mrs`, no workspace do coordenador (o registrado ou o do pane dele): as MRs `pronta`, `!32` no GitLab e `skills#29` no GitHub; o que não cabe em 80 caracteres vira `+N`.
+- `orq_mrs`, no workspace do coordenador (o registrado ou o do pane dele): as MRs `pronta`, `argocd-apps!32` no GitLab e `skills#29` no GitHub (sempre com o projeto, o da URL da MR); o que não cabe em 80 caracteres vira `+N`.
 
 Os nomes `orq` e `orq_mrs` são do orq; `mrs_prontas`, `story` e `fase` são da publicação manual da skill do orquestrador (`--source orquestrador`), que convive com o daemon até ser aposentada. O plugin configura as linhas da sidebar com os nomes do orq.
 
@@ -249,16 +249,16 @@ A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos c
 ```
  convey · sgo-cli                               até MR pronta  1/4 ▰▱▱▱  1 pend
  Comandos api e jql
-╭───┬──────┬──────────────────────────────────────────┬───────────┬────────────╮
-│   │ US   │ título                                   │ status    │ MRs        │
-├───┼──────┼──────────────────────────────────────────┼───────────┼────────────┤
-│ ⚠ │ #313 │ sgo api: chamada REST                    │ Exec r1 ↗ │ !33        │
-│   │      │                                          │           │ !412 [IaC] │
-│ ● │ #312 │ sgo jql: consulta avulsa por JQL com pa… │ Rev r2 ↗  │ !32        │
-│ – │ #314 │ Menores da TG-312                        │ Wait      │            │
-│ ✓ │ #225 │ Criação Suporte/OS                       │ Done ↗    │ !29        │
-│   │      │                                          │           │ !31        │
-╰───┴──────┴──────────────────────────────────────────┴───────────┴────────────╯
+╭───┬──────┬──────────────────────────────────────┬───────────┬──────────────────────╮
+│   │ US   │ título                               │ status    │ MRs                  │
+├───┼──────┼──────────────────────────────────────┼───────────┼──────────────────────┤
+│ ⚠ │ #313 │ sgo api: chamada REST                │ Exec r1 ↗ │ sgo-cli!33           │
+│   │      │                                      │           │ plataforma!412 [IaC] │
+│ ● │ #312 │ sgo jql: consulta avulsa por JQL c…  │ Rev r2 ↗  │ sgo-cli!32           │
+│ – │ #314 │ Menores da TG-312                    │ Wait      │                      │
+│ ✓ │ #225 │ Criação Suporte/OS                   │ Done ↗    │ sgo-cli!29           │
+│   │      │                                      │           │ sgo-cli!31           │
+╰───┴──────┴──────────────────────────────────────┴───────────┴──────────────────────╯
 ╭───────────┬─────────────┬───────────────────────────────────┬───────────┬───╮
 │ id        │ tipo        │ texto                             │ idade     │   │
 ├───────────┼─────────────┼───────────────────────────────────┼───────────┼───┤
@@ -271,9 +271,9 @@ A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos c
 - Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas, e o selo `concluída`, em verde, quando a onda está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)); na 2ª linha, o título da onda, em negrito e numa cor fixa por projeto. O projeto é o `projeto_padrao` do coordenador, quando está entre os das US da onda, ou o primeiro projeto da onda (a ordem da 1ª linha). A cor vem do tom do projeto, gravado na Central (`projeto_tom`) na ordem de chegada: o primeiro projeto que aparece (`orq coord registrar --projeto` ou `orq onda criar`) fica com o tom 0, o seguinte com o 1, e assim por diante, para sempre, e o `orq diario` registra cada atribuição (`projeto.tom`, com o projeto e o índice no `detalhe`). Exceção: o preenchimento da migration, para os projetos que já existiam, não gera eventos, e a ordem dele é reconstruída do estado atual (registro do coordenador e onda atual da US), não a primeira chegada histórica absoluta. A paleta tem 8 tons (azul, amarelo, magenta, verde, laranja, ciano, lilás e ardósia, com versão para o tema claro e para o escuro, sem vermelho); passado o oitavo projeto, os tons se repetem (o 9º volta ao azul). O snapshot traz os índices em `projetos`; projeto sem índice (snapshot antigo) usa o cinza. Limite: o projeto é o board do Taiga, então coordenadores de chaves diferentes no mesmo board (argocd-apps e convey, ambos `infra-2025`) têm a mesma cor. Coordenador sem onda aberta é uma linha discreta.
 - O título da pendência leva as marcas `[respondida]`, `[respondida, sem coordenador]`, `[sem detalhe]` (pendência antiga) e `[arquivo alterado]`. Com `ORQ_WEB_URL` definido, a pendência selecionada mostra o link da página dela na linha de status (OSC 8).
 - Tabela das US: agente | US | título | status | MRs, com fundo alternado. A 1ª coluna é o status Herdr do pane da US, não o da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu (a legenda vai no rodapé). A US com o pane `blocked` sobe para o topo, com fundo de destaque e título em negrito; a US Done sai esmaecida.
-- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`!412…`); num largo as colunas não passam do conteúdo.
+- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`plat…`); num largo as colunas não passam do conteúdo.
 - Status com cor (Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde) e link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples em qualquer linha da US, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`); a seleção é o fundo da linha. No popup, focar fecha o popup.
-- MRs na mesma célula, uma por linha, com link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
+- MRs na mesma célula, uma por linha, rotuladas `<projeto>!<iid>` (GitLab) ou `<repo>#<n>` (GitHub), com o projeto da URL da MR, não o da onda, e link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
 - Pendências abertas numa tabela menor: id, tipo com cor, texto em até 2 linhas (cortado com `…` depois), idade e o `↗`, que foca o pane que perguntou.
 - Os tons de fundo seguem a cor de fundo que o terminal informa ao bubbletea (claro ou escuro), sem esperar a resposta: até ela chegar, e num terminal que não responde, valem os do escuro.
 - Erro de fonte não esconde o valor: a tela mostra o último valor bom, um `*` apagado marca o título ou a MR cuja consulta mais recente falhou, e o rodapé dá a idade de cada fonte e o código do erro.

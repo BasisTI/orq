@@ -30,12 +30,13 @@ type MR struct {
 	SituacaoErro *Erro   `json:"situacao_erro"`
 }
 
-// RefCurta é a referência curta da MR: `!32` no GitLab e `repo#29` no GitHub.
+// RefCurta é a referência curta da MR, sempre com o projeto (o da URL da MR, não o da onda):
+// `argocd-apps!32` no GitLab e `repo#29` no GitHub. Nunca `!32` sozinho.
 func (m MR) RefCurta() string {
-	if strings.Contains(m.URL, "/-/merge_requests/") {
-		return "!" + strconv.Itoa(m.IID)
-	}
 	repo := m.ProjetoPath[strings.LastIndex(m.ProjetoPath, "/")+1:]
+	if strings.Contains(m.URL, "/-/merge_requests/") {
+		return repo + "!" + strconv.Itoa(m.IID)
+	}
 	return repo + "#" + strconv.Itoa(m.IID)
 }
 
