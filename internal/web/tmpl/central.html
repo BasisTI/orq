@@ -102,7 +102,7 @@
 </div>
 {{template "rail" .}}
 </div>
-<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-include=".us-corpo input[name=pi]" hx-trigger="every 30s" hx-swap="none" hidden></div>
+<div id="vivo" hx-get="/vivo" hx-vals="{{.Vals}}" hx-include=".us-corpo input[name=pi]" hx-trigger="every 30s, vivo-agora" hx-swap="none" hidden></div>
 {{template "rodape" .}}{{end}}
 
 {{define "vivo"}}{{template "situacao" .Situacao}}

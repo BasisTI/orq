@@ -299,3 +299,21 @@ func TestCentralEscapaTextoHostil(t *testing.T) {
 	naoContem(t, html, "<script>alert", "<img src=x")
 	contem(t, html, "&lt;script&gt;alert(1)&lt;/script&gt;")
 }
+
+// A remoção só alcança pendência da própria US ("infra-2025" não é "infra" com a US 2025), e a
+// inserção segue o número da pendência (P2 antes de P10).
+func TestPendMudaPrefixoExatoEOrdemNumerica(t *testing.T) {
+	u := USVista{ID: "TG-2025", Anchor: "us-infra-2025", Projeto: ProjetoTag{Slug: "infra"}}
+	for _, n := range []string{"10", "2"} {
+		u.Pendencias = append(u.Pendencias, PendItem{Anchor: "pend-infra-2025-" + n, Estado: "aberta"})
+	}
+	tem := map[string]string{"pend-infra-2025-5-1": "aberta", "pend-infra-2025-9": "aberta"}
+	var got []string
+	for _, m := range pendMuda(u, tem) {
+		got = append(got, m.Acao+":"+m.Item.Anchor)
+	}
+	want := []string{"inserir:pend-infra-2025-2", "remover:pend-infra-2025-9", "inserir:pend-infra-2025-10"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("pendMuda = %v, quer %v", got, want)
+	}
+}

@@ -219,8 +219,7 @@ func temProjeto(o OndaVista, slug string) bool {
 	return false
 }
 
-// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma, das
-// e das abas. As pendências de cada US não entram: o /vivo as atualiza no lugar (pendMuda), para
+// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma e das abas. As pendências de cada US não entram: o /vivo as atualiza no lugar (pendMuda), para
 // que a contagem do título e a lista concordem. Ele muda quando a lista de ondas e US que a
 // página mostra deixa de ser a do servidor.
 func hashLista(ondas []OndaVista, abas []Aba) string {

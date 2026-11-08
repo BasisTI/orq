@@ -251,6 +251,19 @@ func TestNavegadorVivoUS(t *testing.T) {
 	}
 }
 
+// TestNavegadorRetencao (US #41, r2): o /vivo não troca nem remove a pendência que a pessoa está
+// editando; marca como desatualizada e aplica a mudança quando ela fecha o item (casos B, C e D).
+func TestNavegadorRetencao(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	st := abrirStore(t)
+	semear(t, context.Background(), st)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	r := rodarNode(t, env, "retencao.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+	for _, p := range r.Problemas {
+		t.Error(p)
+	}
+}
+
 // TestNavegadorPendencias: a pendência no lugar, os erros dentro do formulário sem perder o texto,
 // o /vivo que não toca o corpo aberto, a cascata e o Voltar que mantém a página inteira (story 3).
 func TestNavegadorPendencias(t *testing.T) {

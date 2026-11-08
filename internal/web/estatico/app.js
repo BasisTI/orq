@@ -11,6 +11,10 @@
 // 4) Envio que não chega ao servidor (rede caiu, aborto, timeout do formulário): o htmx só dá o
 //    evento, então o .erro do próprio formulário diz que não foi possível confirmar o envio; o texto fica
 //    e o formulário está solto para reenviar. Erro 4xx/5xx já chega pelo HX-Retarget, sem aviso aqui.
+// 5) Pendência em edição: o /vivo (oob) não troca nem remove a pendência que tem formulário aberto
+//    ou texto digitado. O item fica como está, marcado como desatualizado com um aviso dentro
+//    dele; o que mudou (respondida, resolvida) é aplicado quando a pessoa fecha o item sem texto
+//    digitado, pedindo um /vivo na hora (evento vivo-agora), ou quando envia a resposta.
 (function () {
   'use strict';
   function abrirAlvo() {
@@ -140,7 +144,44 @@
       e.returnValue = '';
     });
   }
+  // Item de pendência em edição: tem formulário e está aberto, ou tem resposta digitada/escolhida.
+  function emEdicao(d) {
+    if (!d.querySelector('form.resposta')) return false;
+    if (d.open) return true;
+    var t = d.querySelector('textarea');
+    if (t && t.value !== t.defaultValue) return true;
+    return Array.prototype.some.call(d.querySelectorAll('input[name="opcao"]'), function (r) { return r.checked !== r.defaultChecked; });
+  }
+  function retencao() {
+    document.addEventListener('htmx:oobBeforeSwap', function (e) {
+      var d = e.detail && e.detail.target;
+      if (!d || !d.matches || !d.matches('details.pend') || !emEdicao(d)) return;
+      e.detail.shouldSwap = false;
+      var novo = e.detail.fragment && e.detail.fragment.querySelector && e.detail.fragment.querySelector('details.pend');
+      var estado = (novo && novo.getAttribute('data-estado')) || 'resolvida';
+      d.setAttribute('data-desatualizada', estado);
+      var corpo = d.querySelector('.pend-corpo');
+      if (!corpo) return;
+      var av = corpo.querySelector('[data-aviso-desatualizada]');
+      if (!av) {
+        av = document.createElement('p');
+        av.className = 'aviso';
+        av.setAttribute('role', 'status');
+        av.setAttribute('data-aviso-desatualizada', '');
+        corpo.insertBefore(av, corpo.firstChild);
+      }
+      av.textContent = 'Esta pendência mudou depois que você a abriu (agora: ' + estado + '). O que você digitou continua aqui; o item é atualizado quando você o fecha sem texto digitado ou envia a resposta.';
+    });
+    // Fechar o item retido, sem texto digitado, aplica a mudança na hora.
+    document.addEventListener('toggle', function (e) {
+      var d = e.target;
+      if (!d || !d.matches || !d.matches('details.pend[data-desatualizada]') || d.open || emEdicao(d)) return;
+      var v = document.getElementById('vivo');
+      if (v && window.htmx) window.htmx.trigger(v, 'vivo-agora');
+    }, true);
+  }
   envios();
+  retencao();
   window.addEventListener('hashchange', abrirAlvo);
   document.addEventListener('DOMContentLoaded', function () {
     abas();
