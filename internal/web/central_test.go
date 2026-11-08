@@ -378,3 +378,27 @@ func TestCentralVaziaComCoordenadorRegistrado(t *testing.T) {
 	_, html = c.get("/")
 	naoContem(t, html, `class="banner"`)
 }
+
+// O projeto do rótulo vem da URL da MR, não da onda: uma US com MRs em três repositórios mostra
+// cada uma com o seu, e nenhuma tela traz `!N` sozinho.
+func TestCentralMRsDeRepositoriosDiferentes(t *testing.T) {
+	c := vazia(t, false)
+	co, _ := c.coord("alfa", "wA:p1", "colaboradados", 7, "merge")
+	u := refs.US{Projeto: "colaboradados", Ref: 7}
+	for _, url := range []string{
+		"https://gitlab.basis.com.br/basis/colaboradados/-/merge_requests/404",
+		"https://gitlab.basis.com.br/basis/iac/argocd-apps/-/merge_requests/404",
+		"https://gitlab.basis.com.br/basis/biblioteca_de_ativos/-/merge_requests/12",
+		"https://github.com/BasisTI/orq/pull/66",
+	} {
+		_, _, err := c.st.AdicionarMR(c.ctx, &co, u, url)
+		c.ok(err)
+	}
+	c.taiga(u, "Trocar o rótulo", "In progress")
+	_, html := c.get("/")
+	contem(t, html, ">colaboradados!404<", ">argocd-apps!404<", ">biblioteca_de_ativos!12<", ">orq#66<",
+		`href="https://gitlab.basis.com.br/basis/iac/argocd-apps/-/merge_requests/404"`)
+	if regexp.MustCompile(`>!\d+<`).MatchString(html) {
+		t.Errorf("rótulo de MR sem projeto: %s", html)
+	}
+}

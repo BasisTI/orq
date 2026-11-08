@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/refs"
 )
@@ -295,14 +296,8 @@ func (s *Servidor) item(p central.Pendencia) itemLista {
 	return itemLista{P: p, Href: refs.RotaPendencia(u.Projeto, u.Ref, p.Numero), Quando: s.quando(p.AbertaEm)}
 }
 
-// quando formata um instante RFC 3339 no fuso do servidor.
-func (s *Servidor) quando(t string) string {
-	v, err := time.Parse(time.RFC3339, t)
-	if err != nil {
-		return t
-	}
-	return v.Local().Format("02/01 15:04")
-}
+// quando formata um instante RFC 3339 como DD/MM/YYYY HH:MM em BRT.
+func (s *Servidor) quando(t string) string { return hora.DataHoraRFC(t) }
 
 func (s *Servidor) historico(w http.ResponseWriter, r *http.Request) {
 	pagina, _ := strconv.Atoi(r.FormValue("pagina"))

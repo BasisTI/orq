@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/refs"
 )
 
@@ -285,6 +286,7 @@ func textoDetalhe(tipo string, raw json.RawMessage) (string, bool) {
 	if t, _ := m["tipo"].(string); t == "pane" {
 		delete(m, "alvo")
 	}
+	hora.Anterior(m)
 	out := map[string]any{}
 	for _, k := range campos {
 		if v, ok := m[k]; ok {

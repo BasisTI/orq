@@ -260,7 +260,7 @@ Caixa branca de 1px: uma frase e uma lista em linha de fatos em 700, cada um com
 `<details>` sem caixa, separada por filete. Resumo: chevron, id e título (2 linhas), selos de status/Taiga e estado do agente, MRs em resumo, contagem de "espera você". Corpo em fundo `base-200` 35%, filete tracejado em cima, `dl` de fatos (No Taiga com link externo, agente, dependências em `.dep`), seção de MRs e de pendências.
 
 ### MR
-Linha dentro da US: link em 700 (`!N`, caminho em 400) e um bloco de selos em par rótulo/valor: estado (`draft`, `aberta`, `pronta`, `mesclada`, `fechada`, `sem estado`), pipeline, aprovação, `vencido` e "consulta extra falhou". Em onda `até merge`, MR pronta aparece "MR espera merge"; nas demais, "MR pronta" (o merge não está autorizado).
+Linha dentro da US: link em 700 (`projeto!N`, caminho em 400) e um bloco de selos em par rótulo/valor: estado (`draft`, `aberta`, `pronta`, `mesclada`, `fechada`, `sem estado`), pipeline, aprovação, `vencido` e "consulta extra falhou". Em onda `até merge`, MR pronta aparece "MR espera merge"; nas demais, "MR pronta" (o merge não está autorizado).
 
 ### Pendência
 `<details>` com resumo em seis colunas (chave `TG-78 P1`, tipo, idade, título 1 linha, estado). Aberta, o título fica em 700 e o corpo (`max-width` 62rem) traz o markdown do contexto (`max-width` 70ch), a recomendação, as opções e o formulário.

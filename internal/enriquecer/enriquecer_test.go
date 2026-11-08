@@ -373,13 +373,13 @@ func TestTokensPublicaConfereELimpa(t *testing.T) {
 	got := c.chamadas("herdr")
 	want := []string{
 		"pane report-metadata w1:p1 --source orq --token orq=⚠ 1 Wait·1 Exec",
-		"workspace report-metadata w1 --source orq --token orq_mrs=orq#1 !41",
+		"workspace report-metadata w1 --source orq --token orq_mrs=orq#1 plataforma!41",
 	}
 	if len(got) != 2 || strings.Join(got[0], " ") != want[0] || strings.Join(got[1], " ") != want[1] || len(r.Publicados) != 2 {
 		t.Fatalf("argv = %q, resultado %+v", got, r)
 	}
 	// O Herdr já mostra os tokens: nada a republicar.
-	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 !41", "mrs_prontas": "!403"})
+	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 plataforma!41", "mrs_prontas": "!403"})
 	if r := publicar(); len(r.Publicados)+len(r.Limpos)+len(r.Avisos) != 0 || len(c.chamadas("herdr")) != 0 {
 		t.Fatalf("republicou sem mudança: %+v", r)
 	}
@@ -390,7 +390,7 @@ func TestTokensPublicaConfereELimpa(t *testing.T) {
 	}
 	_ = c.chamadas("herdr")
 	// As MRs saem de pronta: orq_mrs, que ainda tem o valor do orq, é limpo.
-	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 !41", "mrs_prontas": "!403"})
+	painel(map[string]string{"orq": "⚠ 1 Wait·1 Exec"}, map[string]string{"orq_mrs": "orq#1 plataforma!41", "mrs_prontas": "!403"})
 	c.responder("gh", `{"state":"closed","merged":true}`, false, argsGH...)
 	c.responder("glab", `{"state":"opened","draft":true,"detailed_merge_status":"draft_status"}`, false, argsGL...)
 	c.atualizar(Opcoes{Fontes: []string{"mr"}, Forcar: true})

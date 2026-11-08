@@ -94,8 +94,8 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
 | `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. Com todas as US no limite, `encerramento` diz o próximo passo (veja [Encerrar a onda](#encerrar-a-onda)). |
-| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). |
-| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. |
+| `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). Avisa no stderr, uma linha por pendência ainda aberta ou só respondida da onda (chave e estado, sem o texto); não resolve nada nem muda o exit. |
+| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. Ao mudar para `done`, avisa no stderr das pendências abertas da US, como o `onda encerrar`. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. |
 | `orq pend importar <arquivo>` | Importa o arquivo de pendência (veja [Pendências com contexto](#pendências-com-contexto-e-resposta-pela-web)), como o daemon faz a cada 5 s; para quando o daemon está parado. |
 | `orq pend ver <ref>#P<n>` | A pendência inteira: detalhe, opções, resposta e quem a deu, histórico e origem. Aceita `projeto/312#P2`. |
@@ -116,7 +116,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq recursos gravar <ref> [--repo R --worktree W --branch B] [--pane NOME]… [--aprovado URL=SHA]…` | Grava (ou completa) o `recursos.json` da US na pasta de trabalho e imprime o `TMPDIR` do worker e os rótulos Docker (veja [Limpeza depois do merge](#limpeza-depois-do-merge)). |
 | `orq recursos ver <ref>` | Mostra o `recursos.json` da US. |
 | `orq recursos reabrir <ref>` | Abre a rodada de correção depois do teste: sobe a geração do `recursos.json` e guarda as MRs de agora como encerradas. Rode **antes** de recriar o worktree. |
-| `orq limpar <ref> [--dry-run]` | Com todas as MRs da US mescladas, fecha os panes, remove o worktree, as branches, as pastas e os recursos Docker da US; o que não passa numa conferência fica preservado, com o motivo. `--dry-run` só mostra. |
+| `orq limpar <ref> [--dry-run] [--forcar]` | Com todas as MRs da US mescladas, fecha os panes, remove o worktree, as branches, as pastas e os recursos Docker da US; o que não passa numa conferência fica preservado, com o motivo. `--dry-run` só mostra. Recusa se o `recursos.json` não registra repo nem pane; `--forcar` segue (não vale com `--onda`). |
 | `orq limpar --onda <id> [--dry-run]` | Remove os recursos Docker com o rótulo `orq.onda=<id>` de uma onda encerrada ou pronta para encerrar. |
 | `orq upgrade [--ref main]` | Atualiza o `orq` do `go install` e o do plugin, reinicia o daemon e confere que todos estão no mesmo commit (veja [Atualização](#atualização)). |
 | `orq version` | Versão, commit e `schema` (a última migration que o binário embute). |
@@ -140,7 +140,7 @@ As ferramentas (`herdr`, `glab`, `gh`, `taiga`, `git`, `docker` e `go`) são cha
 Tokens de sidebar (`herdr pane|workspace report-metadata --source orq`), conferidos a cada tick contra o que o Herdr mostra — os tokens somem quando o servidor do Herdr reinicia, e o daemon republica:
 
 - `orq`, no pane de cada coordenador: as US das ondas abertas por status e as pendências abertas, ex. `2 Exec·1 Rev·1 pend`, com `⚠ ` na frente quando algum pane de US está `blocked`. Até 80 caracteres.
-- `orq_mrs`, no workspace do coordenador (o registrado ou o do pane dele): as MRs `pronta`, `!32` no GitLab e `skills#29` no GitHub; o que não cabe em 80 caracteres vira `+N`.
+- `orq_mrs`, no workspace do coordenador (o registrado ou o do pane dele): as MRs `pronta`, `argocd-apps!32` no GitLab e `skills#29` no GitHub (sempre com o projeto, o da URL da MR); o que não cabe em 80 caracteres vira `+N`.
 
 Os nomes `orq` e `orq_mrs` são do orq; `mrs_prontas`, `story` e `fase` são da publicação manual da skill do orquestrador (`--source orquestrador`), que convive com o daemon até ser aposentada. O plugin configura as linhas da sidebar com os nomes do orq.
 
@@ -207,7 +207,7 @@ Só com o coordenador `idle` ou `done` (`herdr agent get`); senão, tenta no cic
 | `POST /p/<projeto>/<ref>/<n>/responder` | grava (mesmo contrato: campo `texto`, `opcao`, `respondida_por` do proxy). Sem `HX-Request`, redireciona (post/redirect/get); com `HX-Request`, devolve o item respondido e as contagens por `hx-swap-oob`, o item muda de grupo conforme a composição que a página mandou (`comp`), sem rearmar o `/vivo`, e os erros (400, 409, 413, 415, 503) vão para o alerta do formulário (`HX-Retarget: find .erro`, `HX-Reswap: innerHTML`), sem perder o texto |
 | `GET /historico?pagina=N` | as resolvidas, 20 por página |
 | `GET /projeto/<slug>` | a mesma Central, só com as ondas que têm US do projeto; 404 se o slug não tem onda aberta |
-| `GET /vivo?v=<hash>` | fragmento da atualização de 30 s, por aba (só `hx-swap-oob`: situação, abas, idade dos dados, o `<summary>` de cada onda e US e, na aba Pendências, os contadores dos grupos); sem formulário, nunca troca o que está aberto ou digitado; lista diferente da da página vira o aviso "A lista mudou" |
+| `GET /vivo?v=<hash>` | fragmento da atualização de 30 s, por aba (só `hx-swap-oob`: situação, abas, idade dos dados, o `<summary>` de cada onda e US; na Central, também o status do Taiga, as MRs e a lista de pendências de cada US, por diferença contra o `pi` que a página manda; na aba Pendências, os contadores dos grupos); nunca devolve o corpo nem o formulário de uma pendência e não troca nem remove a que está aberta ou com texto digitado (o `app.js` a retém e a marca como desatualizada); lista de ondas ou US diferente da da página vira o aviso "A lista mudou" |
 | `GET /onda/<id>?pagina=N` | o diário da onda (`orq diario --onda`), do mais recente ao mais antigo, 25 por página; recarrega a cada 30 s |
 | `GET /saude` | `ok` se o banco responde e aceita escrita deste `orq` |
 | `GET /estatico/<arquivo>` | o CSS (`app.css`), o `htmx.min.js`, o `app.js`, as fontes e as imagens embutidos no binário; `/estilo.css` deixou de existir. Só `GET`; diretório e o que não está no embed dão 404 |
@@ -250,16 +250,16 @@ A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos c
 ```
  convey · sgo-cli                               até MR pronta  1/4 ▰▱▱▱  1 pend
  Comandos api e jql
-╭───┬──────┬──────────────────────────────────────────┬───────────┬────────────╮
-│   │ US   │ título                                   │ status    │ MRs        │
-├───┼──────┼──────────────────────────────────────────┼───────────┼────────────┤
-│ ⚠ │ #313 │ sgo api: chamada REST                    │ Exec r1 ↗ │ !33        │
-│   │      │                                          │           │ !412 [IaC] │
-│ ● │ #312 │ sgo jql: consulta avulsa por JQL com pa… │ Rev r2 ↗  │ !32        │
-│ – │ #314 │ Menores da TG-312                        │ Wait      │            │
-│ ✓ │ #225 │ Criação Suporte/OS                       │ Done ↗    │ !29        │
-│   │      │                                          │           │ !31        │
-╰───┴──────┴──────────────────────────────────────────┴───────────┴────────────╯
+╭───┬──────┬──────────────────────────────────────┬───────────┬──────────────────────╮
+│   │ US   │ título                               │ status    │ MRs                  │
+├───┼──────┼──────────────────────────────────────┼───────────┼──────────────────────┤
+│ ⚠ │ #313 │ sgo api: chamada REST                │ Exec r1 ↗ │ sgo-cli!33           │
+│   │      │                                      │           │ plataforma!412 [IaC] │
+│ ● │ #312 │ sgo jql: consulta avulsa por JQL c…  │ Rev r2 ↗  │ sgo-cli!32           │
+│ – │ #314 │ Menores da TG-312                    │ Wait      │                      │
+│ ✓ │ #225 │ Criação Suporte/OS                   │ Done ↗    │ sgo-cli!29           │
+│   │      │                                      │           │ sgo-cli!31           │
+╰───┴──────┴──────────────────────────────────────┴───────────┴──────────────────────╯
 ╭───────────┬─────────────┬───────────────────────────────────┬───────────┬───╮
 │ id        │ tipo        │ texto                             │ idade     │   │
 ├───────────┼─────────────┼───────────────────────────────────┼───────────┼───┤
@@ -272,9 +272,9 @@ A forma é a das páginas de pendências: o mesmo CSS, a mesma CSP e os mesmos c
 - Cada onda abre com uma faixa de fundo leve na largura toda: coordenador (link que foca o pane dele) e projetos, e à direita a autorização (`até MR pronta`), o progresso (`1/4 ▰▱▱▱`) e as pendências abertas, e o selo `concluída`, em verde, quando a onda está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)); na 2ª linha, o título da onda, em negrito e numa cor fixa por projeto. O projeto é o `projeto_padrao` do coordenador, quando está entre os das US da onda, ou o primeiro projeto da onda (a ordem da 1ª linha). A cor vem do tom do projeto, gravado na Central (`projeto_tom`) na ordem de chegada: o primeiro projeto que aparece (`orq coord registrar --projeto` ou `orq onda criar`) fica com o tom 0, o seguinte com o 1, e assim por diante, para sempre, e o `orq diario` registra cada atribuição (`projeto.tom`, com o projeto e o índice no `detalhe`). Exceção: o preenchimento da migration, para os projetos que já existiam, não gera eventos, e a ordem dele é reconstruída do estado atual (registro do coordenador e onda atual da US), não a primeira chegada histórica absoluta. A paleta tem 8 tons (azul, amarelo, magenta, verde, laranja, ciano, lilás e ardósia, com versão para o tema claro e para o escuro, sem vermelho); passado o oitavo projeto, os tons se repetem (o 9º volta ao azul). O snapshot traz os índices em `projetos`; projeto sem índice (snapshot antigo) usa o cinza. Limite: o projeto é o board do Taiga, então coordenadores de chaves diferentes no mesmo board (argocd-apps e convey, ambos `infra-2025`) têm a mesma cor. Coordenador sem onda aberta é uma linha discreta.
 - O título da pendência leva as marcas `[respondida]`, `[respondida, sem coordenador]`, `[sem detalhe]` (pendência antiga) e `[arquivo alterado]`. Com `ORQ_WEB_URL` definido, a pendência selecionada mostra o link da página dela na linha de status (OSC 8).
 - Tabela das US: agente | US | título | status | MRs, com fundo alternado. A 1ª coluna é o status Herdr do pane da US, não o da US: `●` working, `⚠` blocked, `·` idle, `✓` done, `○` pane sem agente (unknown), `✗` pane que sumiu (ausente), `–` US sem pane ou Herdr que nunca respondeu (a legenda vai no rodapé). A US com o pane `blocked` sobe para o topo, com fundo de destaque e título em negrito; a US Done sai esmaecida.
-- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`!412…`); num largo as colunas não passam do conteúdo.
+- `#ref` é link (OSC 8) para a story no Taiga; o título é cortado na largura com `…`. Num pane estreito o título encolhe primeiro e depois as MRs (`plat…`); num largo as colunas não passam do conteúdo.
 - Status com cor (Wait cinza, Plan roxo, Exec amarelo, Rev azul, Done verde) e link para `https://orq.local/pane/<id>`: Ctrl+clique chama a ação `focar-pane` do plugin. Clique simples em qualquer linha da US, ou ↑/↓ e Enter, focam o pane pelo próprio TUI (`herdr agent focus`); a seleção é o fundo da linha. No popup, focar fecha o popup.
-- MRs na mesma célula, uma por linha, com link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
+- MRs na mesma célula, uma por linha, rotuladas `<projeto>!<iid>` (GitLab) ou `<repo>#<n>` (GitHub), com o projeto da URL da MR, não o da onda, e link para a forja: draft vermelho, pronta verde, aberta sem cor, mesclada cinza tachado, fechada roxo itálico, `[IaC]` em laranja.
 - Pendências abertas numa tabela menor: id, tipo com cor, texto em até 2 linhas (cortado com `…` depois), idade e o `↗`, que foca o pane que perguntou.
 - Os tons de fundo seguem a cor de fundo que o terminal informa ao bubbletea (claro ou escuro), sem esperar a resposta: até ela chegar, e num terminal que não responde, valem os do escuro.
 - Erro de fonte não esconde o valor: a tela mostra o último valor bom, um `*` apagado marca o título ou a MR cuja consulta mais recente falhou, e o rodapé dá a idade de cada fonte e o código do erro.
@@ -392,7 +392,7 @@ Não há migration nova: o estado é esse arquivo e o diário. Por isso a atuali
 - Contêineres, volumes, redes e imagens que o worker criar levam o rótulo `orq.us=<projeto>/<ref>` e `orq.onda=<id da onda>`. Num `docker compose`, o projeto se chama `orq-<projeto>-<ref>` e os serviços levam os rótulos em `labels:`.
 - O Testcontainers limpa o que cria pelo Ryuk, desde que ele não esteja desligado: `orq recursos gravar` avisa se `TESTCONTAINERS_RYUK_DISABLED=true` ou `ryuk.disabled=true` em `~/.testcontainers.properties`.
 
-**O que `orq limpar <ref>` faz.** Só começa se a US tem `recursos.json` e MR, e se cada MR está `mesclada` na forja (consulta na hora, não o cache) com o head igual ao de `aprovados`, que é obrigatório: conteúdo integrado não prova que o head foi aprovado, então sem `--aprovado <url>=<sha>` registrado para cada MR a limpeza recusa. Senão sai com `limpeza_recusada` (exit 4), sem remover nada, e grava `limpar.recusada` no diário. Depois, na ordem:
+**O que `orq limpar <ref>` faz.** Só começa se a US tem `recursos.json` e MR, e se cada MR está `mesclada` na forja (consulta na hora, não o cache) com o head igual ao de `aprovados`, que é obrigatório: conteúdo integrado não prova que o head foi aprovado, então sem `--aprovado <url>=<sha>` registrado para cada MR a limpeza recusa. Também recusa, sem `--forcar`, se o `recursos.json` não registra repo nem pane (worktrees, branches e panes ficariam órfãos); a simulação mostra então os panes `tg-<ref>_*` soltos. Senão sai com `limpeza_recusada` (exit 4), sem remover nada, e grava `limpar.recusada` no diário. Depois, na ordem:
 
 | Item | Regra |
 |---|---|
@@ -415,7 +415,7 @@ O conteúdo "já na branch de destino" é: o commit é o head mesclado da MR, ou
 
 Nunca se apaga caminho fora das raízes: as pastas são derivadas da raiz, do projeto e da ref; o caminho que o `recursos.json` declare diferente do derivado, um link simbólico (no próprio caminho ou nos pais) e uma raiz vazia, `/` ou `$HOME` viram `preservado`.
 
-Cada item sai em `removido`, `preservado` (com o motivo), `falhou` ou `ausente` (já não existia). Cada um que não é `ausente` vira um evento no diário (`limpar.removido`, `limpar.preservado`, `limpar.falhou`). Um pane que não é `idle`/`done` preserva também o resto (worktree, branches, pastas, Docker), porque o agente pode estar usando; o mesmo vale para quem depende de um item preservado.
+Cada item sai em `removido`, `preservado` (com o motivo), `falhou` ou `ausente` (já não existia). Cada um que não é `ausente` vira um evento no diário (`limpar.removido`, `limpar.preservado`, `limpar.falhou`). Um pane que não é `idle`/`done` preserva também o resto (worktree, branches, pastas, Docker), porque o agente pode estar usando; o mesmo vale para quem depende de um item preservado. Sem repo registrado, a pasta de trabalho (com o `recursos.json`) fica. Worktrees `TG-<ref>*` fora do `recursos.json`, nos repos registrados (`worktree_nao_registrado`, exceto os `prunable`), aparecem preservados e seguram a pasta de trabalho; panes `tg-<ref>_*` ou `<projeto>-tg-<ref>_*` fora dele (`pane_nao_registrado`) só aparecem, porque o nome não prova a posse num Herdr compartilhado, e não seguram nada. `--forcar` não libera a pasta com worktree solto.
 
 **No merge, pelo daemon.** A cada `--intervalo-remoto`, o daemon roda o `limpar` nas US com MR, todas `mescladas` no cache, e `recursos.json`. Quando algo fica preservado, tenta de novo a cada 5 min e só grava no diário se o desfecho mudou. Quando a onda aberta (que não é só de plano) está pronta para encerrar (a regra de [Encerrar a onda](#encerrar-a-onda)) e nenhuma US dela tem mais `recursos.json`, o daemon remove o Docker com `orq.onda=<id>` e só então a encerra (`onda.encerrar`, `limpar.onda`); se o Docker não limpa por completo (volume em uso, Docker fora do ar), a onda segue aberta e ele tenta de novo a cada 5 min. `ORQ_LIMPEZA_AUTOMATICA=0` (também `false`, `nao`, `off`), no ambiente ou no `orq.env` do plugin, desliga as duas coisas; o padrão é ligado, e o daemon já em execução precisa ser reiniciado para ler a mudança. US sem `recursos.json` não são tocadas, e o orq não faz faxina de resíduos antigos.
 

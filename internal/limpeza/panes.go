@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/BasisTI/orq/internal/refs"
 )
 
 // planejarPanes acha os panes da US pelo nome de agente listado no recursos.json, e só eles.
 // Só fecha o pane cujo agente está idle ou done.
-func (l *Limpador) planejarPanes(ctx context.Context, rec *Recursos) []*Item {
+func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) []*Item {
 	sessao, err := l.F.ConsultarHerdr(ctx)
 	if err != nil {
 		return []*Item{{Tipo: "herdr", Alvo: "panes", Estado: Preservado, Motivo: "Herdr indisponível, não consegui conferir os panes: " + err.Error()}}
@@ -57,6 +60,42 @@ func (l *Limpador) planejarPanes(ctx context.Context, rec *Recursos) []*Item {
 		itens = append(itens, it)
 	}
 	return itens
+}
+
+// listarPanesSoltos devolve, só para mostrar, os panes com cara de ser da US (tg-<ref>_* ou
+// <projeto>-tg-<ref>_*) que o recursos.json não registra. O nome não prova a posse (o Herdr é
+// compartilhado entre boards e o mesmo ref repete: tg-306_revisor de um board contra a US 306 de
+// outro), então eles são Preservado e nunca dependência de nada: não seguram worktree, branches,
+// TMPDIR, Docker nem a pasta de trabalho, e nunca são fechados.
+func (l *Limpador) listarPanesSoltos(ctx context.Context, u refs.US, rec *Recursos) []*Item {
+	sessao, err := l.F.ConsultarHerdr(ctx)
+	if err != nil {
+		return nil
+	}
+	registrados := map[string]bool{}
+	for _, n := range rec.Panes {
+		registrados[strings.ToLower(n)] = true
+	}
+	var ids []string
+	for id, p := range sessao.Panes {
+		if p.Nome != "" && !registrados[strings.ToLower(p.Nome)] && nomeDePaneDaUS(p.Nome, u) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	var itens []*Item
+	for _, id := range ids {
+		itens = append(itens, &Item{Tipo: "pane_nao_registrado", Alvo: fmt.Sprintf("%s (%s)", id, sessao.Panes[id].Nome),
+			Estado: Preservado, Motivo: "não registrado no recursos.json, preservado: o nome parece da US, mas pode ser de outro board (registre com orq recursos gravar --pane)"})
+	}
+	return itens
+}
+
+// nomeDePaneDaUS diz se o nome segue o padrão dos panes da US: tg-<ref>_* ou <projeto>-tg-<ref>_*.
+func nomeDePaneDaUS(nome string, u refs.US) bool {
+	n := strings.ToLower(nome)
+	base := "tg-" + strconv.Itoa(u.Ref) + "_"
+	return strings.HasPrefix(n, base) || strings.HasPrefix(n, strings.ToLower(u.Projeto)+"-"+base)
 }
 
 // fecharPane relê o Herdr logo antes de fechar: o agente pode ter voltado a trabalhar.

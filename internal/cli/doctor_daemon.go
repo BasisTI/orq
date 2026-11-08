@@ -10,6 +10,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/upgrade"
 )
@@ -254,7 +255,7 @@ func (a *App) doctorOrqEnvMudou(add func(nome, estado, detalhe string), d daemon
 		return
 	}
 	add("orq.env e daemon", "aviso", fmt.Sprintf("o orq.env mudou em %s, depois que o daemon (pid %s) subiu em %s: reinicie o daemon para ele ler a mudança",
-		st.ModTime().Format(time.RFC3339), d.pid, d.inicio.Format(time.RFC3339)))
+		hora.DataHora(st.ModTime()), d.pid, hora.DataHora(d.inicio)))
 }
 
 // processo é o ambiente do processo, sem o orq.env.

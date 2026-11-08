@@ -1395,3 +1395,155 @@ func TestAutoNaoEncerraOndaQueGanhouUSDuranteALimpeza(t *testing.T) {
 		}
 	}
 }
+
+// semRegistro regrava o recursos.json da US com o que o teste pede (vazio por padrão).
+func (c *cen) semRegistro(repos []Repo, panes []string) {
+	c.t.Helper()
+	rec := &Recursos{Repos: repos, Panes: panes, Aprovados: map[string]string{c.url: c.tip}}
+	if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
+func TestLimparMRMescladaSemRepoNemPaneRecusaEPreserva(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.semRegistro(nil, nil)
+	for _, dry := range []bool{true, false} {
+		r := c.limpar(dry)
+		if !strings.Contains(r.Recusa, "não registra repo nem pane") || !strings.Contains(r.Recusa, "--forcar") {
+			t.Fatalf("dry=%v: recusa = %q", dry, r.Recusa)
+		}
+		// O pane tg-13_executor está vivo e fora do arquivo: aparece, preservado, mesmo na recusa.
+		if ps := c.estadoDe(r, "pane_nao_registrado"); r.Agiu || len(r.Itens) != 1 || len(ps) != 1 || ps[0].Estado != Preservado {
+			t.Fatalf("dry=%v: itens da recusa = %+v", dry, r.Itens)
+		}
+		for _, p := range []string{c.trabalho(), c.tmp(), c.wt} {
+			if !existe(p) {
+				t.Fatalf("dry=%v: %s sumiu", dry, p)
+			}
+		}
+	}
+	if !strings.Contains(strings.Join(c.tipos(), "\n"), "limpar.recusada") {
+		t.Error("a recusa não foi para o diário")
+	}
+}
+
+func TestLimparForcarSemRegistroRemoveAPasta(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.semRegistro(nil, nil)
+	c.herdr(nil) // sem pane da US vivo: o que sobra é só a pasta
+	r, err := c.l.Limpar(context.Background(), &c.coord, c.u, Opcoes{Forcar: true})
+	if err != nil || r.Recusa != "" || !r.Completa {
+		t.Fatalf("forçar: %+v %v %s", r, err, estados(r))
+	}
+	if existe(c.trabalho()) {
+		t.Error("a pasta de trabalho ficou com --forcar")
+	}
+}
+
+func TestLimparSemRepoMasComPanePreservaAPastaDeTrabalho(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.semRegistro(nil, []string{"tg-13_executor"})
+	r := c.limpar(false)
+	if r.Recusa != "" {
+		t.Fatalf("recusou: %s", r.Recusa)
+	}
+	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+		t.Errorf("herdr = %v", got)
+	}
+	it := c.estadoDe(r, "pasta_trabalho")[0]
+	if it.Estado != Preservado || !strings.Contains(it.Motivo, "nenhum repo registrado") || r.Completa {
+		t.Fatalf("pasta_trabalho = %+v completa=%v", it, r.Completa)
+	}
+	if !existe(c.trabalho()) || !existe(filepath.Join(c.trabalho(), ArquivoRecursos)) {
+		t.Error("a pasta de trabalho ou o recursos.json sumiu")
+	}
+	if existe(c.tmp()) {
+		t.Error("a pasta temporária devia ter saído")
+	}
+}
+
+func TestLimparMostraNaoRegistradosEPreservaAPasta(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	// Worktree TG-13-fix (e TG-130, que é de outra US) fora do recursos.json; pane tg-13_extra solto.
+	outro := filepath.Join(c.dir, "repos", "orq.TG-13-fix")
+	git(t, c.repo, "worktree", "add", "-q", "-b", "TG-13-fix", outro)
+	git(t, c.repo, "worktree", "add", "-q", "-b", "TG-130", filepath.Join(c.dir, "repos", "orq.TG-130"))
+	c.extras = []map[string]any{
+		{"pane_id": "wA:p5", "workspace_id": "wA", "agent": "claude", "agent_status": "idle", "name": "tg-13_extra"},
+	}
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	for _, dry := range []bool{true, false} {
+		r := c.limpar(dry)
+		wts := c.estadoDe(r, "worktree_nao_registrado")
+		if len(wts) != 1 || wts[0].Estado != Preservado || !strings.Contains(wts[0].Alvo, "TG-13-fix") || !strings.Contains(wts[0].Motivo, "não registrado") {
+			t.Fatalf("dry=%v worktrees soltos = %+v", dry, wts)
+		}
+		ps := c.estadoDe(r, "pane_nao_registrado")
+		if len(ps) != 1 || ps[0].Estado != Preservado || !strings.Contains(ps[0].Alvo, "tg-13_extra") {
+			t.Fatalf("dry=%v panes soltos = %+v", dry, ps)
+		}
+		if p := c.estadoDe(r, "pasta_trabalho")[0]; p.Estado != Preservado {
+			t.Fatalf("dry=%v: pasta_trabalho = %+v", dry, p)
+		}
+	}
+	if !existe(c.trabalho()) || !existe(outro) {
+		t.Error("removeu o que não estava registrado")
+	}
+	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+		t.Errorf("herdr = %v", got)
+	}
+}
+
+func TestPaneSoltoNaoSeguraNada(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.dockerUS()
+	// tg-13_revisor vivo, fora do recursos.json (outro board ou --pane esquecido).
+	c.extras = []map[string]any{
+		{"pane_id": "wX:p1", "workspace_id": "wX", "agent": "claude", "agent_status": "working", "name": "tg-13_revisor"},
+	}
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	r := c.limpar(false)
+	if r.Recusa != "" || !r.Completa || !r.Agiu {
+		t.Fatalf("resultado = %+v %s", r, estados(r))
+	}
+	for _, i := range r.Itens {
+		want := Removido
+		if i.Tipo == "pane_nao_registrado" {
+			want = Preservado
+		}
+		if i.Estado != want {
+			t.Errorf("%s %s: %s %s", i.Tipo, i.Alvo, i.Estado, i.Motivo)
+		}
+	}
+	for _, p := range []string{c.wt, c.tmp(), c.trabalho()} {
+		if existe(p) {
+			t.Errorf("%s ficou por causa do pane solto", p)
+		}
+	}
+	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+		t.Errorf("herdr = %v", got)
+	}
+	if len(c.escritas("docker")) != 4 {
+		t.Errorf("docker = %v", c.escritas("docker"))
+	}
+}
+
+func TestWorktreePrunableNaoSeguraAPasta(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	extra := filepath.Join(c.dir, "repos", "orq.TG-13-velho")
+	git(t, c.repo, "worktree", "add", "-q", "-b", "TG-13-velho", extra)
+	if err := os.RemoveAll(extra); err != nil {
+		t.Fatal(err)
+	}
+	r := c.limpar(false)
+	if n := len(c.estadoDe(r, "worktree_nao_registrado")); n != 0 || !r.Completa || existe(c.trabalho()) {
+		t.Fatalf("prunable segurou: completa=%v %s", r.Completa, estados(r))
+	}
+}

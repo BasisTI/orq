@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 )
 
 // A tela sai do snapshot (spec §2.1): vistaCentral não abre banco, não chama ferramenta e não lê
@@ -95,6 +96,15 @@ type USVista struct {
 	Pendencias         []PendItem
 	Esperam            int
 	Oob                bool
+	// PendMuda é o que o /vivo muda na lista de pendências da US em relação ao que a página tem.
+	PendMuda []PendMuda
+}
+
+// EpicoVista é um épico no resumo da onda: o número e, se o Taiga deu a URL, o link.
+type EpicoVista struct {
+	Ref    int
+	Titulo string
+	URL    string
 }
 
 // OndaVista é a barra e o corpo de uma onda.
@@ -107,6 +117,7 @@ type OndaVista struct {
 	Limite                   string // "até mr-pronta · estrita"
 	Href                     string // diário
 	Criada                   string
+	Epicos                   []EpicoVista // sem repetição; vazio esconde o rótulo
 	Feitas, Total            int
 	Esperam                  int
 	Sinais                   []Selo
@@ -217,18 +228,15 @@ func temProjeto(o OndaVista, slug string) bool {
 	return false
 }
 
-// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma, das
-// pendências exibidas em cada US (nova ou resolvida muda a lista) e das abas.
-// Ele muda quando a lista que a página mostra deixa de ser a do servidor.
+// hashLista é o começo do SHA-256 dos ids e da ordem das ondas, das US de cada uma e das abas. As pendências de cada US não entram: o /vivo as atualiza no lugar (pendMuda), para
+// que a contagem do título e a lista concordem. Ele muda quando a lista de ondas e US que a
+// página mostra deixa de ser a do servidor.
 func hashLista(ondas []OndaVista, abas []Aba) string {
 	h := sha256.New()
 	for _, o := range ondas {
 		fmt.Fprintf(h, "o%d:", o.ID)
 		for _, u := range o.US {
 			fmt.Fprintf(h, "%s", u.Anchor)
-			for _, p := range u.Pendencias {
-				fmt.Fprintf(h, "+%s", p.ID)
-			}
 			h.Write([]byte{','})
 		}
 		h.Write([]byte{'\n'})
@@ -394,9 +402,7 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 		ID: o.ID, Anchor: "onda-" + id, BarraID: "onda-" + id + "-barra", Titulo: o.Titulo, Coordenador: o.Coordenador,
 		Limite: "até " + o.AutorizacaoAte + " · " + o.Ordem, Href: "/onda/" + id, Total: len(o.US), Esperam: esperam,
 	}
-	if len(o.CriadaEm) >= 10 {
-		ov.Criada = o.CriadaEm[:10]
-	}
+	ov.Criada = hora.DataRFC(o.CriadaEm)
 	if ov.Titulo == "" {
 		ov.Titulo = "onda " + id
 	}
@@ -406,9 +412,20 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 		nomes[u.Chave] = u.ID
 	}
 	merge := o.AutorizacaoAte == "merge"
+	epicos := map[string]bool{}
 	for _, u := range o.US {
 		if u.Status == "done" {
 			ov.Feitas++
+		}
+		for _, e := range u.Taiga.Epicos {
+			k := u.Projeto + "/" + strconv.Itoa(e.Ref)
+			if e.URL != "" {
+				k = e.URL
+			}
+			if !epicos[k] {
+				epicos[k] = true
+				ov.Epicos = append(ov.Epicos, EpicoVista{Ref: e.Ref, Titulo: e.Titulo, URL: e.URL})
+			}
 		}
 		if !visto[u.Projeto] {
 			visto[u.Projeto] = true

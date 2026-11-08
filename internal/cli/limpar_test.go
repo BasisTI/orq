@@ -105,3 +105,19 @@ func TestRecursosGravarELimparRecusaComMRAberta(t *testing.T) {
 		t.Fatalf("--onda aberta: exit %d %s", r.code, r.err)
 	}
 }
+
+func TestRecursosGravarAprovadoSemRepoAvisa(t *testing.T) {
+	env := ambiente(t)
+	env["ORQ_TRABALHO_DIR"] = filepath.Join(t.TempDir(), "trabalho")
+	env["ORQ_TMP_DIR"] = filepath.Join(t.TempDir(), "tmp")
+	env["HOME"] = t.TempDir()
+	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")
+	ok(t, env, "onda", "criar", "o", "--us", "13", "--ate", "merge")
+	var g RecursosGravados
+	if err := json.Unmarshal([]byte(ok(t, env, "recursos", "gravar", "13", "--aprovado", "https://github.com/BasisTI/orq/pull/9=abc1234")), &g); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Avisos) == 0 || !strings.Contains(strings.Join(g.Avisos, "\n"), "--repo, --worktree e --branch") {
+		t.Fatalf("avisos = %v", g.Avisos)
+	}
+}
