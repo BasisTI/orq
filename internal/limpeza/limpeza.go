@@ -73,6 +73,9 @@ type Limpador struct {
 // Opcoes de uma execução.
 type Opcoes struct {
 	DryRun bool
+	// Forcar segue mesmo quando o recursos.json não registra repo nem pane e remove a pasta de
+	// trabalho sem repo registrado. Só o orq limpar --forcar liga; o daemon nunca.
+	Forcar bool
 	// Registrar decide se o resultado vai para o diário; nil registra sempre (menos no dry-run).
 	// O daemon usa para não repetir o mesmo "preservado" a cada tentativa.
 	Registrar func(Resultado) bool
@@ -129,7 +132,12 @@ func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref r
 		res.Recusa = recusa
 		return finalizar()
 	}
-	itens := l.planejar(ctx, u, rec, mrs)
+	if !op.Forcar && len(rec.Repos) == 0 && len(rec.Panes) == 0 {
+		res.Recusa = fmt.Sprintf("a US tem MR mesclada, mas o recursos.json não registra repo nem pane: nada é limpo, porque worktrees, branches e panes dela ficariam órfãos "+
+			"(registre com orq recursos gravar %d --repo R --worktree W --branch B --pane NOME; com --forcar a limpeza segue mesmo assim)", u.Ref)
+		return finalizar()
+	}
+	itens := l.planejar(ctx, u, rec, mrs, op.Forcar)
 	res.Itens = itens
 	if !op.DryRun {
 		if l.aposPlano != nil {
@@ -257,10 +265,11 @@ func (l *Limpador) conferirMRs(ctx context.Context, us central.US, rec *Recursos
 // pasta temporária, Docker e, por último, a pasta de trabalho. Tudo depende dos panes, e a pasta
 // de trabalho (onde mora o recursos.json) só some se todo o resto foi resolvido: senão o daemon
 // esqueceria o que ficou.
-func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs map[string]enriquecer.DetalheMR) []*Item {
-	panes := l.planejarPanes(ctx, rec)
+func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs map[string]enriquecer.DetalheMR, forcar bool) []*Item {
+	panes := l.planejarPanes(ctx, u, rec)
 	var itens []*Item
 	itens = append(itens, panes...)
+	itens = append(itens, l.planejarWorktreesNaoRegistrados(ctx, u, rec)...)
 	for _, r := range rec.Repos {
 		for _, i := range l.planejarRepo(ctx, r, mrs) {
 			i.deps = append(i.deps, panes...)
@@ -275,6 +284,11 @@ func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs m
 		itens = append(itens, i)
 	}
 	trabalho := l.itemPasta("pasta_trabalho", l.Raizes.Trabalho, l.Raizes.PastaTrabalho(u), rec.Trabalho, u)
+	if len(rec.Repos) == 0 && !forcar && trabalho.Estado == Remover {
+		// Sem repo registrado não há como saber se sobrou worktree ou branch da US: o
+		// recursos.json e os relatórios ficam.
+		trabalho.Estado, trabalho.Motivo, trabalho.exec = Preservado, "nenhum repo registrado no recursos.json: a pasta de trabalho fica (orq limpar --forcar remove)", nil
+	}
 	trabalho.deps = append([]*Item(nil), itens...)
 	itens = append(itens, trabalho)
 	propagar(itens)

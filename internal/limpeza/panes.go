@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/BasisTI/orq/internal/refs"
 )
 
 // planejarPanes acha os panes da US pelo nome de agente listado no recursos.json, e só eles.
 // Só fecha o pane cujo agente está idle ou done.
-func (l *Limpador) planejarPanes(ctx context.Context, rec *Recursos) []*Item {
+func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) []*Item {
 	sessao, err := l.F.ConsultarHerdr(ctx)
 	if err != nil {
 		return []*Item{{Tipo: "herdr", Alvo: "panes", Estado: Preservado, Motivo: "Herdr indisponível, não consegui conferir os panes: " + err.Error()}}
@@ -56,7 +59,27 @@ func (l *Limpador) planejarPanes(ctx context.Context, rec *Recursos) []*Item {
 		}
 		itens = append(itens, it)
 	}
+	// Panes que parecem da US (tg-<ref>_*) mas não estão no recursos.json: só aparecem, nunca
+	// são fechados. Também seguram a pasta de trabalho, que guarda o registro.
+	var soltos []string
+	for id, p := range sessao.Panes {
+		if !casa(p.Nome) && !coords[id] && nomeDePaneDaUS(p.Nome, u) {
+			soltos = append(soltos, id)
+		}
+	}
+	sort.Strings(soltos)
+	for _, id := range soltos {
+		itens = append(itens, &Item{Tipo: "pane_nao_registrado", Alvo: fmt.Sprintf("%s (%s)", id, sessao.Panes[id].Nome),
+			Estado: Preservado, Motivo: "não registrado no recursos.json, preservado (registre com orq recursos gravar --pane)"})
+	}
 	return itens
+}
+
+// nomeDePaneDaUS diz se o nome segue o padrão dos panes da US: tg-<ref>_* ou <projeto>-tg-<ref>_*.
+func nomeDePaneDaUS(nome string, u refs.US) bool {
+	n := strings.ToLower(nome)
+	base := "tg-" + strconv.Itoa(u.Ref) + "_"
+	return strings.HasPrefix(n, base) || strings.HasPrefix(n, strings.ToLower(u.Projeto)+"-"+base)
 }
 
 // fecharPane relê o Herdr logo antes de fechar: o agente pode ter voltado a trabalhar.
