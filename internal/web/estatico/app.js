@@ -13,8 +13,10 @@
 //    e o formulário está solto para reenviar. Erro 4xx/5xx já chega pelo HX-Retarget, sem aviso aqui.
 // 5) Pendência em edição: o /vivo (oob) não troca nem remove a pendência que tem formulário aberto
 //    ou texto digitado. O item fica como está, marcado como desatualizado com um aviso dentro
-//    dele; o que mudou (respondida, resolvida) é aplicado quando a pessoa fecha o item sem texto
-//    digitado, pedindo um /vivo na hora (evento vivo-agora), ou quando envia a resposta.
+//    dele e um selo no <summary> (visível com o item fechado); o que mudou (respondida, resolvida)
+//    é aplicado quando a pessoa fecha o item sem texto digitado, pedindo um /vivo na hora (evento
+//    vivo-agora), ou quando envia a resposta. A opção marcada sem texto não retém item fechado.
+//    "Nenhuma pendência." acompanha a lista, com o item retido contando como item.
 (function () {
   'use strict';
   function abrirAlvo() {
@@ -144,24 +146,39 @@
       e.returnValue = '';
     });
   }
-  // Item de pendência em edição: tem formulário e está aberto, ou tem resposta digitada/escolhida.
+  // Item de pendência em edição: tem formulário e está aberto, ou tem texto digitado. A opção
+  // marcada (rádio) conta só com o item aberto: fechado, refazer a escolha custa um clique e
+  // reter por ela não tem saída (o rádio não se desmarca ao fechar), ao contrário do texto, que se
+  // perde e por isso é protegido.
   function emEdicao(d) {
     if (!d.querySelector('form.resposta')) return false;
     if (d.open) return true;
     var t = d.querySelector('textarea');
-    if (t && t.value !== t.defaultValue) return true;
-    return Array.prototype.some.call(d.querySelectorAll('input[name="opcao"]'), function (r) { return r.checked !== r.defaultChecked; });
+    // Texto alterado e não vazio: o campo do "Trocar a resposta" já vem com a resposta anterior, e
+    // apagá-lo por inteiro não deixa nada a proteger.
+    return !!t && t.value !== t.defaultValue && t.value.trim() !== '';
   }
-  function retencao() {
-    document.addEventListener('htmx:oobBeforeSwap', function (e) {
-      var d = e.detail && e.detail.target;
-      if (!d || !d.matches || !d.matches('details.pend') || !emEdicao(d)) return;
-      e.detail.shouldSwap = false;
-      var novo = e.detail.fragment && e.detail.fragment.querySelector && e.detail.fragment.querySelector('details.pend');
-      var estado = (novo && novo.getAttribute('data-estado')) || 'resolvida';
-      d.setAttribute('data-desatualizada', estado);
-      var corpo = d.querySelector('.pend-corpo');
-      if (!corpo) return;
+  var AVISO = {
+    resolvida: 'Esta pendência foi resolvida depois que você a abriu e já não aceita resposta (enviar dará erro). O que você digitou continua aqui para você copiar; o item sai da lista quando você o fecha sem texto digitado.',
+    respondida: 'Esta pendência foi respondida por outra pessoa depois que você a abriu. O que você digitou continua aqui; o item é atualizado quando você o fecha sem texto digitado ou envia a resposta (que troca a anterior).'
+  };
+  // Marca o item retido de forma visível mesmo fechado: um selo no <summary> e o aviso no corpo.
+  function marcarRetido(d, estado) {
+    d.setAttribute('data-desatualizada', estado);
+    var sum = d.querySelector(':scope > summary'), corpo = d.querySelector('.pend-corpo');
+    if (sum) {
+      var alvo = sum.querySelector('.pend-estado') || sum;
+      var m = alvo.querySelector('[data-marca-desatualizada]');
+      if (!m) {
+        m = document.createElement('span');
+        m.className = 'selo selo-aviso';
+        m.setAttribute('data-marca-desatualizada', '');
+        alvo.insertBefore(m, alvo.firstChild);
+      }
+      m.textContent = 'mudou: ' + estado;
+      m.title = 'Esta pendência mudou depois que você a abriu; o que você digitou foi mantido.';
+    }
+    if (corpo) {
       var av = corpo.querySelector('[data-aviso-desatualizada]');
       if (!av) {
         av = document.createElement('p');
@@ -170,7 +187,27 @@
         av.setAttribute('data-aviso-desatualizada', '');
         corpo.insertBefore(av, corpo.firstChild);
       }
-      av.textContent = 'Esta pendência mudou depois que você a abriu (agora: ' + estado + '). O que você digitou continua aqui; o item é atualizado quando você o fecha sem texto digitado ou envia a resposta.';
+      av.textContent = AVISO[estado] || AVISO.respondida;
+    }
+  }
+  // "Nenhuma pendência." só aparece com a lista da US sem item (o retido ainda é item).
+  function sincronizarVazio() {
+    document.querySelectorAll('p[id$="-vazio"]').forEach(function (p) {
+      var lista = document.getElementById(p.id.slice(0, -'-vazio'.length) + '-pend');
+      if (lista) p.hidden = !!lista.querySelector('details.pend');
+    });
+  }
+  function retencao() {
+    document.addEventListener('htmx:oobBeforeSwap', function (e) {
+      var d = e.detail && e.detail.target;
+      if (!d || !d.matches || !d.matches('details.pend') || !emEdicao(d)) return;
+      e.detail.shouldSwap = false;
+      var novo = e.detail.fragment && e.detail.fragment.querySelector && e.detail.fragment.querySelector('details.pend');
+      marcarRetido(d, (novo && novo.getAttribute('data-estado')) || 'resolvida');
+    });
+    document.addEventListener('htmx:oobAfterSwap', sincronizarVazio);
+    document.addEventListener('htmx:afterRequest', function (e) {
+      if (e.target && e.target.id === 'vivo') sincronizarVazio();
     });
     // Fechar o item retido, sem texto digitado, aplica a mudança na hora.
     document.addEventListener('toggle', function (e) {
