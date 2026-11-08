@@ -382,11 +382,32 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 		StatusExtraInfo struct {
 			Name string `json:"name"`
 		} `json:"status_extra_info"`
+		Epics []struct {
+			Ref     int    `json:"ref"`
+			Subject string `json:"subject"`
+			Project struct {
+				Slug string `json:"slug"`
+			} `json:"project"`
+		} `json:"epics"`
 	}
 	if err := json.Unmarshal(out, &r); err != nil || r.Subject == "" {
 		return central.ValorTaiga{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "taiga story get devolveu algo que não é uma story: " + resumir(out)}
 	}
-	return central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, URL: r.URL}, nil
+	v := central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, URL: r.URL}
+	for _, e := range r.Epics {
+		v.Epicos = append(v.Epicos, central.EpicoTaiga{Ref: e.Ref, Titulo: e.Subject, URL: urlEpico(r.URL, e.Project.Slug, e.Ref)})
+	}
+	return v, nil
+}
+
+// urlEpico monta o link do épico a partir da URL base que o Taiga já deu para a US
+// (https://host/project/<slug>/us/N). Sem o formato esperado, não há link: devolve "".
+func urlEpico(urlUS, slug string, ref int) string {
+	i := strings.Index(urlUS, "/project/")
+	if i < 0 || slug == "" || ref <= 0 {
+		return ""
+	}
+	return urlUS[:i] + "/project/" + slug + "/epic/" + strconv.Itoa(ref)
 }
 
 // classificarTaiga separa autenticação e "não encontrado" das outras falhas da CLI taiga. A

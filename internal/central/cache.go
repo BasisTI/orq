@@ -77,6 +77,15 @@ type ValorTaiga struct {
 	Titulo string `json:"titulo"`
 	Status string `json:"status"`
 	URL    string `json:"url"`
+	// Epicos são os épicos a que a US está ligada (vêm no mesmo `story get`, sem consulta extra).
+	Epicos []EpicoTaiga `json:"epicos,omitempty"`
+}
+
+// EpicoTaiga é um épico do Taiga: o número, o título e o link.
+type EpicoTaiga struct {
+	Ref    int    `json:"ref"`
+	Titulo string `json:"titulo"`
+	URL    string `json:"url"`
 }
 
 // LerCache devolve as linhas de cache da fonte, por chave.
@@ -328,11 +337,13 @@ type Herdr struct {
 
 // Taiga é o que o Taiga diz de uma US no snapshot.
 type Taiga struct {
-	Titulo       *string `json:"titulo"`
-	Status       *string `json:"status"`
-	URL          *string `json:"url"`
-	AtualizadoEm *string `json:"atualizado_em"`
-	Erro         *Erro   `json:"erro"`
+	Titulo *string `json:"titulo"`
+	Status *string `json:"status"`
+	URL    *string `json:"url"`
+	// Epicos some quando a US não tem épico ou o Taiga ainda não respondeu.
+	Epicos       []EpicoTaiga `json:"epicos,omitempty"`
+	AtualizadoEm *string      `json:"atualizado_em"`
+	Erro         *Erro        `json:"erro"`
 }
 
 // Fonte resume uma fonte no snapshot.
@@ -412,6 +423,7 @@ func carregarTaiga(ctx context.Context, q querier, chave string) (Taiga, error) 
 		var v ValorTaiga
 		if json.Unmarshal([]byte(*valor), &v) == nil {
 			t.Titulo, t.Status, t.URL = ptr(v.Titulo), ptr(v.Status), ptr(v.URL)
+			t.Epicos = v.Epicos
 		}
 	}
 	return t, nil

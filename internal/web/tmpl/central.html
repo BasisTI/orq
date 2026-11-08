@@ -54,7 +54,7 @@
 
 {{define "c-onda"}}<details class="onda" id="{{.Anchor}}">{{template "onda-barra" .}}
 <div class="onda-corpo">
-<p class="onda-meta"><span>Coordenador <b>{{.Coordenador}}</b></span><span>Criada {{.Criada}}</span><a href="{{.Href}}">{{template "ic" "arquivo"}}Diário da onda</a></p>
+<p class="onda-meta"><span>Coordenador <b>{{.Coordenador}}</b></span><span>Criada {{.Criada}}</span><a href="{{.Href}}">{{template "ic" "arquivo"}}Diário da onda</a>{{if .Epicos}}<span class="onda-epicos">{{if gt (len .Epicos) 1}}Épicos{{else}}Épico{{end}} {{range $i, $e := .Epicos}}{{if $i}}, {{end}}{{if $e.URL}}<a href="{{$e.URL}}" title="{{$e.Titulo}}" rel="noopener noreferrer" target="_blank">#{{$e.Ref}}</a>{{else}}<span title="{{$e.Titulo}}">#{{$e.Ref}}</span>{{end}}{{end}}</span>{{end}}</p>
 <div class="us-lista">{{range .US}}{{template "c-us" .}}{{end}}</div>
 </div></details>{{end}}
 

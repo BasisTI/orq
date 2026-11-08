@@ -160,3 +160,22 @@ func TestBinarioAusenteListaDiretoriosDoNix(t *testing.T) {
 		}
 	}
 }
+
+func TestUrlEpico(t *testing.T) {
+	cs := []struct {
+		url, slug string
+		ref       int
+		quer      string
+	}{
+		{"https://agile.basis.com.br/project/orq/us/44", "orq", 30, "https://agile.basis.com.br/project/orq/epic/30"},
+		{"https://h/project/a/us/1", "b", 2, "https://h/project/b/epic/2"},
+		{"", "orq", 30, ""},
+		{"https://h/x", "orq", 30, ""},
+		{"https://h/project/a/us/1", "", 30, ""},
+	}
+	for _, c := range cs {
+		if got := urlEpico(c.url, c.slug, c.ref); got != c.quer {
+			t.Errorf("urlEpico(%q,%q,%d)=%q, quer %q", c.url, c.slug, c.ref, got, c.quer)
+		}
+	}
+}

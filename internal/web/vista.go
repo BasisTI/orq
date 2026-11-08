@@ -100,6 +100,13 @@ type USVista struct {
 	PendMuda []PendMuda
 }
 
+// EpicoVista é um épico no resumo da onda: o número e, se o Taiga deu a URL, o link.
+type EpicoVista struct {
+	Ref    int
+	Titulo string
+	URL    string
+}
+
 // OndaVista é a barra e o corpo de uma onda.
 type OndaVista struct {
 	ID                       int64
@@ -110,6 +117,7 @@ type OndaVista struct {
 	Limite                   string // "até mr-pronta · estrita"
 	Href                     string // diário
 	Criada                   string
+	Epicos                   []EpicoVista // sem repetição; vazio esconde o rótulo
 	Feitas, Total            int
 	Esperam                  int
 	Sinais                   []Selo
@@ -404,9 +412,20 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 		nomes[u.Chave] = u.ID
 	}
 	merge := o.AutorizacaoAte == "merge"
+	epicos := map[string]bool{}
 	for _, u := range o.US {
 		if u.Status == "done" {
 			ov.Feitas++
+		}
+		for _, e := range u.Taiga.Epicos {
+			k := u.Projeto + "/" + strconv.Itoa(e.Ref)
+			if e.URL != "" {
+				k = e.URL
+			}
+			if !epicos[k] {
+				epicos[k] = true
+				ov.Epicos = append(ov.Epicos, EpicoVista{Ref: e.Ref, Titulo: e.Titulo, URL: e.URL})
+			}
 		}
 		if !visto[u.Projeto] {
 			visto[u.Projeto] = true
