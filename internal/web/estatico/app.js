@@ -205,7 +205,6 @@
       var novo = e.detail.fragment && e.detail.fragment.querySelector && e.detail.fragment.querySelector('details.pend');
       marcarRetido(d, (novo && novo.getAttribute('data-estado')) || 'resolvida');
     });
-    document.addEventListener('htmx:oobAfterSwap', sincronizarVazio);
     document.addEventListener('htmx:afterRequest', function (e) {
       if (e.target && e.target.id === 'vivo') sincronizarVazio();
     });
