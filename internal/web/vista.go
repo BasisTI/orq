@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/BasisTI/orq/internal/hora"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 )
 
 // A tela sai do snapshot (spec §2.1): vistaCentral não abre banco, não chama ferramenta e não lê

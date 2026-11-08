@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/BasisTI/orq/internal/hora"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/herdrcfg"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/spf13/cobra"
 )

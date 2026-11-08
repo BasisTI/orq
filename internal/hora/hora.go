@@ -41,6 +41,21 @@ func DataHoraRFC(s string) string {
 	return DataHora(t)
 }
 
+// Anterior formata, no lugar, o instante "em" do campo "anterior" do detalhe de
+// um evento pend.responder. Devolve se mudou algo.
+func Anterior(detalhe map[string]any) bool {
+	a, ok := detalhe["anterior"].(map[string]any)
+	if !ok {
+		return false
+	}
+	em, ok := a["em"].(string)
+	if !ok {
+		return false
+	}
+	a["em"] = DataHoraRFC(em)
+	return true
+}
+
 // DataRFC converte um instante RFC 3339 em DD/MM/YYYY (BRT). Texto que não é
 // RFC 3339 volta como veio.
 func DataRFC(s string) string {

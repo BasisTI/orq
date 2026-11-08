@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"github.com/BasisTI/orq/internal/hora"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/upgrade"
 )

@@ -2,12 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"github.com/BasisTI/orq/internal/hora"
 	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/pendencias"

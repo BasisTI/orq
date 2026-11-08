@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -542,5 +543,13 @@ func TestQuandoUsaBRTComAnoSemDependerDoFusoDoHost(t *testing.T) {
 	time.Local = time.FixedZone("Tokyo", 9*3600)
 	if got, want := s.quando("2026-11-07T01:30:00Z"), "06/11/2026 22:30"; got != want {
 		t.Fatalf("quando = %q, quer %q", got, want)
+	}
+}
+
+func TestDetalheDoDiarioFormataAnteriorEm(t *testing.T) {
+	raw := json.RawMessage(`{"id":"TG-1#P1","opcao":2,"anterior":{"em":"2027-01-01T02:00:00Z","por":"chat"}}`)
+	got, _ := textoDetalhe("pend.responder", raw)
+	if strings.Contains(got, "2027-01-01") || !strings.Contains(got, "31/12/2026 23:00") {
+		t.Fatalf("detalhe = %s", got)
 	}
 }
