@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -129,13 +130,19 @@ func conjunto(s string) map[string]bool {
 // vivo atende a atualização de 30 s (spec §6). A resposta é só hx-swap-oob; o elemento que a
 // pede tem hx-swap="none" e nada nele é trocado. Troca a situação, a idade dos dados e, só para
 // os ids que a página diz ter (o="ondas", u="US", a="abas", no hx-vals do #vivo), as barras das
-// ondas, as linhas das US e as contagens das abas (só o <summary>, nunca o <details>). Nunca
-// devolve formulário, campo de texto nem corpo de pendência.
+// ondas e das US, as contagens das abas e, no corpo de cada US, o status do Taiga, as MRs e a lista
+// de pendências. Nunca devolve o formulário nem o corpo de uma pendência.
 //
-// A lista não muda embaixo da mão de quem lê: se o hash (v) da página difere do do servidor
-// (onda nova ou encerrada, ordem por atenção, pendência nova), nada é inserido, removido nem
-// reordenado; os alvos que a página tem continuam sendo atualizados no lugar, e a resposta traz
-// o aviso "A lista mudou. Atualizar".
+// A lista de pendências da US é atualizada por diferença contra o que a página diz ter (pi, os
+// "anchor:estado" do hx-include): o item novo entra no fim, o que mudou de estado é trocado e o
+// que saiu é removido; o que não mudou não vai na resposta. Item com formulário aberto ou texto
+// digitado não é trocado nem removido: o app.js o retém (htmx:oobBeforeSwap), marca como
+// desatualizado e aplica a mudança quando a pessoa o fecha ou envia (spec §6).
+//
+// A lista de ondas e US não muda embaixo da mão de quem lê: se o hash (v) da página difere do do
+// servidor (onda nova ou encerrada, ordem por atenção), nada é inserido, removido nem reordenado;
+// os alvos que a página tem continuam sendo atualizados no lugar, e a resposta traz o aviso "A
+// lista mudou. Atualizar".
 func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	snap, err := s.fonte().Snapshot(r.Context(), false)
 	if err != nil {
@@ -155,6 +162,7 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	c := vistaCentral(snap, s.agora(), Filtro{Projeto: aba.Projeto})
 	igual := q.Get("v") == c.Hash
 	ondas, us, abas := conjunto(q.Get("o")), conjunto(q.Get("u")), conjunto(q.Get("a"))
+	tem := pendDaPagina(q["pi"])
 	c.Situacao.Oob, c.FontesOob = true, true
 	var as []Aba
 	for _, a := range c.Abas {
@@ -174,6 +182,7 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 		for _, u := range o.US {
 			if us[u.Anchor] {
 				u.Oob = true
+				u.PendMuda = pendMuda(u, tem)
 				uu = append(uu, u)
 			}
 		}
@@ -189,4 +198,65 @@ func (s *Servidor) vivo(w http.ResponseWriter, r *http.Request) {
 	if err != nil && s.Log != nil {
 		s.Log("web: modelo vivo: %v", err)
 	}
+}
+
+// pendDaPagina lê os "pi" (anchor:estado) das pendências que a página tem. Valor que não tem a
+// forma esperada é ignorado.
+func pendDaPagina(pi []string) map[string]string {
+	m := map[string]string{}
+	for i, v := range pi {
+		if i >= 2000 {
+			break
+		}
+		if a, e, ok := strings.Cut(v, ":"); ok && len(v) < 200 && pendAnchorValido.MatchString(a) && listaValida.MatchString(e) {
+			m[a] = e
+		}
+	}
+	return m
+}
+
+var pendAnchorValido = regexp.MustCompile(`^pend-[a-z0-9_-]+-[0-9]+-[0-9]+$`)
+
+// pendMuda compara a lista de pendências da US com a que a página tem (tem: anchor -> estado).
+// Só mexe no que mudou: insere a nova, troca a que mudou de estado e remove a que saiu da lista;
+// o que não mudou (aberto, com texto digitado) não vai na resposta.
+func pendMuda(u USVista, tem map[string]string) []PendMuda {
+	var out []PendMuda
+	alvo := u.Anchor + "-pend"
+	prefixo := "pend-" + strings.TrimPrefix(u.Anchor, "us-") + "-"
+	vistas := map[string]bool{}
+	for _, p := range u.Pendencias {
+		vistas[p.Anchor] = true
+		estado, na := tem[p.Anchor]
+		switch {
+		case !na:
+			out = append(out, PendMuda{Acao: "inserir", Alvo: alvo, Item: p})
+		case estado != p.Estado:
+			p.Oob = true
+			out = append(out, PendMuda{Acao: "trocar", Item: p})
+		}
+	}
+	for a := range tem {
+		if resto, ok := strings.CutPrefix(a, prefixo); ok && numeroPuro.MatchString(resto) && !vistas[a] {
+			out = append(out, PendMuda{Acao: "remover", Item: PendItem{Anchor: a}})
+		}
+	}
+	// Na ordem do número da pendência (P2 antes de P10), que é a da carga nova.
+	sort.Slice(out, func(i, j int) bool {
+		a, b := numeroDe(out[i].Item.Anchor), numeroDe(out[j].Item.Anchor)
+		if a != b {
+			return a < b
+		}
+		return out[i].Item.Anchor < out[j].Item.Anchor
+	})
+	return out
+}
+
+var numeroPuro = regexp.MustCompile(`^[0-9]+$`)
+
+// numeroDe é o número da pendência no fim do anchor ("pend-proj-12-3" é 3).
+func numeroDe(anchor string) int {
+	i := strings.LastIndexByte(anchor, '-')
+	n, _ := strconv.Atoi(anchor[i+1:])
+	return n
 }

@@ -27,6 +27,15 @@ type PendItem struct {
 	SemCoordenador              bool
 	// Nova marca o item que acabou de ser respondido: ele pisca uma vez.
 	Nova bool
+	// Oob: o /vivo troca o item no lugar (hx-swap-oob).
+	Oob bool
+}
+
+// PendMuda é o que o /vivo faz com uma pendência da lista de uma US: "inserir" (no fim do
+// elemento Alvo), "trocar" (o item mudou de estado) ou "remover" (saiu da lista).
+type PendMuda struct {
+	Acao, Alvo string
+	Item       PendItem
 }
 
 var iconesTipo = map[string]string{"decisao": "decisao", "autorizacao": "autoriza", "duvida": "duvida"}

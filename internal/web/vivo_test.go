@@ -101,12 +101,20 @@ func queryDaPagina(t *testing.T, c *cena, caminho string) url.Values {
 		t.Fatalf("%s não tem o #vivo", caminho)
 	}
 	q, _ := url.ParseQuery(valsParaQuery(m[1]))
+	// O hx-include do #vivo manda também as pendências que a Central tem (input hidden "pi").
+	if strings.Contains(h, `hx-include=".us-corpo input[name=pi]"`) {
+		for _, pi := range piRe.FindAllStringSubmatch(h, -1) {
+			q.Add("pi", html.UnescapeString(pi[1]))
+		}
+	}
 	// A aba Pendências manda também a composição que renderizou (hx-include="#comp").
 	if cm := compRe.FindStringSubmatch(h); cm != nil {
 		q.Set("comp", html.UnescapeString(cm[1]))
 	}
 	return q
 }
+
+var piRe = regexp.MustCompile(`<input type="hidden" name="pi" value="([^"]*)">`)
 
 var compRe = regexp.MustCompile(`id="comp" name="comp" value="([^"]*)"`)
 
@@ -163,21 +171,54 @@ func TestVivoComHashVelhoAvisaEAtualizaSoOQueAPaginaTem(t *testing.T) {
 	contem(t, html, "A lista mudou")
 }
 
-func TestVivoPendenciaNovaMudaOHash(t *testing.T) {
+// A pendência nova, resolvida ou respondida aparece na lista da US sem avisar que "a lista mudou":
+// a contagem do título e a lista concordam (US #41). Só o que mudou vai na resposta.
+func TestVivoAtualizaAListaDePendenciasNoLugar(t *testing.T) {
 	c := semeada(t)
 	antes := queryDaPagina(t, c, "/")
 	_, html, _ := c.vivo(antes, "/")
-	naoContem(t, html, "A lista mudou")
+	naoContem(t, html, "A lista mudou", "pend-nova", "hx-swap-oob=\"beforeend", "hx-swap-oob=\"delete\"", "<details")
+	// Nova, partindo de "Nenhuma pendência." (a 406 não tem nenhuma).
 	_, err := c.st.RegistrarPendencia(c.ctx, central.NovaPendencia{US: refsUS("catalogo", 406), Tipo: "duvida", Titulo: "nova", Autor: "w", Detalhe: "d", Slug: "n1", Hash: "n1"})
 	c.ok(err)
 	_, html, _ = c.vivo(antes, "/")
-	contem(t, html, "A lista mudou", `id="us-catalogo-406-barra"`)
-	// Responder não muda a lista (a pendência segue na US), então não avisa.
+	naoContem(t, html, "A lista mudou")
+	contem(t, html, `id="us-catalogo-406-barra"`, "1 espera você", `<div hx-swap-oob="beforeend:#us-catalogo-406-pend">`, `id="pend-catalogo-406-1"`, `<p id="us-catalogo-406-vazio" class="vazio-linha" hidden hx-swap-oob="true">`)
+	if n := strings.Count(html, "<details"); n != 1 {
+		t.Errorf("a resposta trouxe %d pendência(s), quer só a nova", n)
+	}
+	// A página aplicou a mudança: o ciclo seguinte não repete o item.
 	depois := queryDaPagina(t, c, "/")
+	_, html, _ = c.vivo(depois, "/")
+	naoContem(t, html, "<details", "hx-swap-oob=\"delete\"", "A lista mudou")
+	// Respondida por outra pessoa: o item é trocado (estado novo), a contagem cai.
 	_, err = c.st.ResponderPendencia(c.ctx, nil, refs.Pend{US: refsUS("catalogo", 406), Numero: 1}, central.Resposta{Texto: "ok", Por: "ana"})
 	c.ok(err)
 	_, html, _ = c.vivo(depois, "/")
-	naoContem(t, html, "A lista mudou")
+	naoContem(t, html, "A lista mudou", "beforeend")
+	contem(t, html, `<details class="pend pend-ok" id="pend-catalogo-406-1" data-estado="respondida" hx-swap-oob="true"`)
+	// Resolvida: sai da lista, e "Nenhuma pendência." volta.
+	depois = queryDaPagina(t, c, "/")
+	_, err = c.st.ResolverPendencia(c.ctx, nil, refs.Pend{US: refsUS("catalogo", 406), Numero: 1}, "feito")
+	c.ok(err)
+	_, html, _ = c.vivo(depois, "/")
+	contem(t, html, `<div id="pend-catalogo-406-1" hx-swap-oob="delete"></div>`, `<p id="us-catalogo-406-vazio" class="vazio-linha" hx-swap-oob="true">`)
+	naoContem(t, html, "A lista mudou", "<details", `id="us-catalogo-406-vazio" class="vazio-linha" hidden`)
+}
+
+// O pi que a página manda é entrada do cliente: valor fora da forma esperada é ignorado, e a
+// remoção só alcança pendência da própria US.
+func TestVivoIgnoraPiInvalido(t *testing.T) {
+	c := semeada(t)
+	q := queryDaPagina(t, c, "/")
+	q.Add("pi", "<script>:aberta")
+	q.Add("pi", "pend-catalogo-9999-1:aberta")
+	q.Add("pi", "sem-dois-pontos")
+	q.Add("pi", "pend-x-1-1:<x>")
+	_, html, _ := c.vivo(q, "/")
+	naoContem(t, html, "<script>", "<x>", "pend-x-1-1", "A lista mudou")
+	// Anchor de outra US (catalogo-9999 não existe na Central): nada a remover.
+	naoContem(t, html, `hx-swap-oob="delete"`)
 }
 
 func TestVivoPorAbaDeProjeto(t *testing.T) {
@@ -257,4 +298,22 @@ func TestCentralEscapaTextoHostil(t *testing.T) {
 	_, html := c.get("/")
 	naoContem(t, html, "<script>alert", "<img src=x")
 	contem(t, html, "&lt;script&gt;alert(1)&lt;/script&gt;")
+}
+
+// A remoção só alcança pendência da própria US ("infra-2025" não é "infra" com a US 2025), e a
+// inserção segue o número da pendência (P2 antes de P10).
+func TestPendMudaPrefixoExatoEOrdemNumerica(t *testing.T) {
+	u := USVista{ID: "TG-2025", Anchor: "us-infra-2025", Projeto: ProjetoTag{Slug: "infra"}}
+	for _, n := range []string{"10", "2"} {
+		u.Pendencias = append(u.Pendencias, PendItem{Anchor: "pend-infra-2025-" + n, Estado: "aberta"})
+	}
+	tem := map[string]string{"pend-infra-2025-5-1": "aberta", "pend-infra-2025-9": "aberta"}
+	var got []string
+	for _, m := range pendMuda(u, tem) {
+		got = append(got, m.Acao+":"+m.Item.Anchor)
+	}
+	want := []string{"inserir:pend-infra-2025-2", "remover:pend-infra-2025-9", "inserir:pend-infra-2025-10"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("pendMuda = %v, quer %v", got, want)
+	}
 }

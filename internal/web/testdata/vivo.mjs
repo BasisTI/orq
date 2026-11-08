@@ -37,7 +37,7 @@ const foto = () => pagina.evaluate(() => ({
   hxGet: document.querySelector('#vivo')?.getAttribute('hx-get'),
   vivos: document.querySelectorAll('#vivo').length,
   filhosDoVivo: document.querySelector('#vivo')?.children.length,
-  formularios: document.querySelectorAll('form, textarea:not(#teste-texto), input').length,
+  formularios: document.querySelectorAll('form, textarea:not(#teste-texto), input:not([name=pi])').length,
   aviso: document.querySelector('#aviso-lista')?.textContent.trim(),
 }));
 
@@ -81,7 +81,9 @@ if (pedidos.length !== 1) falha(`pedidos ao /vivo no primeiro ciclo = ${pedidos.
 await Promise.all([pagina.waitForResponse((r) => r.url().includes('/vivo')), pagina.clock.runFor(30500)]);
 await pagina.waitForTimeout(200);
 if (pedidos.length !== 2) falha(`pedidos ao /vivo depois de dois ciclos = ${pedidos.length}, quer 2`);
-if (pedidos.length === 2 && pedidos[0] !== pedidos[1]) falha(`o v mudou entre os ciclos: ${pedidos.join(' | ')}`);
+// O pi (pendências que a página tem) muda com a resposta aplicada; o v não.
+const vDe = (u) => new URL(u).searchParams.get('v');
+if (pedidos.length === 2 && vDe(pedidos[0]) !== vDe(pedidos[1])) falha(`o v mudou entre os ciclos: ${pedidos.join(' | ')}`);
 
 const ciclo = async () => {
   await Promise.all([pagina.waitForResponse((r) => r.url().includes('/vivo')), pagina.clock.runFor(30500)]);
