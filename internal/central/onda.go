@@ -139,30 +139,12 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 			if err := s.atribuirTom(ctx, tx, u.Projeto, coord.Nome); err != nil {
 				return err
 			}
-			var ondaAtual int64
-			var encerrada *string
-			var ateAntigo, status string
-			err := tx.QueryRowContext(ctx, `SELECT us.onda_id, onda.encerrada_em, onda.autorizacao_ate, us.status FROM us JOIN onda ON onda.id = us.onda_id WHERE us.projeto = ? AND us.ref = ?`, u.Projeto, u.Ref).
-				Scan(&ondaAtual, &encerrada, &ateAntigo, &status)
-			switch {
-			case semLinha(err):
-				_, err = tx.ExecContext(ctx, `INSERT INTO us (projeto, ref, onda_id, posicao, status, atualizado_em) VALUES (?, ?, ?, ?, 'wait', ?)`, u.Projeto, u.Ref, id, i+1, agora)
-			case err != nil:
-			case encerrada == nil:
-				err = conflito("us_em_outra_onda", fmt.Sprintf("%s já está na onda %d, aberta", u.Chave(), ondaAtual), fmt.Sprintf("encerre a onda %d ou tire %s de --us", ondaAtual, u.Chave()))
-			default:
-				movidas = append(movidas, fmt.Sprintf("%s (da onda %d)", u.Chave(), ondaAtual))
-				if _, err = tx.ExecContext(ctx, `DELETE FROM dependencia WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref); err == nil {
-					_, err = tx.ExecContext(ctx, `UPDATE us SET onda_id = ?, posicao = ?, atualizado_em = ? WHERE projeto = ? AND ref = ?`, id, i+1, agora, u.Projeto, u.Ref)
-				}
-				// O status vale para o limite da onda de onde a US veio: com outro limite, ela
-				// recomeça em wait (o done de um plano aprovado não é a MR pronta da onda nova).
-				if err == nil && ateAntigo != ate && status != "wait" {
-					_, err = tx.ExecContext(ctx, `UPDATE us SET status = 'wait' WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref)
-					reiniciadas = append(reiniciadas, evento{coordenador: coord.Nome, ondaID: id, projeto: u.Projeto, ref: u.Ref, tipo: "us.status",
-						detalhe: map[string]any{"de": status, "para": "wait", "status": "wait",
-							"motivo": fmt.Sprintf("veio da onda %d (até %s) para a onda %d (até %s): o status valia para o limite anterior", ondaAtual, ateAntigo, id, ate)}})
-				}
+			movida, reinicio, err := s.colocarUS(ctx, tx, coord.Nome, id, ate, u, i+1, agora)
+			if movida != "" {
+				movidas = append(movidas, movida)
+			}
+			if reinicio != nil {
+				reiniciadas = append(reiniciadas, *reinicio)
 			}
 			if err != nil {
 				return err
@@ -182,6 +164,179 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 			detalhe["movidas"] = movidas
 		}
 		if err := s.registrar(ctx, tx, evento{coordenador: coord.Nome, ondaID: id, tipo: "onda.criar", detalhe: detalhe}); err != nil {
+			return err
+		}
+		for _, e := range reiniciadas {
+			if err := s.registrar(ctx, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Onda{}, err
+	}
+	return s.VerOnda(ctx, id)
+}
+
+// colocarUS põe a US na onda `id` (limite `ate`), na posição dada. US nova entra em wait; a de
+// onda encerrada muda de onda (movida diz de qual) e perde as dependências antigas, guardando o
+// status se o limite é o mesmo e voltando a wait, com o evento devolvido em reinicio, se é outro.
+// A de onda aberta é recusada com us_em_outra_onda, e a que já está nesta onda, com us_ja_na_onda.
+func (s *Store) colocarUS(ctx context.Context, tx *sql.Tx, coord string, id int64, ate string, u refs.US, posicao int, agora string) (movida string, reinicio *evento, err error) {
+	var ondaAtual int64
+	var encerrada *string
+	var ateAntigo, status string
+	err = tx.QueryRowContext(ctx, `SELECT us.onda_id, onda.encerrada_em, onda.autorizacao_ate, us.status FROM us JOIN onda ON onda.id = us.onda_id WHERE us.projeto = ? AND us.ref = ?`, u.Projeto, u.Ref).
+		Scan(&ondaAtual, &encerrada, &ateAntigo, &status)
+	switch {
+	case semLinha(err):
+		_, err = tx.ExecContext(ctx, `INSERT INTO us (projeto, ref, onda_id, posicao, status, atualizado_em) VALUES (?, ?, ?, ?, 'wait', ?)`, u.Projeto, u.Ref, id, posicao, agora)
+	case err != nil:
+	case encerrada == nil && ondaAtual == id:
+		err = conflito("us_ja_na_onda", fmt.Sprintf("%s já está na onda %d", u.Chave(), id), "")
+	case encerrada == nil:
+		err = conflito("us_em_outra_onda", fmt.Sprintf("%s já está na onda %d, aberta", u.Chave(), ondaAtual), fmt.Sprintf("encerre a onda %d ou tire %s da lista", ondaAtual, u.Chave()))
+	default:
+		movida = fmt.Sprintf("%s (da onda %d)", u.Chave(), ondaAtual)
+		if _, err = tx.ExecContext(ctx, `DELETE FROM dependencia WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref); err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE us SET onda_id = ?, posicao = ?, atualizado_em = ? WHERE projeto = ? AND ref = ?`, id, posicao, agora, u.Projeto, u.Ref)
+		}
+		// O status vale para o limite da onda de onde a US veio: com outro limite, ela
+		// recomeça em wait (o done de um plano aprovado não é a MR pronta da onda nova).
+		if err == nil && ateAntigo != ate && status != "wait" {
+			_, err = tx.ExecContext(ctx, `UPDATE us SET status = 'wait' WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref)
+			reinicio = &evento{coordenador: coord, ondaID: id, projeto: u.Projeto, ref: u.Ref, tipo: "us.status",
+				detalhe: map[string]any{"de": status, "para": "wait", "status": "wait",
+					"motivo": fmt.Sprintf("veio da onda %d (até %s) para a onda %d (até %s): o status valia para o limite anterior", ondaAtual, ateAntigo, id, ate)}}
+		}
+	}
+	return movida, reinicio, err
+}
+
+// NovaAdicao são os dados de `orq onda adicionar`.
+type NovaAdicao struct {
+	Projeto string // completa as US sem projeto; vazio usa o projeto padrão do coordenador
+	US      []refs.US
+	Apos    *refs.US // vazio = no fim da onda
+}
+
+// AdicionarUS inclui US numa onda aberta, no fim ou logo depois de `Apos`. A US nova entra em wait, ou com o status que já tinha se veio de onda encerrada de mesmo limite. A regra de
+// quem já está em outra onda é a de CriarOnda: onda aberta recusa, onda encerrada cede a US.
+// Não mexe nas dependências: as da US nova são as que ela já tinha (nenhuma, se veio de onda
+// encerrada). `coord` pode ser nulo: o evento é então assinado pelo dono da onda, que também
+// dá o projeto padrão.
+func (s *Store) AdicionarUS(ctx context.Context, coord *Coordenador, id int64, n NovaAdicao) (Onda, error) {
+	if len(n.US) == 0 {
+		return Onda{}, uso("nenhuma US para adicionar", "passe as refs: orq onda adicionar <id> 215 216")
+	}
+	err := s.escrever(ctx, func(tx *sql.Tx) error {
+		var dono, ate string
+		var encerrada *string
+		err := tx.QueryRowContext(ctx, `SELECT coordenador, autorizacao_ate, encerrada_em FROM onda WHERE id = ?`, id).Scan(&dono, &ate, &encerrada)
+		if semLinha(err) {
+			return naoEncontrado(fmt.Sprintf("onda %d não existe", id), "veja as ondas com orq onda list")
+		}
+		if err != nil {
+			return err
+		}
+		if encerrada != nil {
+			return conflito("onda_encerrada", fmt.Sprintf("a onda %d foi encerrada em %s", id, *encerrada), "crie uma onda com orq onda criar")
+		}
+		assina, projeto := dono, n.Projeto
+		if coord != nil {
+			assina = coord.Nome
+		}
+		if projeto == "" {
+			c := coord
+			if c == nil || c.ProjetoPadrao == nil {
+				d, err := coordPorNome(ctx, tx, dono)
+				if err != nil {
+					return err
+				}
+				c = &d
+			}
+			if c.ProjetoPadrao != nil {
+				projeto = *c.ProjetoPadrao
+			}
+		}
+		completar := func(u refs.US) (refs.US, error) {
+			if u.Projeto != "" {
+				return u, nil
+			}
+			if projeto == "" {
+				return u, uso(refs.Exibir(u.Ref)+" sem projeto", "passe --projeto <slug> ou registre o coordenador com --projeto")
+			}
+			p, err := refs.ValidarProjeto(projeto)
+			if err != nil {
+				return u, uso(err.Error(), "")
+			}
+			return refs.US{Projeto: p, Ref: u.Ref}, nil
+		}
+		novas := make([]refs.US, 0, len(n.US))
+		vistas := map[refs.US]bool{}
+		for _, u := range n.US {
+			u, err := completar(u)
+			if err != nil {
+				return err
+			}
+			if vistas[u] {
+				return uso(u.Chave()+" repetida", "")
+			}
+			vistas[u] = true
+			novas = append(novas, u)
+		}
+		posicao := 0
+		if n.Apos == nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(posicao), 0) FROM us WHERE onda_id = ?`, id).Scan(&posicao); err != nil {
+				return err
+			}
+		} else {
+			a, err := completar(*n.Apos)
+			if err != nil {
+				return err
+			}
+			err = tx.QueryRowContext(ctx, `SELECT posicao FROM us WHERE onda_id = ? AND projeto = ? AND ref = ?`, id, a.Projeto, a.Ref).Scan(&posicao)
+			if semLinha(err) {
+				return uso(a.Chave()+" (--apos) não está na onda "+fmt.Sprint(id), "veja as US da onda com orq onda ver "+fmt.Sprint(id))
+			}
+			if err != nil {
+				return err
+			}
+		}
+		// Abre espaço para as novas; uma US recusada adiante desfaz a transação inteira (rollback).
+		if _, err := tx.ExecContext(ctx, `UPDATE us SET posicao = posicao + ? WHERE onda_id = ? AND posicao > ?`, len(novas), id, posicao); err != nil {
+			return err
+		}
+		agora := s.agora()
+		chaves := make([]string, len(novas))
+		movidas := []string{}
+		var reiniciadas []evento
+		for i, u := range novas {
+			chaves[i] = u.Chave()
+			if err := s.atribuirTom(ctx, tx, u.Projeto, assina); err != nil {
+				return err
+			}
+			movida, reinicio, err := s.colocarUS(ctx, tx, assina, id, ate, u, posicao+i+1, agora)
+			if err != nil {
+				return err
+			}
+			if movida != "" {
+				movidas = append(movidas, movida)
+			}
+			if reinicio != nil {
+				reiniciadas = append(reiniciadas, *reinicio)
+			}
+		}
+		detalhe := map[string]any{"us": chaves}
+		if n.Apos != nil {
+			a, _ := completar(*n.Apos)
+			detalhe["apos"] = a.Chave()
+		}
+		if len(movidas) > 0 {
+			detalhe["movidas"] = movidas
+		}
+		if err := s.registrar(ctx, tx, evento{coordenador: assina, ondaID: id, tipo: "onda.adicionar", detalhe: detalhe}); err != nil {
 			return err
 		}
 		for _, e := range reiniciadas {
@@ -338,6 +493,32 @@ func (s *Store) EncerrarOnda(ctx context.Context, coord string, id int64) (Onda,
 		return Onda{}, err
 	}
 	return s.VerOnda(ctx, id)
+}
+
+// EncerrarOndaSePronta encerra a onda só se, dentro da própria transação de escrita, a regra de
+// encerramento ainda diz pronta. É o que o daemon usa: a decisão dele vem de um snapshot lido
+// antes de limpar o Docker, e uma US adicionada nesse intervalo (orq onda adicionar) tira a onda
+// de pronta. Devolve encerrada=false, sem gravar nada, se a onda deixou de estar pronta ou já foi
+// encerrada. O `orq onda encerrar` manual segue incondicional (EncerrarOnda).
+func (s *Store) EncerrarOndaSePronta(ctx context.Context, coord string, id int64) (encerrada bool, err error) {
+	err = s.escrever(ctx, func(tx *sql.Tx) error {
+		os, err := carregarOndas(ctx, tx, `WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if len(os) == 0 {
+			return naoEncontrado(fmt.Sprintf("onda %d não existe", id), "veja as ondas com orq onda list")
+		}
+		if e := EncerramentoDe(os[0]); e == nil || !e.Pronta {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE onda SET encerrada_em = ? WHERE id = ?`, s.agora(), id); err != nil {
+			return err
+		}
+		encerrada = true
+		return s.registrar(ctx, tx, evento{coordenador: valorOu(coord, os[0].Coordenador), ondaID: id, tipo: "onda.encerrar", detalhe: map[string]any{}})
+	})
+	return encerrada, err
 }
 
 // Bloqueio é uma US em wait que ainda não pode sair, com o motivo.

@@ -67,7 +67,7 @@ func (a *App) coordCmd() *cobra.Command {
 }
 
 func (a *App) ondaCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "onda", Short: "Cria, consulta e encerra ondas de US"}
+	cmd := &cobra.Command{Use: "onda", Short: "Cria, amplia, consulta e encerra ondas de US"}
 
 	var projeto, us, ate, ordem string
 	var depende []string
@@ -214,7 +214,56 @@ func (a *App) ondaCmd() *cobra.Command {
 			return a.emit(o, func(w io.Writer) error { return textoOndaResumo(w, o) })
 		},
 	}
-	cmd.AddCommand(criar, ver, list, proxima, encerrar)
+	var projetoAdd, apos string
+	adicionar := &cobra.Command{
+		Use:   "adicionar <id> <ref>… [--apos <ref>] [--projeto <slug>]",
+		Short: "Inclui US numa onda aberta, no fim ou depois de --apos (em wait; mantém o status se veio de onda encerrada de mesmo limite)",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			id, err := ondaID(args[0])
+			if err != nil {
+				return err
+			}
+			n := central.NovaAdicao{Projeto: projetoAdd}
+			for _, s := range args[1:] {
+				for _, p := range strings.Split(s, ",") {
+					if p = strings.TrimSpace(p); p == "" {
+						continue
+					}
+					u, err := refs.ParseUS(p)
+					if err != nil {
+						return usoDe(err)
+					}
+					n.US = append(n.US, u)
+				}
+			}
+			if cmd.Flags().Changed("apos") {
+				u, err := refs.ParseUS(apos)
+				if err != nil {
+					return usoDe(err)
+				}
+				n.Apos = &u
+			}
+			st, err := a.store(ctx)
+			if err != nil {
+				return err
+			}
+			coord, err := a.coordOpcional(ctx, st)
+			if err != nil {
+				return err
+			}
+			o, err := st.AdicionarUS(ctx, coord, id, n)
+			if err != nil {
+				return err
+			}
+			return a.emit(o, func(w io.Writer) error { return textoOnda(w, o) })
+		},
+	}
+	adicionar.Flags().StringVar(&projetoAdd, "projeto", "", "slug do projeto Taiga das US sem projeto (padrão: o do coordenador)")
+	adicionar.Flags().StringVar(&apos, "apos", "", "põe as US logo depois desta, que já está na onda (padrão: no fim)")
+
+	cmd.AddCommand(criar, adicionar, ver, list, proxima, encerrar)
 	return cmd
 }
 

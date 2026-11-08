@@ -68,7 +68,7 @@ func (s *Store) RegistrarPendencia(ctx context.Context, n NovaPendencia) (Result
 			return err
 		}
 		if !aberta {
-			return conflito("onda_encerrada", fmt.Sprintf("%s está numa onda encerrada", alvo.Chave()), "ponha a US numa onda aberta com orq onda criar")
+			return conflito("onda_encerrada", fmt.Sprintf("%s está numa onda encerrada", alvo.Chave()), "ponha a US numa onda aberta: orq onda adicionar <id> <ref> (ou orq onda criar)")
 		}
 		opcoes, err := ValidarOpcoes(n.Tipo, n.Opcoes)
 		if err != nil {
