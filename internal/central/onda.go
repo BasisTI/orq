@@ -221,7 +221,7 @@ type NovaAdicao struct {
 	Apos    *refs.US // vazio = no fim da onda
 }
 
-// AdicionarUS inclui US numa onda aberta, no fim ou logo depois de `Apos`, em wait. A regra de
+// AdicionarUS inclui US numa onda aberta, no fim ou logo depois de `Apos`. A US nova entra em wait, ou com o status que já tinha se veio de onda encerrada de mesmo limite. A regra de
 // quem já está em outra onda é a de CriarOnda: onda aberta recusa, onda encerrada cede a US.
 // Não mexe nas dependências: as da US nova são as que ela já tinha (nenhuma, se veio de onda
 // encerrada). `coord` pode ser nulo: o evento é então assinado pelo dono da onda, que também
@@ -304,7 +304,7 @@ func (s *Store) AdicionarUS(ctx context.Context, coord *Coordenador, id int64, n
 				return err
 			}
 		}
-		// Valida tudo antes de abrir espaço: uma US recusada desfaz a transação inteira.
+		// Abre espaço para as novas; uma US recusada adiante desfaz a transação inteira (rollback).
 		if _, err := tx.ExecContext(ctx, `UPDATE us SET posicao = posicao + ? WHERE onda_id = ? AND posicao > ?`, len(novas), id, posicao); err != nil {
 			return err
 		}
@@ -493,6 +493,32 @@ func (s *Store) EncerrarOnda(ctx context.Context, coord string, id int64) (Onda,
 		return Onda{}, err
 	}
 	return s.VerOnda(ctx, id)
+}
+
+// EncerrarOndaSePronta encerra a onda só se, dentro da própria transação de escrita, a regra de
+// encerramento ainda diz pronta. É o que o daemon usa: a decisão dele vem de um snapshot lido
+// antes de limpar o Docker, e uma US adicionada nesse intervalo (orq onda adicionar) tira a onda
+// de pronta. Devolve encerrada=false, sem gravar nada, se a onda deixou de estar pronta ou já foi
+// encerrada. O `orq onda encerrar` manual segue incondicional (EncerrarOnda).
+func (s *Store) EncerrarOndaSePronta(ctx context.Context, coord string, id int64) (encerrada bool, err error) {
+	err = s.escrever(ctx, func(tx *sql.Tx) error {
+		os, err := carregarOndas(ctx, tx, `WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if len(os) == 0 {
+			return naoEncontrado(fmt.Sprintf("onda %d não existe", id), "veja as ondas com orq onda list")
+		}
+		if e := EncerramentoDe(os[0]); e == nil || !e.Pronta {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE onda SET encerrada_em = ? WHERE id = ?`, s.agora(), id); err != nil {
+			return err
+		}
+		encerrada = true
+		return s.registrar(ctx, tx, evento{coordenador: valorOu(coord, os[0].Coordenador), ondaID: id, tipo: "onda.encerrar", detalhe: map[string]any{}})
+	})
+	return encerrada, err
 }
 
 // Bloqueio é uma US em wait que ainda não pode sair, com o motivo.

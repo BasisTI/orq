@@ -158,3 +158,31 @@ func TestAdicionarUSEntraNaProximaEEncerramento(t *testing.T) {
 		t.Fatalf("encerramento = %+v", e)
 	}
 }
+
+func TestEncerrarOndaSeProntaReavaliaNaTransacao(t *testing.T) {
+	s := novoStore(t)
+	ctx := context.Background()
+	co := coord(t, s, "a", "p1", "proj")
+	o := onda(t, s, co, NovaOnda{Titulo: "o", US: []refs.US{us(t, "1")}})
+	if enc, err := s.EncerrarOndaSePronta(ctx, "a", o.ID); err != nil || enc {
+		t.Fatalf("US em wait: encerrada=%v, %v", enc, err)
+	}
+	if _, _, err := s.AtualizarStatus(ctx, &co, us(t, "1"), MudancaStatus{Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdicionarUS(ctx, &co, o.ID, NovaAdicao{US: []refs.US{us(t, "2")}}); err != nil {
+		t.Fatal(err)
+	}
+	if enc, err := s.EncerrarOndaSePronta(ctx, "a", o.ID); err != nil || enc {
+		t.Fatalf("com US nova: encerrada=%v, %v", enc, err)
+	}
+	if _, _, err := s.AtualizarStatus(ctx, &co, us(t, "2"), MudancaStatus{Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if enc, err := s.EncerrarOndaSePronta(ctx, "a", o.ID); err != nil || !enc {
+		t.Fatalf("pronta: encerrada=%v, %v", enc, err)
+	}
+	if enc, err := s.EncerrarOndaSePronta(ctx, "a", o.ID); err != nil || enc {
+		t.Fatalf("já encerrada: encerrada=%v, %v", enc, err)
+	}
+}

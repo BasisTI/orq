@@ -38,6 +38,9 @@ type Auto struct {
 	// Agora é o relógio; nil usa time.Now.
 	Agora func() time.Time
 
+	// antesDeEncerrar é só dos testes: roda entre o Docker limpo e o encerramento.
+	antesDeEncerrar func()
+
 	mu      sync.Mutex
 	tentado map[string]*tentativa
 }
@@ -235,8 +238,18 @@ func (a *Auto) fecharOnda(ctx context.Context, coord string, id int64) error {
 	a.mu.Lock()
 	delete(a.tentado, chave)
 	a.mu.Unlock()
-	if _, err := a.L.St.EncerrarOnda(ctx, coord, id); err != nil {
+	if a.antesDeEncerrar != nil {
+		a.antesDeEncerrar()
+	}
+	// A decisão veio de um snapshot anterior à limpeza: reavalia a regra na transação do
+	// encerramento, porque uma US adicionada nesse intervalo tira a onda de pronta.
+	encerrada, err := a.L.St.EncerrarOndaSePronta(ctx, coord, id)
+	if err != nil {
 		return err
+	}
+	if !encerrada {
+		a.logf("onda %d deixou de estar pronta durante a limpeza (US nova ou pendência), segue aberta", id)
+		return nil
 	}
 	a.logf("onda %d encerrada: todas as US prontas e limpas", id)
 	return a.L.St.RegistrarExternosOnda(ctx, id, []central.EventoExterno{{Tipo: "limpar.onda", Detalhe: map[string]any{"acao": "encerrada pelo daemon", "motivo": "todas as US no limite, MRs mescladas ou fechadas, sem pendência aberta, sem recursos por limpar e com o Docker da onda limpo"}}})

@@ -248,7 +248,7 @@ func TestDetalheDeTipoDesconhecidoEOmitido(t *testing.T) {
 		t.Errorf("não-objeto = %q", got)
 	}
 	// Todo tipo gravado por esta versão tem entrada na lista (se não, o detalhe some sem ninguém ver).
-	for _, tipo := range append([]string{"us.status", "mr.estado", "onda.criar", "pend.add"}, central.TiposExternos...) {
+	for _, tipo := range append([]string{"us.status", "mr.estado", "onda.criar", "onda.adicionar", "pend.add"}, central.TiposExternos...) {
 		if _, ok := camposDoDiario[tipo]; !ok {
 			t.Errorf("tipo %s sem lista de campos", tipo)
 		}

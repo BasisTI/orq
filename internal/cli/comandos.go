@@ -216,7 +216,7 @@ func (a *App) ondaCmd() *cobra.Command {
 	var projetoAdd, apos string
 	adicionar := &cobra.Command{
 		Use:   "adicionar <id> <ref>… [--apos <ref>] [--projeto <slug>]",
-		Short: "Inclui US numa onda aberta, em wait, no fim ou depois de --apos",
+		Short: "Inclui US numa onda aberta, no fim ou depois de --apos (em wait; mantém o status se veio de onda encerrada de mesmo limite)",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()

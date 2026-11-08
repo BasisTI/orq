@@ -1359,3 +1359,39 @@ func TestReabrirSoDepoisDoMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Regressão (r1, S1): a US adicionada enquanto o daemon limpa o Docker da onda pronta tira a
+// onda de pronta; o daemon não a encerra nem grava limpar.onda.
+func TestAutoNaoEncerraOndaQueGanhouUSDuranteALimpeza(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.dockerUS()
+	c.docker("orq.onda", fmt.Sprint(c.ondaID), "", "", "onda-vol", "")
+	c.mesclarNoBanco()
+	adicionou := 0
+	a := &Auto{L: c.l, Log: func(string, ...any) {}, antesDeEncerrar: func() {
+		adicionou++
+		if _, err := c.st.AdicionarUS(context.Background(), nil, c.ondaID, central.NovaAdicao{US: []refs.US{{Projeto: "orq", Ref: 77}}}); err != nil {
+			t.Error(err)
+		}
+	}}
+	if err := a.Ciclo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if adicionou != 1 {
+		t.Fatalf("o gancho rodou %d vezes", adicionou)
+	}
+	o, err := c.st.VerOnda(context.Background(), c.ondaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.EncerradaEm != nil || len(o.US) != 2 {
+		t.Fatalf("onda encerrada com a US nova em wait: %+v", o)
+	}
+	es, _ := c.st.Diario(context.Background(), nil, central.FiltroDiario{OndaID: c.ondaID})
+	for _, e := range es {
+		if e.Tipo == "onda.encerrar" || e.Tipo == "limpar.onda" {
+			t.Fatalf("evento %s gravado: %s", e.Tipo, e.Detalhe)
+		}
+	}
+}
