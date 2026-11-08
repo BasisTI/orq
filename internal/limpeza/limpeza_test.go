@@ -1378,8 +1378,9 @@ func TestLimparMRMescladaSemRepoNemPaneRecusaEPreserva(t *testing.T) {
 		if !strings.Contains(r.Recusa, "não registra repo nem pane") || !strings.Contains(r.Recusa, "--forcar") {
 			t.Fatalf("dry=%v: recusa = %q", dry, r.Recusa)
 		}
-		if r.Agiu || len(r.Itens) != 0 {
-			t.Fatalf("dry=%v: agiu ou listou itens: %+v", dry, r)
+		// O pane tg-13_executor está vivo e fora do arquivo: aparece, preservado, mesmo na recusa.
+		if ps := c.estadoDe(r, "pane_nao_registrado"); r.Agiu || len(r.Itens) != 1 || len(ps) != 1 || ps[0].Estado != Preservado {
+			t.Fatalf("dry=%v: itens da recusa = %+v", dry, r.Itens)
 		}
 		for _, p := range []string{c.trabalho(), c.tmp(), c.wt} {
 			if !existe(p) {
@@ -1459,5 +1460,54 @@ func TestLimparMostraNaoRegistradosEPreservaAPasta(t *testing.T) {
 	}
 	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
 		t.Errorf("herdr = %v", got)
+	}
+}
+
+func TestPaneSoltoNaoSeguraNada(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.dockerUS()
+	// tg-13_revisor vivo, fora do recursos.json (outro board ou --pane esquecido).
+	c.extras = []map[string]any{
+		{"pane_id": "wX:p1", "workspace_id": "wX", "agent": "claude", "agent_status": "working", "name": "tg-13_revisor"},
+	}
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	r := c.limpar(false)
+	if r.Recusa != "" || !r.Completa || !r.Agiu {
+		t.Fatalf("resultado = %+v %s", r, estados(r))
+	}
+	for _, i := range r.Itens {
+		want := Removido
+		if i.Tipo == "pane_nao_registrado" {
+			want = Preservado
+		}
+		if i.Estado != want {
+			t.Errorf("%s %s: %s %s", i.Tipo, i.Alvo, i.Estado, i.Motivo)
+		}
+	}
+	for _, p := range []string{c.wt, c.tmp(), c.trabalho()} {
+		if existe(p) {
+			t.Errorf("%s ficou por causa do pane solto", p)
+		}
+	}
+	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+		t.Errorf("herdr = %v", got)
+	}
+	if len(c.escritas("docker")) != 4 {
+		t.Errorf("docker = %v", c.escritas("docker"))
+	}
+}
+
+func TestWorktreePrunableNaoSeguraAPasta(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	extra := filepath.Join(c.dir, "repos", "orq.TG-13-velho")
+	git(t, c.repo, "worktree", "add", "-q", "-b", "TG-13-velho", extra)
+	if err := os.RemoveAll(extra); err != nil {
+		t.Fatal(err)
+	}
+	r := c.limpar(false)
+	if n := len(c.estadoDe(r, "worktree_nao_registrado")); n != 0 || !r.Completa || existe(c.trabalho()) {
+		t.Fatalf("prunable segurou: completa=%v %s", r.Completa, estados(r))
 	}
 }

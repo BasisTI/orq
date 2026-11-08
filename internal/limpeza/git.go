@@ -251,24 +251,35 @@ func (l *Limpador) planejarWorktreesNaoRegistrados(ctx context.Context, u refs.U
 		if err != nil {
 			continue
 		}
-		var caminho string
+		type wt struct {
+			caminho, branch string
+			prunable        bool
+		}
+		var wts []*wt
 		for _, linha := range strings.Split(lista, "\n") {
 			if p, ok := strings.CutPrefix(linha, "worktree "); ok {
-				caminho = p
-				continue
+				wts = append(wts, &wt{caminho: p})
+			} else if len(wts) > 0 {
+				if b, ok := strings.CutPrefix(linha, "branch refs/heads/"); ok {
+					wts[len(wts)-1].branch = b
+				} else if linha == "prunable" || strings.HasPrefix(linha, "prunable ") {
+					wts[len(wts)-1].prunable = true
+				}
 			}
-			b, ok := strings.CutPrefix(linha, "branch refs/heads/")
-			if !ok || caminho == "" || !strings.HasPrefix(b, prefixo) {
-				continue
+		}
+		for _, w := range wts {
+			b := w.branch
+			if w.prunable || !strings.HasPrefix(b, prefixo) {
+				continue // prunable: a pasta já sumiu, não há o que preservar (o orq não faz prune)
 			}
 			if resto := b[len(prefixo):]; resto != "" && resto[0] >= '0' && resto[0] <= '9' {
 				continue // TG-380 não é TG-38
 			}
-			rp, err := resolver(caminho)
+			rp, err := resolver(w.caminho)
 			if err != nil || registrados[rp] || rp == mustResolver(r.Repo) {
 				continue
 			}
-			itens = append(itens, &Item{Tipo: "worktree_nao_registrado", Alvo: fmt.Sprintf("%s (branch %s)", caminho, b), Estado: Preservado,
+			itens = append(itens, &Item{Tipo: "worktree_nao_registrado", Alvo: fmt.Sprintf("%s (branch %s)", w.caminho, b), Estado: Preservado,
 				Motivo: "não registrado no recursos.json, preservado (registre com orq recursos gravar --repo --worktree --branch)"})
 		}
 	}

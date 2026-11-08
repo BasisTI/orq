@@ -59,18 +59,34 @@ func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) 
 		}
 		itens = append(itens, it)
 	}
-	// Panes que parecem da US (tg-<ref>_*) mas não estão no recursos.json: só aparecem, nunca
-	// são fechados. Também seguram a pasta de trabalho, que guarda o registro.
-	var soltos []string
+	return itens
+}
+
+// listarPanesSoltos devolve, só para mostrar, os panes com cara de ser da US (tg-<ref>_* ou
+// <projeto>-tg-<ref>_*) que o recursos.json não registra. O nome não prova a posse (o Herdr é
+// compartilhado entre boards e o mesmo ref repete: tg-306_revisor de um board contra a US 306 de
+// outro), então eles são Preservado e nunca dependência de nada: não seguram worktree, branches,
+// TMPDIR, Docker nem a pasta de trabalho, e nunca são fechados.
+func (l *Limpador) listarPanesSoltos(ctx context.Context, u refs.US, rec *Recursos) []*Item {
+	sessao, err := l.F.ConsultarHerdr(ctx)
+	if err != nil {
+		return nil
+	}
+	registrados := map[string]bool{}
+	for _, n := range rec.Panes {
+		registrados[strings.ToLower(n)] = true
+	}
+	var ids []string
 	for id, p := range sessao.Panes {
-		if !casa(p.Nome) && !coords[id] && nomeDePaneDaUS(p.Nome, u) {
-			soltos = append(soltos, id)
+		if p.Nome != "" && !registrados[strings.ToLower(p.Nome)] && nomeDePaneDaUS(p.Nome, u) {
+			ids = append(ids, id)
 		}
 	}
-	sort.Strings(soltos)
-	for _, id := range soltos {
+	sort.Strings(ids)
+	var itens []*Item
+	for _, id := range ids {
 		itens = append(itens, &Item{Tipo: "pane_nao_registrado", Alvo: fmt.Sprintf("%s (%s)", id, sessao.Panes[id].Nome),
-			Estado: Preservado, Motivo: "não registrado no recursos.json, preservado (registre com orq recursos gravar --pane)"})
+			Estado: Preservado, Motivo: "não registrado no recursos.json, preservado: o nome parece da US, mas pode ser de outro board (registre com orq recursos gravar --pane)"})
 	}
 	return itens
 }

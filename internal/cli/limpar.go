@@ -35,7 +35,7 @@ func (a *App) limparCmd() *cobra.Command {
 	var dry, forcar bool
 	var onda int64
 	cmd := &cobra.Command{
-		Use:   "limpar <ref> [--dry-run] | --onda <id> [--dry-run]",
+		Use:   "limpar <ref> [--dry-run] [--forcar] | --onda <id> [--dry-run]",
 		Short: "Remove os recursos de uma US cujas MRs foram mescladas (panes, worktree, branches, pastas, Docker)",
 		Long: `Só age se todas as MRs da US estão mescladas (conferidas na forja, não no cache) e, havendo head
 aprovado gravado no recursos.json, se o head mesclado é ele. Então, na ordem:
@@ -50,8 +50,11 @@ O que não passa numa conferência fica preservado, com o motivo, e vira evento 
 Nunca usa prune. Com --dry-run, mostra o que seria feito sem tocar em nada.
 
 Se o recursos.json não registra repo nem pane, a limpeza recusa (a simulação também): worktrees,
-branches e panes da US ficariam órfãos. Sem repo registrado a pasta de trabalho fica, e os worktrees
-TG-<ref>* e panes tg-<ref>_* fora do arquivo aparecem como preservados. --forcar ignora isso.
+branches e panes da US ficariam órfãos (os panes tg-<ref>_* fora do arquivo aparecem mesmo na recusa).
+Sem repo registrado a pasta de trabalho fica. Os worktrees TG-<ref>* fora do arquivo, nos repos
+registrados, aparecem como preservados e seguram a pasta de trabalho; os panes soltos só aparecem,
+porque o nome não prova que são da US, e não seguram nada. --forcar vale só para a recusa e para a
+pasta sem repo registrado: um worktree solto continua segurando a pasta. Não vale com --onda.
 
 Com --onda, remove só os recursos Docker com o rótulo orq.onda=<id> de uma onda encerrada ou
 pronta para encerrar.
@@ -67,6 +70,9 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 			var res limpeza.Resultado
 			switch {
 			case onda > 0 && len(args) == 0:
+				if forcar {
+					return usoErr("--forcar não vale com --onda")
+				}
 				o, err := l.St.VerOnda(ctx, onda)
 				if err != nil {
 					return err
@@ -107,7 +113,7 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 		},
 	}
 	cmd.Flags().BoolVar(&dry, "dry-run", false, "mostra o que seria removido, sem remover nada nem gravar no diário")
-	cmd.Flags().BoolVar(&forcar, "forcar", false, "segue mesmo sem repo ou pane registrado no recursos.json e remove a pasta de trabalho sem repo registrado")
+	cmd.Flags().BoolVar(&forcar, "forcar", false, "segue sem repo ou pane registrado no recursos.json e remove a pasta de trabalho sem repo registrado (um worktree solto ainda a segura)")
 	cmd.Flags().Int64Var(&onda, "onda", 0, "limpa só o Docker com o rótulo orq.onda=<id>")
 	return cmd
 }
@@ -121,8 +127,9 @@ func textoLimpeza(w io.Writer, r limpeza.Resultado) error {
 		return err
 	}
 	if r.Recusa != "" {
-		_, err := fmt.Fprintf(w, "  recusada: %s\n", q(r.Recusa))
-		return err
+		if _, err := fmt.Fprintf(w, "  recusada: %s\n", q(r.Recusa)); err != nil {
+			return err
+		}
 	}
 	for _, i := range r.Itens {
 		motivo := ""

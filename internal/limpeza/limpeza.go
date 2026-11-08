@@ -133,8 +133,10 @@ func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref r
 		return finalizar()
 	}
 	if !op.Forcar && len(rec.Repos) == 0 && len(rec.Panes) == 0 {
+		// O Herdr é global: os panes soltos aparecem mesmo sem repo registrado.
+		res.Itens = append(res.Itens, l.listarPanesSoltos(ctx, u, rec)...)
 		res.Recusa = fmt.Sprintf("a US tem MR mesclada, mas o recursos.json não registra repo nem pane: nada é limpo, porque worktrees, branches e panes dela ficariam órfãos "+
-			"(registre com orq recursos gravar %d --repo R --worktree W --branch B --pane NOME; com --forcar a limpeza segue mesmo assim)", u.Ref)
+			"(registre com orq recursos gravar %s --repo R --worktree W --branch B --pane NOME; com --forcar a limpeza segue mesmo assim)", u.Chave())
 		return finalizar()
 	}
 	itens := l.planejar(ctx, u, rec, mrs, op.Forcar)
@@ -154,6 +156,9 @@ func (l *Limpador) Limpar(ctx context.Context, coord *central.Coordenador, ref r
 func resumo(itens []*Item) (agiu, completa bool) {
 	completa = true
 	for _, i := range itens {
+		if i.Tipo == "pane_nao_registrado" {
+			continue // só aparece: não é da limpeza e não a impede de completar
+		}
 		switch i.Estado {
 		case Removido:
 			agiu = true
@@ -269,7 +274,9 @@ func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs m
 	panes := l.planejarPanes(ctx, u, rec)
 	var itens []*Item
 	itens = append(itens, panes...)
-	itens = append(itens, l.planejarWorktreesNaoRegistrados(ctx, u, rec)...)
+	// Soltos só aparecem; o worktree solto segura a pasta de trabalho (abaixo), o pane solto não.
+	soltos := l.planejarWorktreesNaoRegistrados(ctx, u, rec)
+	panesSoltos := l.listarPanesSoltos(ctx, u, rec)
 	for _, r := range rec.Repos {
 		for _, i := range l.planejarRepo(ctx, r, mrs) {
 			i.deps = append(i.deps, panes...)
@@ -289,7 +296,9 @@ func (l *Limpador) planejar(ctx context.Context, u refs.US, rec *Recursos, mrs m
 		// recursos.json e os relatórios ficam.
 		trabalho.Estado, trabalho.Motivo, trabalho.exec = Preservado, "nenhum repo registrado no recursos.json: a pasta de trabalho fica (orq limpar --forcar remove)", nil
 	}
-	trabalho.deps = append([]*Item(nil), itens...)
+	trabalho.deps = append(append([]*Item(nil), itens...), soltos...)
+	itens = append(itens, soltos...)
+	itens = append(itens, panesSoltos...)
 	itens = append(itens, trabalho)
 	propagar(itens)
 	return itens
