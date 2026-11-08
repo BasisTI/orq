@@ -113,18 +113,19 @@ func TestTelaDoCoordenador(t *testing.T) {
 	quer := []struct{ texto, pane string }{
 		{" convey · sgo-cli                                                   até MR pronta  1/4 ▰▱▱▱  1 pend ", ""},
 		{" Comandos api e jql                                                                                 ", ""},
-		{"╭───┬──────┬──────────────────────────────────────────────────────────────┬───────────┬────────────╮", ""},
-		{"│   │ US   │ título                                                       │ status    │ MRs        │", ""},
-		{"├───┼──────┼──────────────────────────────────────────────────────────────┼───────────┼────────────┤", ""},
+		{"╭───┬──────┬────────────────────────────────────────────────────┬───────────┬──────────────────────╮", ""},
+		{"│   │ US   │ título                                             │ status    │ MRs                  │", ""},
+		{"├───┼──────┼────────────────────────────────────────────────────┼───────────┼──────────────────────┤", ""},
 		// A US blocked sobe para o topo; o resto segue a ordem da onda. As MRs ficam na mesma
-		// célula, uma por linha física, e toda linha da US aponta para o pane dela.
-		{"│ ⚠ │ #313 │ sgo api: chamada REST                                        │ Exec r1 ↗ │ !33        │", "wB:p4"},
-		{"│   │      │                                                              │           │ !412 [IaC] │", "wB:p4"},
-		{"│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e campos esc… │ Rev r2 ↗  │ !32        │", "wB:p3"},
-		{"│ – │ #314 │ Menores da TG-312                                            │ Wait      │            │", ""},
-		{"│ ✓ │ #225 │ Criação Suporte/OS                                           │ Done ↗    │ !29        │", "wB:p6"},
-		{"│   │      │                                                              │           │ !31        │", "wB:p6"},
-		{"╰───┴──────┴──────────────────────────────────────────────────────────────┴───────────┴────────────╯", ""},
+		// célula, uma por linha física, e toda linha da US aponta para o pane dela. O projeto
+		// vem da URL da MR (sgo-cli e plataforma na mesma US), nunca `!N` sozinho.
+		{"│ ⚠ │ #313 │ sgo api: chamada REST                              │ Exec r1 ↗ │ sgo-cli!33           │", "wB:p4"},
+		{"│   │      │                                                    │           │ plataforma!412 [IaC] │", "wB:p4"},
+		{"│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e … │ Rev r2 ↗  │ sgo-cli!32           │", "wB:p3"},
+		{"│ – │ #314 │ Menores da TG-312                                  │ Wait      │                      │", ""},
+		{"│ ✓ │ #225 │ Criação Suporte/OS                                 │ Done ↗    │ sgo-cli!29           │", "wB:p6"},
+		{"│   │      │                                                    │           │ sgo-cli!31           │", "wB:p6"},
+		{"╰───┴──────┴────────────────────────────────────────────────────┴───────────┴──────────────────────╯", ""},
 		{"╭───────────┬─────────────┬───────────────────────────────────────────┬───────────┬───╮", ""},
 		{"│ id        │ tipo        │ texto                                     │ idade     │   │", ""},
 		{"├───────────┼─────────────┼───────────────────────────────────────────┼───────────┼───┤", ""},
@@ -161,7 +162,7 @@ func TestTelaDoCoordenador(t *testing.T) {
 func TestPaneLargo(t *testing.T) {
 	tela := desenhar(Opcoes{Coord: "convey", Largura: 300})
 	ls := planas(tela)
-	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e campos escolhidos │ Rev r2 ↗  │ !32        │" {
+	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por JQL com paginação e campos escolhidos │ Rev r2 ↗  │ sgo-cli!32           │" {
 		t.Fatalf("%q", ls[7])
 	}
 	if w, tw := ansi.StringWidth(tela.Linhas[0].Texto), ansi.StringWidth(tela.Linhas[2].Texto); w != tw || ansi.StringWidth(tela.Linhas[1].Texto) != tw {
@@ -169,7 +170,7 @@ func TestPaneLargo(t *testing.T) {
 	}
 }
 
-// Em 80 colunas o título encolhe; mais estreito, as MRs cedem (`!412…`). Nenhuma linha passa
+// Em 80 colunas o título encolhe; mais estreito, as MRs cedem (`plat…`). Nenhuma linha passa
 // da largura, nem em largura mínima.
 func TestTruncamento(t *testing.T) {
 	for _, w := range []int{80, 60, 50, 30, 5} {
@@ -182,18 +183,18 @@ func TestTruncamento(t *testing.T) {
 		}
 	}
 	ls := planas(desenhar(Opcoes{Coord: "convey", Largura: 80}))
-	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por JQL com pa… │ Rev r2 ↗  │ !32        │" {
+	if ls[7] != "│ ● │ #312 │ sgo jql: consulta avulsa por … │ Rev r2 ↗  │ sgo-cli!32           │" {
 		t.Errorf("título em 80: %q", ls[7])
 	}
 	if ls[0] != " convey · sgo-cli                               até MR pronta  1/4 ▰▱▱▱  1 pend " {
 		t.Errorf("faixa em 80: %q", ls[0])
 	}
 	ls = planas(desenhar(Opcoes{Coord: "convey", Largura: 50}))
-	if ls[5] != "│ ⚠ │ #313 │ sgo api: chama… │ Exec r1 ↗ │ !33   │" || ls[6] != "│   │      │                 │           │ !412… │" {
+	if ls[5] != "│ ⚠ │ #313 │ sgo api: chama… │ Exec r1 ↗ │ sgo-… │" || ls[6] != "│   │      │                 │           │ plat… │" {
 		t.Errorf("MRs não cederam em 50:\n%s\n%s", ls[5], ls[6])
 	}
 	// O corte da MR mantém o link fechado: nada de hyperlink vazando para a borda.
-	if l := desenhar(Opcoes{Coord: "convey", Largura: 50}).Linhas[6].Texto; !strings.Contains(l, "!412\x1b]8;;\x1b\\…") {
+	if l := desenhar(Opcoes{Coord: "convey", Largura: 50}).Linhas[6].Texto; !strings.Contains(l, "plat…\x1b]8;;\x1b\\") {
 		t.Errorf("link aberto depois do corte: %q", l)
 	}
 	// Sem lugar, a autorização sai da faixa antes do resto.
@@ -254,11 +255,11 @@ func TestEstilosEOSC8(t *testing.T) {
 	vermelho, verde, cinza, laranja := "38;2;224;108;117", "38;2;152;195;121", "38;2;127;132;142", "38;2;255;140;0"
 	amarelo, azul := "38;2;229;192;123", "38;2;97;175;239"
 	casos := []struct{ nome, quer string }{
-		{"draft vermelho com link", "\x1b]8;;https://gitlab.basis.com.br/basis/sgo-cli/-/merge_requests/33\x1b\\\x1b[" + vermelho + "m!33"},
-		{"pronta verde", "\x1b[" + verde + "m!32"},
-		{"mesclada cinza tachado", "merge_requests/29\x1b\\\x1b[" + cinza + ";9m!"},
+		{"draft vermelho com link", "\x1b]8;;https://gitlab.basis.com.br/basis/sgo-cli/-/merge_requests/33\x1b\\\x1b[" + vermelho + "msgo-cli!33"},
+		{"pronta verde", "\x1b[" + verde + "msgo-cli!32"},
+		{"mesclada cinza tachado", "merge_requests/29\x1b\\\x1b[" + cinza + ";9ms\x1b[m"},
 		{"IaC laranja", "\x1b[" + laranja + "m[IaC]"},
-		{"fechada roxo itálico", "\x1b[3;38;2;198;120;221m!31"},
+		{"fechada roxo itálico", "\x1b[3;38;2;198;120;221msgo-cli!31"},
 		{"#ref com link do Taiga", "\x1b]8;;https://agile.basis.com.br/project/sgo-cli/us/313\x1b\\#313\x1b]8;;\x1b\\"},
 		{"status com link de pane", "\x1b]8;;https://orq.local/pane/wB:p4\x1b\\"},
 		{"blocked em negrito vermelho", "\x1b[1;" + vermelho + "m⚠"},
@@ -276,7 +277,7 @@ func TestEstilosEOSC8(t *testing.T) {
 		}
 	}
 	// Aberta é neutra: sem cor.
-	if !strings.Contains(tudo, "merge_requests/412\x1b\\!412\x1b]8;;") {
+	if !strings.Contains(tudo, "merge_requests/412\x1b\\plataforma!412\x1b]8;;") {
 		t.Errorf("aberta não é neutra:\n%q", tudo)
 	}
 	// O título da US blocked fica em negrito.
