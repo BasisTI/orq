@@ -505,3 +505,44 @@ func TestBancoMaisNovoApontaOUpgrade(t *testing.T) {
 		}
 	}
 }
+
+func TestOndaAdicionarCLI(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
+	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	out := ok(t, env, "onda", "adicionar", "1", "3", "4", "--apos", "1")
+	var o struct{ US []struct{ Chave string } }
+	if err := json.Unmarshal([]byte(out), &o); err != nil || len(o.US) != 4 || o.US[1].Chave != "p/3" || o.US[2].Chave != "p/4" {
+		t.Fatalf("onda = %s", out)
+	}
+	if !strings.Contains(ok(t, env, "diario", "--onda", "1"), "onda.adicionar") {
+		t.Fatal("o diário não tem onda.adicionar")
+	}
+	cases := []struct {
+		args []string
+		exit int
+		code string
+	}{
+		{[]string{"onda", "adicionar", "1", "2"}, 4, "us_ja_na_onda"},
+		{[]string{"onda", "adicionar", "1"}, 2, "uso"},
+		{[]string{"onda", "adicionar", "x", "5"}, 2, "uso"},
+		{[]string{"onda", "adicionar", "1", "5", "--apos", "9"}, 2, "uso"},
+		{[]string{"onda", "adicionar", "7", "5"}, 5, "nao_encontrado"},
+	}
+	ok(t, env, "onda", "criar", "outra", "--us", "10")
+	cases = append(cases, struct {
+		args []string
+		exit int
+		code string
+	}{[]string{"onda", "adicionar", "1", "10"}, 4, "us_em_outra_onda"})
+	for _, c := range cases {
+		r := rodar(t, env, c.args...)
+		if r.code != c.exit || !strings.Contains(r.err, `"`+c.code+`"`) {
+			t.Errorf("%v: exit %d, stderr %s; queria %d %s", c.args, r.code, r.err, c.exit, c.code)
+		}
+	}
+	ok(t, env, "onda", "encerrar", "1")
+	if r := rodar(t, env, "onda", "adicionar", "1", "5"); r.code != 4 || !strings.Contains(r.err, "onda_encerrada") {
+		t.Fatalf("onda encerrada: %d %s", r.code, r.err)
+	}
+}

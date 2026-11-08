@@ -69,7 +69,7 @@ O banco fica em `$ORQ_STATE_DIR/central.db`; sem a variável, em `$XDG_STATE_HOM
 - `--output json|text`. Sem a flag, texto num terminal e JSON fora dele. `orq snapshot` sai sempre em JSON.
 - Erro vai para o stderr como `{"error":{"code","cause","recovery"}}` (ou `erro [code]: cause` em texto).
 - `banco_ocupado` (exit 4) separa os dois casos no `recovery`: outro processo segurou o banco por mais de 15 s, ou o SQLite recusou a trava na hora (o que não devia acontecer; reporte).
-- Códigos de saída: `0` ok, `1` inesperado, `2` uso (inclui `ref_ambigua` e `coord_nao_resolvido`), `4` conflito (`transicao_invalida`, `us_em_outra_onda`, `onda_encerrada`, `pendencia_resolvida`, `banco_ocupado`), `5` não encontrado.
+- Códigos de saída: `0` ok, `1` inesperado, `2` uso (inclui `ref_ambigua` e `coord_nao_resolvido`), `4` conflito (`transicao_invalida`, `us_em_outra_onda`, `us_ja_na_onda`, `onda_encerrada`, `pendencia_resolvida`, `banco_ocupado`), `5` não encontrado.
 
 ## Coordenador corrente
 
@@ -90,6 +90,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq coord registrar <nome> [--pane <id>] [--workspace <id>] [--projeto <slug>]` | Cria ou atualiza o coordenador. Campo omitido mantém o valor gravado; o pane fica com um coordenador só. |
 | `orq coord list` | Lista os coordenadores. |
 | `orq onda criar <titulo> --us 215,216,217,218 [--projeto <slug>] [--ate plano\|mr-pronta\|merge] [--ordem estrita\|livre] [--depende 216:215]` | Cria a onda com as US em `wait`, na ordem dada. `--ate` padrão `mr-pronta`, `--ordem` padrão `livre`. `--depende` é repetível e aceita `218:216+217`. US sem projeto usam `--projeto` ou o projeto padrão do coordenador. |
+| `orq onda adicionar <id> <ref>… [--apos <ref>] [--projeto <slug>]` | Inclui US numa onda aberta, em `wait`, no fim ou logo depois de `--apos` (que precisa estar na onda); grava `onda.adicionar` no diário. Mesma regra do `onda criar` para quem já tem onda: onda aberta recusa (`us_em_outra_onda`; `us_ja_na_onda` se já está nesta), onda encerrada cede a US. Onda encerrada não recebe (`onda_encerrada`). Não cria dependências. `onda proxima` e a regra de encerramento passam a contar a US nova. Sem coordenador corrente, assina o dono da onda. |
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
 | `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. Com todas as US no limite, `encerramento` diz o próximo passo (veja [Encerrar a onda](#encerrar-a-onda)). |
