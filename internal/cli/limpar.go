@@ -32,10 +32,10 @@ func (a *App) limpador(ctx context.Context) (*limpeza.Limpador, error) {
 }
 
 func (a *App) limparCmd() *cobra.Command {
-	var dry bool
+	var dry, forcar bool
 	var onda int64
 	cmd := &cobra.Command{
-		Use:   "limpar <ref> [--dry-run] | --onda <id> [--dry-run]",
+		Use:   "limpar <ref> [--dry-run] [--forcar] | --onda <id> [--dry-run]",
 		Short: "Remove os recursos de uma US cujas MRs foram mescladas (panes, worktree, branches, pastas, Docker)",
 		Long: `Só age se todas as MRs da US estão mescladas (conferidas na forja, não no cache) e, havendo head
 aprovado gravado no recursos.json, se o head mesclado é ele. Então, na ordem:
@@ -48,6 +48,13 @@ aprovado gravado no recursos.json, se o head mesclado é ele. Então, na ordem:
   - remove os contêineres, redes, volumes e imagens com o rótulo orq.us=<projeto>/<ref>.
 O que não passa numa conferência fica preservado, com o motivo, e vira evento no diário.
 Nunca usa prune. Com --dry-run, mostra o que seria feito sem tocar em nada.
+
+Se o recursos.json não registra repo nem pane, a limpeza recusa (a simulação também): worktrees,
+branches e panes da US ficariam órfãos (os panes tg-<ref>_* fora do arquivo aparecem mesmo na recusa).
+Sem repo registrado a pasta de trabalho fica. Os worktrees TG-<ref>* fora do arquivo, nos repos
+registrados, aparecem como preservados e seguram a pasta de trabalho; os panes soltos só aparecem,
+porque o nome não prova que são da US, e não seguram nada. --forcar vale só para a recusa e para a
+pasta sem repo registrado: um worktree solto continua segurando a pasta. Não vale com --onda.
 
 Com --onda, remove só os recursos Docker com o rótulo orq.onda=<id> de uma onda encerrada ou
 pronta para encerrar.
@@ -63,6 +70,9 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 			var res limpeza.Resultado
 			switch {
 			case onda > 0 && len(args) == 0:
+				if forcar {
+					return usoErr("--forcar não vale com --onda")
+				}
 				o, err := l.St.VerOnda(ctx, onda)
 				if err != nil {
 					return err
@@ -82,7 +92,7 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 				if err != nil {
 					return err
 				}
-				if res, err = l.Limpar(ctx, coord, ref, limpeza.Opcoes{DryRun: dry}); err != nil {
+				if res, err = l.Limpar(ctx, coord, ref, limpeza.Opcoes{DryRun: dry, Forcar: forcar}); err != nil {
 					return err
 				}
 			default:
@@ -103,6 +113,7 @@ O orq daemon roda isto sozinho no merge (veja ORQ_LIMPEZA_AUTOMATICA).`,
 		},
 	}
 	cmd.Flags().BoolVar(&dry, "dry-run", false, "mostra o que seria removido, sem remover nada nem gravar no diário")
+	cmd.Flags().BoolVar(&forcar, "forcar", false, "segue sem repo ou pane registrado no recursos.json e remove a pasta de trabalho sem repo registrado (um worktree solto ainda a segura)")
 	cmd.Flags().Int64Var(&onda, "onda", 0, "limpa só o Docker com o rótulo orq.onda=<id>")
 	return cmd
 }
@@ -116,8 +127,9 @@ func textoLimpeza(w io.Writer, r limpeza.Resultado) error {
 		return err
 	}
 	if r.Recusa != "" {
-		_, err := fmt.Fprintf(w, "  recusada: %s\n", q(r.Recusa))
-		return err
+		if _, err := fmt.Fprintf(w, "  recusada: %s\n", q(r.Recusa)); err != nil {
+			return err
+		}
 	}
 	for _, i := range r.Itens {
 		motivo := ""
@@ -223,6 +235,9 @@ rótulos Docker (orq.us e orq.onda).`,
 					rec.Aprovados = map[string]string{}
 				}
 				rec.Aprovados[m.URL] = sha
+			}
+			if len(aprovados) > 0 && len(rec.Repos) == 0 {
+				avisos = append(avisos, "o recursos.json não tem repo registrado: registre --repo, --worktree e --branch, ou o orq limpar recusa e preserva a pasta de trabalho")
 			}
 			arquivo, err := rec.Gravar(l.Raizes, loc.US)
 			if err != nil {
