@@ -122,6 +122,7 @@ US {
     "titulo": string|null,
     "status": string|null,                 # nome do status no Taiga, "In progress"
     "url": string|null,
+    "epicos": [{"ref": int, "titulo": string, "url": string}],  # ausente sem épico ou sem resposta do Taiga
     "atualizado_em": data|null,
     "erro": Erro|null
   }
