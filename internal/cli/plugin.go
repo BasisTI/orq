@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/BasisTI/orq/internal/hora"
 	"io"
 	"os"
 	"path/filepath"
@@ -290,7 +291,7 @@ func (a *App) doctor(ctx context.Context, config string) Doctor {
 				case x.AtualizadoEm == nil:
 					add("fonte "+fo, "aviso", "nunca consultada")
 				default:
-					add("fonte "+fo, "ok", "atualizada em "+*x.AtualizadoEm)
+					add("fonte "+fo, "ok", "atualizada em "+hora.DataHoraRFC(*x.AtualizadoEm))
 				}
 			}
 		}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/BasisTI/orq/internal/hora"
 	"io"
 	"strings"
 
@@ -29,7 +30,7 @@ func textoOndaResumo(w io.Writer, o central.Onda) error {
 	}
 	estado := ""
 	if o.EncerradaEm != nil {
-		estado = "  encerrada " + *o.EncerradaEm
+		estado = "  encerrada " + hora.DataHoraRFC(*o.EncerradaEm)
 	}
 	_, err := fmt.Fprintf(w, "onda %d  %s  [%s · até %s · %s]  %d/%d done%s\n", o.ID, q(o.Titulo), q(o.Coordenador), o.AutorizacaoAte, o.Ordem, feitas, len(o.US), estado)
 	return err

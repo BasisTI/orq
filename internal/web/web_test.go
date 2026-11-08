@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/refs"
@@ -528,4 +529,18 @@ func TestAbrirEscuta(t *testing.T) {
 		t.Fatalf("tcp = %+v, %v", tcp, err)
 	}
 	_ = tcp.Close()
+}
+
+func TestQuandoUsaBRTComAnoSemDependerDoFusoDoHost(t *testing.T) {
+	old := time.Local
+	defer func() { time.Local = old }()
+	time.Local = time.UTC
+	s := &Servidor{}
+	if got, want := s.quando("2026-11-07T01:30:00Z"), "06/11/2026 22:30"; got != want {
+		t.Fatalf("quando = %q, quer %q", got, want)
+	}
+	time.Local = time.FixedZone("Tokyo", 9*3600)
+	if got, want := s.quando("2026-11-07T01:30:00Z"), "06/11/2026 22:30"; got != want {
+		t.Fatalf("quando = %q, quer %q", got, want)
+	}
 }
