@@ -53,3 +53,20 @@ func TestCentralEpicoSemURLNaoViraLink(t *testing.T) {
 	contem(t, html, "onda-epicos", "#5")
 	naoContem(t, html, "/epic/")
 }
+
+// Épico que entra no Taiga com a página aberta aparece no /vivo, no lugar, sem recarregar.
+func TestVivoTrocaOsEpicosDaOnda(t *testing.T) {
+	c := vazia(t, false)
+	c.coord("alfa", "wA:p1", "proj", 7, "merge")
+	u := refs.US{Projeto: "proj", Ref: 7}
+	c.taiga(u, "sem épico", "New")
+	_, pagina := c.get("/")
+	contem(t, pagina, `id="onda-1-epicos"`)
+	naoContem(t, pagina, `class="onda-epicos"`)
+	q := queryDaPagina(t, c, "/")
+
+	c.taigaEpicos(u, central.EpicoTaiga{Ref: 30, Titulo: "Novo", URL: "https://taiga.exemplo/project/proj/epic/30"})
+	_, html, _ := c.vivo(q, "/")
+	contem(t, html, `id="onda-1-epicos"`, `hx-swap-oob="true"`, `class="onda-epicos"`, ">#30<")
+	naoContem(t, html, `id="onda-1-epicos" hidden`)
+}
