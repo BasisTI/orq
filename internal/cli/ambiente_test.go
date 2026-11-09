@@ -114,7 +114,6 @@ func TestDoctorOrigemEDaemonEShell(t *testing.T) {
 	home := t.TempDir()
 	env["HOME"] = home
 	env["USER"] = "ana"
-	env["ORQ_DOCKER_BIN"] = "/nao/existe/docker" // nunca o docker real da máquina
 	delete(env, "HERDR_PLUGIN_CONFIG_DIR")
 	cfg := filepath.Join(dir, "config.toml")
 	escrever(t, filepath.Join(dir, "plugins.json"), `{"result":{"plugins":[{"plugin_id":"orq","enabled":true,"plugin_root":"/x/orq"}]}}`)
