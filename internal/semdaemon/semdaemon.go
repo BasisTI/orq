@@ -239,7 +239,7 @@ func daemonSob(pid int, raiz string) (string, bool) {
 	}
 	if env, err := os.ReadFile(filepath.Join(dir, "environ")); err == nil {
 		for _, kv := range strings.Split(string(env), "\x00") {
-			if v, ok := strings.CutPrefix(kv, "ORQ_STATE_DIR="); ok && sob(raiz, v) {
+			if v, ok := strings.CutPrefix(kv, "ORQ_STATE_DIR="); ok && (v == raiz || sob(raiz, v)) {
 				return v, true
 			}
 		}
