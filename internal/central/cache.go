@@ -77,6 +77,9 @@ type ValorTaiga struct {
 	Titulo string `json:"titulo"`
 	Status string `json:"status"`
 	URL    string `json:"url"`
+	// Fechada é o is_closed do status no board: a US concluída. A limpeza só fecha pane de US
+	// fechada, e lê o valor ao vivo, não do cache.
+	Fechada bool `json:"fechada,omitempty"`
 	// Epicos são os épicos a que a US está ligada (vêm no mesmo `story get`, sem consulta extra).
 	Epicos []EpicoTaiga `json:"epicos,omitempty"`
 }

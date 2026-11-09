@@ -380,7 +380,8 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 		Subject         string `json:"subject"`
 		URL             string `json:"url"`
 		StatusExtraInfo struct {
-			Name string `json:"name"`
+			Name     string `json:"name"`
+			IsClosed bool   `json:"is_closed"`
 		} `json:"status_extra_info"`
 		Epics []struct {
 			Ref     int    `json:"ref"`
@@ -393,7 +394,7 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 	if err := json.Unmarshal(out, &r); err != nil || r.Subject == "" {
 		return central.ValorTaiga{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "taiga story get devolveu algo que não é uma story: " + resumir(out)}
 	}
-	v := central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, URL: r.URL}
+	v := central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, Fechada: r.StatusExtraInfo.IsClosed, URL: r.URL}
 	for _, e := range r.Epics {
 		v.Epicos = append(v.Epicos, central.EpicoTaiga{Ref: e.Ref, Titulo: e.Subject, URL: urlEpico(r.URL, e.Project.Slug, e.Ref)})
 	}
