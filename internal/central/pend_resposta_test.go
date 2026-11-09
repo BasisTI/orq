@@ -34,7 +34,7 @@ func TestMigracaoV3ComPendencias(t *testing.T) {
 	v3 := fstest.MapFS{}
 	es, _ := fs.ReadDir(migrationsFS, "migrations")
 	for _, e := range es {
-		if strings.HasPrefix(e.Name(), "0004") || strings.HasPrefix(e.Name(), "0005") {
+		if strings.HasPrefix(e.Name(), "0004") || strings.HasPrefix(e.Name(), "0005") || strings.HasPrefix(e.Name(), "0006") {
 			continue
 		}
 		b, _ := fs.ReadFile(migrationsFS, "migrations/"+e.Name())
@@ -73,7 +73,7 @@ func TestMigracaoV3ComPendencias(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if m.De != 3 || m.Para != 5 || m.LeitorMinimo != 4 || m.EscritorMinimo != 5 {
+	if m.De != 3 || m.Para != 6 || m.LeitorMinimo != 4 || m.EscritorMinimo != 5 {
 		t.Fatalf("migração = %+v", m)
 	}
 	ps, err := s.ListarPendencias(ctx, FiltroPendencias{})

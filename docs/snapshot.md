@@ -16,6 +16,7 @@
 ### Histórico
 
 - Versão 1, US #3: o esqueleto.
+- Ainda versão 1, US #68: `MR.precondicao` (texto ou nulo) entrou, aditivo; migration 0006. Draft com `precondicao` é "Draft com pré-condição", distinto de `pronta` e de `draft` comum.
 - Ainda versão 1, US #4: os campos `herdr` (coordenador e US), `taiga` (US), `atualizado_em` e `erro` (MR) e `fontes` (raiz) entraram, e `MR.estado` passou a ser preenchido. Tudo aditivo: `estado` já estava declarado como `draft|aberta|pronta|mesclada|fechada`, e quem lia a versão 1 continua lendo.
 - Ainda versão 1, US #10: o campo `projetos` (raiz) entrou, com o índice de tom de cada projeto. Aditivo.
 - Ainda versão 1, US #15: a `Pendencia` ganhou `chave`, `estado`, `tem_detalhe`, `opcoes`, `slug`, `arquivo`, `autor`, `resposta_opcao`, `respondida_em`, `respondida_por`, `avisada_em`, `resposta_versao`, `arquivo_alterado` e `sem_coordenador`. Aditivo: o sentido dos campos antigos não mudou, e `aberta` continua `true` na pendência respondida (ela só fecha em `orq pend resolver`). O `detalhe` (até 64 KiB por pendência) não vai no snapshot: `orq pend ver` o traz.
@@ -134,6 +135,7 @@ MR {
   "iid": int,
   "iac": bool,                             # projeto sob basis/iac/
   "estado": "draft"|"aberta"|"pronta"|"mesclada"|"fechada"|null,   # nulo até a primeira consulta boa
+  "precondicao": string|null,              # "Mesclar depois de …": o que falta para a MR em Draft sair dele; só vale com estado "draft"
   "adicionada_em": data,
   "atualizado_em": data|null,              # última consulta boa à forja
   "erro": Erro|null,                       # última consulta, se falhou

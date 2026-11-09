@@ -67,7 +67,9 @@ type MRVista struct {
 	Estado               Selo
 	IaC                  bool
 	Pipeline, Aprovacao  Selo
-	Vencido              bool
+	// Precondicao é o texto de "Mesclar depois de …" da MR em Draft de propósito; vazio nos outros casos.
+	Precondicao string
+	Vencido     bool
 	// ExtraFalhou é o código da falha da consulta extra (vazio: não falhou); ValoresLidos diz
 	// há quanto tempo pipeline e aprovação foram lidos.
 	ExtraFalhou, ValoresLidos string
@@ -512,11 +514,14 @@ func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]str
 			uv.Papel += ", rodada " + strconv.Itoa(*u.Rodada)
 		}
 	}
-	var falhando, prontas int
+	var falhando, prontas, comPrecond int
 	desconhecido := false
 	for _, m := range u.MRs {
 		mv := vistaMR(m, merge, agora)
 		uv.MRs = append(uv.MRs, mv)
+		if m.DraftComPrecondicao() {
+			comPrecond++
+		}
 		if m.Estado == nil || m.Pipeline == nil {
 			desconhecido = true
 		}
@@ -539,6 +544,9 @@ func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]str
 			t = plural(prontas, "MR espera merge", "MRs esperam merge")
 		}
 		uv.ResumoMRs = append(uv.ResumoMRs, Selo{Cls: "info", Texto: fmt.Sprintf("%d %s", prontas, t), Icone: "merge"})
+	}
+	if comPrecond > 0 {
+		uv.ResumoMRs = append(uv.ResumoMRs, Selo{Cls: "aviso", Texto: fmt.Sprintf("%d %s", comPrecond, plural(comPrecond, "MR em draft com pré-condição", "MRs em draft com pré-condição")), Icone: "relogio"})
 	}
 	if desconhecido {
 		uv.ResumoMRs = append(uv.ResumoMRs, Selo{Cls: "tracejado", Texto: "desconhecido"})
@@ -571,6 +579,10 @@ func vistaMR(m central.MR, merge bool, agora time.Time) MRVista {
 		mv.Estado = s
 		if *m.Estado == "pronta" && merge {
 			mv.Estado = Selo{Cls: "info", Texto: "espera merge"}
+		}
+		if m.DraftComPrecondicao() {
+			mv.Estado = Selo{Cls: "aviso", Texto: "draft com pré-condição", Icone: "relogio", Title: "em Draft de propósito, não pronta: " + *m.Precondicao}
+			mv.Precondicao = *m.Precondicao
 		}
 	} else {
 		mv.Estado = Selo{Cls: "tracejado", Texto: "desconhecido"}

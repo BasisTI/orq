@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/refs"
 	"github.com/spf13/cobra"
 )
@@ -360,6 +361,7 @@ func (a *App) usCmd() *cobra.Command {
 
 func (a *App) mrCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "mr", Short: "Liga e desliga merge requests das US"}
+	var precondicao string
 	add := &cobra.Command{
 		Use:   "add <ref> <url>",
 		Short: "Liga a MR (GitLab) ou PR (GitHub) à US",
@@ -372,6 +374,11 @@ func (a *App) mrCmd() *cobra.Command {
 			m, criada, err := st.AdicionarMR(ctx, coord, ref, args[1])
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("precondicao") {
+				if m, err = st.DefinirPrecondicaoMR(ctx, coord, ref, args[1], precondicao); err != nil {
+					return err
+				}
 			}
 			res := struct {
 				Criada bool       `json:"criada"`
@@ -387,6 +394,40 @@ func (a *App) mrCmd() *cobra.Command {
 			})
 		},
 	}
+	add.Flags().StringVar(&precondicao, "precondicao", "", "registra a pré-condição da MR em Draft, por exemplo \"Mesclar depois de orq#27\"")
+	var limpar bool
+	pre := &cobra.Command{
+		Use:   "precondicao <ref> <url> [texto]",
+		Short: "Registra ou limpa a pré-condição de uma MR em Draft (Mesclar depois de …)",
+		Long:  "Registra o que falta para a MR em Draft sair dele. A Central mostra a MR como Draft com pré-condição, distinta de pronta e de Draft comum. Com --limpar, remove. O texto só aparece enquanto a MR está em Draft.",
+		Args:  cobra.RangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			texto := ""
+			if len(args) == 3 {
+				texto = args[2]
+			}
+			if limpar == (strings.TrimSpace(texto) != "") {
+				return &output.Error{Code: "uso", Cause: "informe o texto da pré-condição ou --limpar, não os dois nem nenhum", Recovery: "orq mr precondicao <ref> <url> \"Mesclar depois de orq#27\"", Exit: output.ExitUsage}
+			}
+			ctx, st, coord, ref, err := a.preparar(cmd, args[0])
+			if err != nil {
+				return err
+			}
+			m, err := st.DefinirPrecondicaoMR(ctx, coord, ref, args[1], texto)
+			if err != nil {
+				return err
+			}
+			return a.emit(m, func(w io.Writer) error {
+				if m.Precondicao == nil {
+					_, err := fmt.Fprintf(w, "pré-condição removida de %s\n", m.URL)
+					return err
+				}
+				_, err := fmt.Fprintf(w, "%s: %s\n", m.URL, *m.Precondicao)
+				return err
+			})
+		},
+	}
+	pre.Flags().BoolVar(&limpar, "limpar", false, "remove a pré-condição")
 	rm := &cobra.Command{
 		Use:   "rm <ref> <url>",
 		Short: "Desliga a MR da US",
@@ -406,7 +447,7 @@ func (a *App) mrCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.AddCommand(add, rm)
+	cmd.AddCommand(add, pre, rm)
 	return cmd
 }
 

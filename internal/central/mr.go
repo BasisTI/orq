@@ -28,6 +28,15 @@ type MR struct {
 	// que não os renovou. Sem falha, valem AtualizadoEm.
 	SituacaoEm   *string `json:"situacao_em"`
 	SituacaoErro *Erro   `json:"situacao_erro"`
+	// Precondicao é o texto de "Mesclar depois de …": o que falta para a MR em Draft sair dele.
+	// Só vale enquanto o estado é draft; nula quando ninguém a registrou.
+	Precondicao *string `json:"precondicao"`
+}
+
+// DraftComPrecondicao diz se a MR está em Draft de propósito, com o que falta registrado. É o
+// terceiro caso, distinto de "pronta" e de "Draft" comum.
+func (m MR) DraftComPrecondicao() bool {
+	return m.Estado != nil && *m.Estado == "draft" && m.Precondicao != nil && *m.Precondicao != ""
 }
 
 // RefCurta é a referência curta da MR, sempre com o projeto (o da URL da MR, não o da onda):
@@ -41,13 +50,13 @@ func (m MR) RefCurta() string {
 }
 
 // colunasMR lê a MR com o cache dela; scanMR casa com a ordem.
-const colunasMR = `SELECT mr.url, mr.projeto_path, mr.iid, mr.iac, mr.estado, mr.adicionada_em, c.valor_em, c.valor, c.erro_codigo, c.erro_mensagem, c.erro_em
+const colunasMR = `SELECT mr.url, mr.projeto_path, mr.iid, mr.iac, mr.estado, mr.adicionada_em, c.valor_em, c.valor, c.erro_codigo, c.erro_mensagem, c.erro_em, mr.precondicao
 	FROM mr LEFT JOIN cache c ON c.fonte = 'mr' AND c.chave = mr.url `
 
 func scanMR(r scanner) (MR, error) {
 	var m MR
 	var codigo, mensagem, em, valor *string
-	err := r.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm, &m.AtualizadoEm, &valor, &codigo, &mensagem, &em)
+	err := r.Scan(&m.URL, &m.ProjetoPath, &m.IID, &m.IaC, &m.Estado, &m.AdicionadaEm, &m.AtualizadoEm, &valor, &codigo, &mensagem, &em, &m.Precondicao)
 	if valor != nil {
 		var v ValorMR
 		if json.Unmarshal([]byte(*valor), &v) == nil {
@@ -127,6 +136,56 @@ func (s *Store) RemoverMR(ctx context.Context, coord *Coordenador, ref refs.US, 
 			return err
 		}
 		return s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "mr.rm", detalhe: map[string]any{"url": m.URL}})
+	})
+	return out, err
+}
+
+// TamanhoMaxPrecondicao é o limite do texto da pré-condição, em runas.
+const TamanhoMaxPrecondicao = 300
+
+// DefinirPrecondicaoMR registra (ou, com texto vazio, limpa) a pré-condição de uma MR ligada à US.
+// O mesmo texto de novo não muda nada nem gera evento.
+func (s *Store) DefinirPrecondicaoMR(ctx context.Context, coord *Coordenador, ref refs.US, rawURL, texto string) (MR, error) {
+	m, err := refs.ParseMR(rawURL)
+	if err != nil {
+		return MR{}, uso(err.Error(), "")
+	}
+	texto = strings.Join(strings.Fields(texto), " ")
+	if len([]rune(texto)) > TamanhoMaxPrecondicao {
+		return MR{}, uso("a pré-condição passa de "+strconv.Itoa(TamanhoMaxPrecondicao)+" caracteres", "resuma no que falta, por exemplo: Mesclar depois de orq#27")
+	}
+	var out MR
+	err = s.escrever(ctx, func(tx *sql.Tx) error {
+		alvo, err := resolverUS(ctx, tx, ref, coord)
+		if err != nil {
+			return err
+		}
+		out, err = scanMR(tx.QueryRowContext(ctx, colunasMR+`WHERE mr.projeto = ? AND mr.ref = ? AND mr.url = ?`, alvo.Projeto, alvo.Ref, m.URL))
+		if semLinha(err) {
+			return naoEncontrado(m.URL+" não está ligada a "+alvo.Chave(), "ligue com orq mr add")
+		}
+		if err != nil {
+			return err
+		}
+		antes := ""
+		if out.Precondicao != nil {
+			antes = *out.Precondicao
+		}
+		if antes == texto {
+			return nil
+		}
+		var valor any
+		if texto != "" {
+			valor = texto
+			out.Precondicao = &texto
+		} else {
+			out.Precondicao = nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE mr SET precondicao = ? WHERE projeto = ? AND ref = ? AND url = ?`, valor, alvo.Projeto, alvo.Ref, m.URL); err != nil {
+			return err
+		}
+		return s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "mr.precondicao",
+			detalhe: map[string]any{"url": m.URL, "de": antes, "para": texto}})
 	})
 	return out, err
 }

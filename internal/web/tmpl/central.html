@@ -12,7 +12,8 @@
 <span class="par"><span class="rot">aprovação</span> {{template "sel" .Aprovacao}}</span>
 {{if .Vencido}}{{template "vencido"}}{{end}}
 {{if .Erro}}<span class="selo selo-erro">{{template "ic" "alerta"}}falhou: {{.Erro}}</span>{{end}}
-{{if .ExtraFalhou}}<span class="rot">valores lidos: {{.ValoresLidos}}</span> <span class="selo selo-aviso" title="mantém o último valor bom de pipeline e aprovação">{{template "ic" "alerta"}}consulta extra falhou: {{.ExtraFalhou}}</span>{{end}}</span></li>{{end}}
+{{if .ExtraFalhou}}<span class="rot">valores lidos: {{.ValoresLidos}}</span> <span class="selo selo-aviso" title="mantém o último valor bom de pipeline e aprovação">{{template "ic" "alerta"}}consulta extra falhou: {{.ExtraFalhou}}</span>{{end}}</span>
+{{if .Precondicao}}<span class="mr-precond"><span class="rot">pré-condição</span> {{.Precondicao}}</span>{{end}}</li>{{end}}
 
 {{define "us-barra"}}<summary class="us-sum" id="{{.Anchor}}-barra"{{if .Oob}} hx-swap-oob="true"{{end}}>
 {{template "chev"}}

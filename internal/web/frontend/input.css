@@ -296,6 +296,7 @@ details[open] > summary .chev { rotate: 90deg; }
 .mr-link:hover { text-decoration: underline; }
 .mr-path { font-weight: 400; color: #2B3A48; overflow-wrap: anywhere; }
 .mr-selos { display: flex; flex-wrap: wrap; gap: .35rem .85rem; align-items: center; }
+.mr-precond { font-size: .92rem; overflow-wrap: anywhere; }
 .par { display: inline-flex; gap: .35rem; align-items: center; }
 .rot { font-size: .85rem; color: var(--suave); }
 @media (min-width: 760px) { .mr { grid-template-columns: minmax(12rem, 18rem) 1fr; align-items: center; } }
