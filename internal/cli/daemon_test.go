@@ -174,6 +174,14 @@ func TestMRPrecondicaoPelaCLI(t *testing.T) {
 	if got := pre(ok(t, env, "mr", "precondicao", "4", url, "--limpar")); got != "" {
 		t.Fatalf("--limpar = %q", got)
 	}
+	// Texto inválido no add não deixa a MR ligada pela metade.
+	const outra = "https://github.com/BasisTI/orq/pull/2"
+	if r := rodar(t, env, "mr", "add", "4", outra, "--precondicao", strings.Repeat("a", 301)); r.code == 0 {
+		t.Fatal("texto grande aceito")
+	}
+	if strings.Contains(ok(t, env, "snapshot"), "pull/2") {
+		t.Fatal("a MR ficou ligada com a pré-condição inválida")
+	}
 	// Sem texto e sem --limpar, ou com os dois, é erro de uso.
 	for _, args := range [][]string{{"mr", "precondicao", "4", url}, {"mr", "precondicao", "4", url, "x", "--limpar"}} {
 		if r := rodar(t, env, args...); r.code == 0 {

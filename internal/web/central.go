@@ -252,6 +252,7 @@ var camposDoDiario = map[string][]string{
 	"mr.add":                  {"url", "projeto_path", "iid", "iac"},
 	"mr.rm":                   {"url"},
 	"mr.estado":               {"url", "de", "para"},
+	"mr.precondicao":          {"url", "de", "para"},
 	"pend.add":                {"id", "tipo", "texto", "origem", "slug", "arquivo", "autor", "opcoes"},
 	"pend.responder":          {"id", "por", "opcao", "texto", "titulo_opcao", "anterior"},
 	"pend.resolver":           {"id", "resposta"},

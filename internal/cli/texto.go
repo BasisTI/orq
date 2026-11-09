@@ -58,6 +58,11 @@ func textoOnda(w io.Writer, o central.Onda) error {
 			if _, err := fmt.Fprintf(w, "       MR %s%s%s\n", m.URL, estado, iacTexto(m.IaC)); err != nil {
 				return err
 			}
+			if m.DraftComPrecondicao() {
+				if _, err := fmt.Fprintf(w, "          pré-condição: %s\n", q(*m.Precondicao)); err != nil {
+					return err
+				}
+			}
 		}
 		for _, p := range u.Pendencias {
 			if err := textoPendencia(w, p, "       "); err != nil {

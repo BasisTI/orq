@@ -371,6 +371,12 @@ func (a *App) mrCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("precondicao") {
+				// Valida antes de ligar: texto inválido não deixa a MR ligada pela metade.
+				if _, err := central.NormalizarPrecondicao(precondicao); err != nil {
+					return err
+				}
+			}
 			m, criada, err := st.AdicionarMR(ctx, coord, ref, args[1])
 			if err != nil {
 				return err

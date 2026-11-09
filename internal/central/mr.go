@@ -143,6 +143,16 @@ func (s *Store) RemoverMR(ctx context.Context, coord *Coordenador, ref refs.US, 
 // TamanhoMaxPrecondicao é o limite do texto da pré-condição, em runas.
 const TamanhoMaxPrecondicao = 300
 
+// NormalizarPrecondicao junta os espaços e confere o limite (em runas). A CLI a chama antes de
+// ligar a MR, para um texto inválido não deixar a MR ligada pela metade.
+func NormalizarPrecondicao(texto string) (string, error) {
+	texto = strings.Join(strings.Fields(texto), " ")
+	if len([]rune(texto)) > TamanhoMaxPrecondicao {
+		return "", uso("a pré-condição passa de "+strconv.Itoa(TamanhoMaxPrecondicao)+" caracteres", "resuma no que falta, por exemplo: Mesclar depois de orq#27")
+	}
+	return texto, nil
+}
+
 // DefinirPrecondicaoMR registra (ou, com texto vazio, limpa) a pré-condição de uma MR ligada à US.
 // O mesmo texto de novo não muda nada nem gera evento.
 func (s *Store) DefinirPrecondicaoMR(ctx context.Context, coord *Coordenador, ref refs.US, rawURL, texto string) (MR, error) {
@@ -150,9 +160,9 @@ func (s *Store) DefinirPrecondicaoMR(ctx context.Context, coord *Coordenador, re
 	if err != nil {
 		return MR{}, uso(err.Error(), "")
 	}
-	texto = strings.Join(strings.Fields(texto), " ")
-	if len([]rune(texto)) > TamanhoMaxPrecondicao {
-		return MR{}, uso("a pré-condição passa de "+strconv.Itoa(TamanhoMaxPrecondicao)+" caracteres", "resuma no que falta, por exemplo: Mesclar depois de orq#27")
+	texto, err = NormalizarPrecondicao(texto)
+	if err != nil {
+		return MR{}, err
 	}
 	var out MR
 	err = s.escrever(ctx, func(tx *sql.Tx) error {
