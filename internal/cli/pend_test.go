@@ -272,6 +272,8 @@ func TestDaemonCicloCompletoDaPendencia(t *testing.T) {
 		t.Fatalf("detach = %+v, %v", r, err)
 	}
 	t.Cleanup(func() {
+		// A trava solta antes de o processo sumir: espera o processo e os filhos de verdade.
+		defer semdaemon.Parar(env["ORQ_STATE_DIR"])
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		for i := 0; i < 100; i++ {
 			if ativo, _, _ := enriquecer.DaemonAtivo(env["ORQ_STATE_DIR"]); !ativo {

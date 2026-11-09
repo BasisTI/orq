@@ -216,7 +216,8 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := falso(t, estado)
-	go func() { _ = cmd.Wait() }()
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
 	for i := 0; i < 100 && len(procurar(filepath.Join(raiz, "casa"))) == 0; i++ {
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -225,5 +226,11 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 	}
 	if v := procurar(filepath.Join(raiz, "casa")); len(v) != 0 {
 		t.Fatalf("ainda vivo: %+v", v)
+	}
+	// Um só Wait (o do Cleanup de falso só roda depois deste canal).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("o daemon continuou vivo")
 	}
 }

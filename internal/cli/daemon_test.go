@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BasisTI/orq/internal/enriquecer"
+	"github.com/BasisTI/orq/internal/semdaemon"
 )
 
 // Sem as ferramentas, orq atualizar não falha: registra binario_ausente e o snapshot mostra.
@@ -120,6 +121,8 @@ func TestDaemonDetach(t *testing.T) {
 		t.Fatalf("r = %+v", r)
 	}
 	t.Cleanup(func() {
+		// A trava solta antes de o processo sumir: espera o processo e os filhos de verdade.
+		defer semdaemon.Parar(env["ORQ_STATE_DIR"])
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 		for i := 0; i < 100; i++ {
 			if ativo, _, _ := enriquecer.DaemonAtivo(env["ORQ_STATE_DIR"]); !ativo {

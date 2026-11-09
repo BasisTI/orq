@@ -193,7 +193,7 @@ func (c *casa) pararDaemon() {
 		_ = syscall.Kill(n, syscall.SIGTERM)
 		for i := 0; i < 100; i++ {
 			if a, _, _ := enriquecer.DaemonAtivo(c.estado); !a {
-				return
+				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
