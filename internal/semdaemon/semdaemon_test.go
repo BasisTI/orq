@@ -124,6 +124,10 @@ func TestEncerraShellQueIgnoraTerm(t *testing.T) {
 // uma raiz que não seja assim.
 func TestRaizEPrivadaENova(t *testing.T) {
 	herdado := os.TempDir()
+	base := herdado // com TMPDIR longo, a raiz vai para /tmp (o caminho do socket Unix tem limite)
+	if len(herdado) > maxTmpdir {
+		base = "/tmp"
+	}
 	a, err := novaRaiz()
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +138,7 @@ func TestRaizEPrivadaENova(t *testing.T) {
 	}
 	defer os.RemoveAll(a)
 	defer os.RemoveAll(b)
-	if a == b || a == herdado || !strings.HasPrefix(filepath.Base(a), prefixoRaiz) || !sob(herdado, a) {
+	if a == b || a == herdado || !strings.HasPrefix(filepath.Base(a), prefixoRaiz) || !sob(base, a) {
 		t.Fatalf("raízes = %q, %q (herdado %q)", a, b, herdado)
 	}
 	if ls, _ := os.ReadDir(a); len(ls) != 0 {
@@ -149,5 +153,77 @@ func TestRaizEPrivadaENova(t *testing.T) {
 			}()
 			Procurar(ruim)
 		}()
+	}
+}
+
+// O ambiente de teste não enxerga a máquina: HOME e XDG dentro da raiz privada (o orq.env real
+// fica fora do alcance) e nenhuma ORQ_*/HERDR_* herdada, como ORQ_WEB do daemon real.
+func TestIsolarAmbiente(t *testing.T) {
+	for _, k := range []string{"HOME", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "ORQ_WEB", "HERDR_SOCKET_PATH", "GOCACHE", "GOPATH"} {
+		t.Setenv(k, os.Getenv(k)) // o t.Setenv restaura o valor de agora no fim
+	}
+	t.Setenv("ORQ_WEB", "unix:/run/user/1000/orq.sock")
+	t.Setenv("HERDR_SOCKET_PATH", "/real/herdr.sock")
+	t.Setenv("XDG_CONFIG_HOME", "/real/config")
+	t.Setenv("HOME", "/home/real")
+	raiz, err := novaRaiz()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(raiz)
+	if err := isolarAmbiente(raiz); err != nil {
+		t.Fatal(err)
+	}
+	for k, quer := range map[string]string{"HOME": filepath.Join(raiz, "home"), "TMPDIR": raiz, "XDG_RUNTIME_DIR": filepath.Join(raiz, "run"),
+		"ORQ_WEB": "", "HERDR_SOCKET_PATH": "", "XDG_CONFIG_HOME": ""} {
+		if got := os.Getenv(k); got != quer {
+			t.Errorf("%s = %q, queria %q", k, got, quer)
+		}
+	}
+}
+
+// Um TMPDIR longo não leva a raiz nem o DirCurto para um caminho que estoura o socket Unix.
+func TestRaizEDirCurtoComTmpdirLongo(t *testing.T) {
+	longo := filepath.Join(t.TempDir(), strings.Repeat("x", 80))
+	if err := os.MkdirAll(longo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", longo)
+	raiz, err := novaRaiz()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(raiz)
+	if len(raiz) > maxTmpdir {
+		t.Errorf("raiz longa (%d): %s", len(raiz), raiz)
+	}
+	dir := DirCurto(t, "orq")
+	if len(filepath.Join(dir, "web.sock")) > 60 {
+		t.Errorf("DirCurto longo: %s", dir)
+	}
+}
+
+// Parar encerra o daemon de teste e o que mais estiver preso ao diretório, e espera sumir.
+func TestPararEsperaOProcessoSumir(t *testing.T) {
+	raiz, err := novaRaiz()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(raiz)
+	t.Setenv("TMPDIR", raiz)
+	estado := filepath.Join(raiz, "casa", "estado")
+	if err := os.MkdirAll(estado, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := falso(t, estado)
+	go func() { _ = cmd.Wait() }()
+	for i := 0; i < 100 && len(procurar(filepath.Join(raiz, "casa"))) == 0; i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if v := Parar(filepath.Join(raiz, "casa")); len(v) != 1 {
+		t.Fatalf("vazados = %+v", v)
+	}
+	if v := procurar(filepath.Join(raiz, "casa")); len(v) != 0 {
+		t.Fatalf("ainda vivo: %+v", v)
 	}
 }

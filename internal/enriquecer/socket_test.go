@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/BasisTI/orq/internal/semdaemon"
 )
 
 // servidorFalso é um Herdr de mentira no socket: confirma a assinatura e roda o roteiro de cada
@@ -28,12 +29,9 @@ type servidorFalso struct {
 func novoServidor(t *testing.T, roteiro ...func(enviar func(string))) *servidorFalso {
 	t.Helper()
 	// Caminho curto: socket Unix tem limite de ~108 bytes.
-	dir, err := os.MkdirTemp("", "orq")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := semdaemon.DirCurto(t, "orq")
 	s := &servidorFalso{t: t, caminho: filepath.Join(dir, "h.sock"), roteiro: roteiro}
+	var err error
 	if s.ln, err = net.Listen("unix", s.caminho); err != nil {
 		t.Fatal(err)
 	}

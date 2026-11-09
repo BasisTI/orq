@@ -19,6 +19,7 @@ import (
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/herdrfalso/falsotest"
 	"github.com/BasisTI/orq/internal/pendencias"
+	"github.com/BasisTI/orq/internal/semdaemon"
 )
 
 const arquivoDecisao = `---
@@ -165,11 +166,7 @@ func TestPendVerAntigaSemDetalhe(t *testing.T) {
 func TestDaemonWebForaDoAr(t *testing.T) {
 	env := ambiente(t)
 	// Socket numa pasta curta (o caminho de um socket Unix tem limite) e arquivo comum no lugar.
-	dir, err := os.MkdirTemp("", "w")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := semdaemon.DirCurto(t, "w")
 	comum := filepath.Join(dir, "x")
 	escrever(t, comum, "x")
 	if r := rodar(t, env, "daemon", "--web", "unix:"+comum); r.code != 4 || !strings.Contains(r.err, "web_nao_abriu") {
@@ -194,8 +191,7 @@ func TestDaemonDetachComWebQueNaoAbre(t *testing.T) {
 	for _, v := range enriquecer.VariavelBin {
 		env[v] = "/nao/existe/bin"
 	}
-	dir, _ := os.MkdirTemp("", "w")
-	defer os.RemoveAll(dir)
+	dir := semdaemon.DirCurto(t, "w")
 	comum := filepath.Join(dir, "x")
 	escrever(t, comum, "x")
 	r := rodar(t, env, "daemon", "--detach", "--web", "unix:"+comum)
@@ -264,11 +260,7 @@ func TestDaemonCicloCompletoDaPendencia(t *testing.T) {
 		env[v] = "/nao/existe/bin"
 	}
 	env["ORQ_LIMPEZA_AUTOMATICA"] = "0"
-	runtime, err := os.MkdirTemp("", "w")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(runtime) })
+	runtime := semdaemon.DirCurto(t, "w")
 	sock := filepath.Join(runtime, "web.sock")
 
 	var r ResultadoDetach

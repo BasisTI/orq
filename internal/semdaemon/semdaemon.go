@@ -41,7 +41,10 @@ func Main(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "semdaemon:", err)
 		return 1
 	}
-	os.Setenv("TMPDIR", raiz)
+	if err := isolarAmbiente(raiz); err != nil {
+		fmt.Fprintln(os.Stderr, "semdaemon:", err)
+		return 1
+	}
 	code := m.Run()
 	vazados := Encerrar(raiz)
 	if len(vazados) > 0 {
@@ -56,9 +59,57 @@ func Main(m *testing.M) int {
 
 const prefixoRaiz = "orq-teste-"
 
+// maxTmpdir é o maior TMPDIR herdado que ainda deixa sobrar caminho para um socket Unix (cerca
+// de 100 bytes) debaixo da raiz privada, do t.TempDir() e do nome do socket.
+const maxTmpdir = 30
+
+// isolarAmbiente põe o processo de teste, e com ele todo subprocesso que herda os.Environ(), fora
+// da máquina: TMPDIR na raiz privada, HOME e XDG_* dentro dela e nenhuma ORQ_*/HERDR_* herdada.
+// Sem isso o teste lê o orq.env real (HOME/.config/herdr/plugins/config/orq), e o daemon de
+// teste tenta escutar no socket web do daemon real. As caches do Go são fixadas antes de trocar
+// o HOME, para o `go build` dos testes não recomeçar do zero.
+func isolarAmbiente(raiz string) error {
+	if os.Getenv("GOCACHE") == "" {
+		if c, err := os.UserCacheDir(); err == nil {
+			os.Setenv("GOCACHE", filepath.Join(c, "go-build"))
+		}
+	}
+	if os.Getenv("GOPATH") == "" && os.Getenv("GOMODCACHE") == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			os.Setenv("GOPATH", filepath.Join(h, "go"))
+		}
+	}
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "ORQ_") || strings.HasPrefix(k, "HERDR_") || strings.HasPrefix(k, "XDG_") {
+			os.Unsetenv(k)
+		}
+	}
+	home := filepath.Join(raiz, "home")
+	runtime := filepath.Join(raiz, "run")
+	for _, d := range []string{home, runtime} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return err
+		}
+	}
+	os.Setenv("TMPDIR", raiz)
+	os.Setenv("HOME", home)
+	os.Setenv("XDG_RUNTIME_DIR", runtime)
+	return nil
+}
+
 // novaRaiz cria o diretório privado desta execução, sempre novo, com o caminho real (sem links).
 func novaRaiz() (string, error) {
-	raiz, err := os.MkdirTemp("", prefixoRaiz)
+	// TMPDIR longo estoura o limite do caminho do socket Unix (bind: invalid argument): a raiz
+	// vai para um diretório curto, que continua sendo só desta execução.
+	base := ""
+	if len(os.TempDir()) > maxTmpdir {
+		base = "/tmp"
+	}
+	raiz, err := os.MkdirTemp(base, prefixoRaiz)
+	if err != nil && base != "" {
+		raiz, err = os.MkdirTemp("", prefixoRaiz)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -82,6 +133,10 @@ func Procurar(raiz string) []Vazado {
 	if !strings.HasPrefix(filepath.Base(raiz), prefixoRaiz) {
 		panic("semdaemon: a raiz não é privada: " + raiz)
 	}
+	return procurar(raiz)
+}
+
+func procurar(raiz string) []Vazado {
 	entradas, _ := os.ReadDir("/proc")
 	var out []Vazado
 	for _, e := range entradas {
@@ -110,6 +165,55 @@ func Encerrar(raiz string) []Vazado {
 	}
 	for _, v := range Procurar(raiz) {
 		_ = syscall.Kill(v.PID, syscall.SIGKILL)
+	}
+	return vazados
+}
+
+// DirCurto cria um diretório temporário de caminho curto, apagado no fim do teste, para o
+// socket Unix que o teste vai abrir: o sun_path tem ~108 bytes, e um TMPDIR longo (o de um worker
+// do orq, por exemplo) com o nome do teste estoura o bind ("invalid argument"). Vai para /tmp
+// quando o TMPDIR é longo.
+func DirCurto(t testing.TB, prefixo string) string {
+	t.Helper()
+	base := ""
+	if len(os.TempDir()) > maxTmpdir {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, prefixo)
+	if err != nil && base != "" {
+		dir, err = os.MkdirTemp("", prefixo)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// Parar encerra, e espera sumir, todo processo do mesmo UID preso a dir, que tem de estar sob a
+// raiz privada desta execução (o TMPDIR que Main pôs). Serve ao Cleanup de um teste que subiu
+// daemon: SIGTERM, até 10 s de espera e SIGKILL no que sobrar, inclusive os filhos do daemon
+// (um herdr falso ainda no meio de uma consulta), que a trava do daemon não enxerga. Devolve
+// o que ainda estava vivo ao ser chamada.
+func Parar(dir string) []Vazado {
+	raiz := os.Getenv("TMPDIR")
+	if !strings.HasPrefix(filepath.Base(raiz), prefixoRaiz) || !sob(raiz, dir) {
+		panic("semdaemon: " + dir + " não está sob a raiz privada " + raiz)
+	}
+	vazados := procurar(dir)
+	for _, v := range vazados {
+		_ = syscall.Kill(v.PID, syscall.SIGTERM)
+	}
+	limite := time.Now().Add(10 * time.Second)
+	for time.Now().Before(limite) && len(procurar(dir)) > 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, v := range procurar(dir) {
+		_ = syscall.Kill(v.PID, syscall.SIGKILL)
+	}
+	limite = time.Now().Add(3 * time.Second)
+	for time.Now().Before(limite) && len(procurar(dir)) > 0 {
+		time.Sleep(20 * time.Millisecond)
 	}
 	return vazados
 }
