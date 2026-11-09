@@ -31,6 +31,8 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		AgentStatus string            `json:"agent_status"`
 		Name        *string           `json:"name"`
 		Tokens      map[string]string `json:"tokens"`
+		Cwd         string            `json:"cwd"`
+		FgCwd       string            `json:"foreground_cwd"`
 	}
 	var r struct {
 		Result *struct {
@@ -63,7 +65,7 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		s.Workspaces[w.WorkspaceID] = central.WorkspaceHerdr{Tokens: w.Tokens}
 	}
 	for _, p := range snap.Panes {
-		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens}
+		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
 	}
 	// O registro do agente é o de `herdr agent list`: vale mais que o do pane.
 	for _, a := range snap.Agents {
@@ -77,6 +79,12 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		}
 		if a.Name != nil {
 			p.Nome = *a.Name
+		}
+		if a.Cwd != "" {
+			p.Cwd = a.Cwd
+		}
+		if a.FgCwd != "" {
+			p.CwdPrimeiroPlano = a.FgCwd
 		}
 		s.Panes[a.PaneID] = p
 	}

@@ -3,11 +3,13 @@ package limpeza
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/refs"
 )
 
@@ -51,9 +53,12 @@ func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) 
 		it := &Item{Tipo: "pane", Alvo: fmt.Sprintf("%s (%s)", id, p.Nome)}
 		nome := p.Nome
 		outra := l.outraUS(ctx, u, id, nome)
+		fora := foraDoWorktree(p, rec)
 		switch {
 		case outra != "":
 			it.Estado, it.Motivo = Preservado, outra
+		case fora != "":
+			it.Estado, it.Motivo = Preservado, fora
 		case motivoBoard != "":
 			it.Estado, it.Motivo = Preservado, motivoBoard
 		case coords[id]:
@@ -64,7 +69,7 @@ func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) 
 			it.Estado, it.Motivo = Preservado, "agente em "+p.Status
 		default:
 			it.Estado = Remover
-			it.exec = func(ctx context.Context) error { return l.fecharPane(ctx, u, id, nome) }
+			it.exec = func(ctx context.Context) error { return l.fecharPane(ctx, u, rec, id, nome) }
 		}
 		itens = append(itens, it)
 	}
@@ -114,10 +119,43 @@ func (l *Limpador) conferirBoard(ctx context.Context, u refs.US) string {
 	if err != nil {
 		return "não consegui conferir a US no Taiga, preservado: " + err.Error()
 	}
-	if !v.Fechada {
+	if !v.Fechada && !statusPosMerge[strings.ToLower(strings.TrimSpace(v.Status))] {
 		return fmt.Sprintf("a US não está concluída no Taiga (status %q): pode ter sido reaberta", v.Status)
 	}
 	return ""
+}
+
+// statusPosMerge são os status de uma US já mesclada que esperam teste ou deploy. Contam como
+// concluída para a limpeza, porque ela vem logo depois do merge; a volta para In progress
+// (correção depois do teste) continua segurando o pane.
+var statusPosMerge = map[string]bool{"ready for test": true, "ready to test": true, "waiting for deployment": true}
+
+// foraDoWorktree devolve o motivo de preservar quando o pane não está comprovadamente num
+// worktree da US: o nome do agente se repete entre boards, o diretório não. O Herdr acrescenta
+// " (deleted)" ao diretório já removido.
+func foraDoWorktree(p central.PaneHerdr, rec *Recursos) string {
+	var cwds []string
+	for _, c := range []string{p.Cwd, p.CwdPrimeiroPlano} {
+		c = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(c), " (deleted)"))
+		if c != "" {
+			cwds = append(cwds, filepath.Clean(c))
+		}
+	}
+	if len(cwds) == 0 {
+		return "o Herdr não informou o diretório do pane, não consegui conferir que ele é desta US, preservado"
+	}
+	if len(rec.Repos) == 0 {
+		return "o recursos.json não registra worktree, não consegui conferir que o pane é desta US, preservado"
+	}
+	for _, c := range cwds {
+		for _, r := range rec.Repos {
+			w := filepath.Clean(r.Worktree)
+			if c == w || strings.HasPrefix(c, w+string(filepath.Separator)) {
+				return ""
+			}
+		}
+	}
+	return fmt.Sprintf("o pane está em %s, fora dos worktrees da US: pode ser de outro board, preservado", cwds[0])
 }
 
 // outraUS devolve o motivo de preservar quando o pane parece hospedar outra US: o nome é de
@@ -146,8 +184,15 @@ func (l *Limpador) outraUS(ctx context.Context, u refs.US, id, nome string) stri
 
 var nomeOutraUS = regexp.MustCompile(`^(?:([a-z0-9._-]+)-)?tg-(\d+)_`)
 
-// fecharPane relê o Herdr logo antes de fechar: o agente pode ter voltado a trabalhar.
-func (l *Limpador) fecharPane(ctx context.Context, u refs.US, id, nome string) error {
+// fecharPane confere tudo de novo e relê o Herdr por último, logo antes do close: a ida ao
+// Taiga e ao Central demora, e o agente pode ter voltado a trabalhar nesse intervalo.
+func (l *Limpador) fecharPane(ctx context.Context, u refs.US, rec *Recursos, id, nome string) error {
+	if motivo := l.conferirBoard(ctx, u); motivo != "" {
+		return preservar(motivo)
+	}
+	if motivo := l.outraUS(ctx, u, id, nome); motivo != "" {
+		return preservar(motivo)
+	}
 	sessao, err := l.F.ConsultarHerdr(ctx)
 	if err != nil {
 		return preservar("Herdr indisponível na hora de fechar: " + err.Error())
@@ -159,14 +204,11 @@ func (l *Limpador) fecharPane(ctx context.Context, u refs.US, id, nome string) e
 	if p.Nome != nome {
 		return preservar(fmt.Sprintf("o pane %s agora se chama %q", id, p.Nome))
 	}
+	if motivo := foraDoWorktree(p, rec); motivo != "" {
+		return preservar(motivo)
+	}
 	if p.Status != "idle" && p.Status != "done" {
 		return preservar("agente passou a " + p.Status)
-	}
-	if motivo := l.outraUS(ctx, u, id, nome); motivo != "" {
-		return preservar(motivo)
-	}
-	if motivo := l.conferirBoard(ctx, u); motivo != "" {
-		return preservar(motivo)
 	}
 	_, err = l.F.Rodar(ctx, "herdr", "pane", "close", id)
 	return err

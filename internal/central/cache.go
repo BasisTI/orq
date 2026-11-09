@@ -50,6 +50,10 @@ type PaneHerdr struct {
 	Nome        string            `json:"nome,omitempty"`
 	WorkspaceID string            `json:"workspace_id"`
 	Tokens      map[string]string `json:"tokens,omitempty"`
+	// Cwd e CwdPrimeiroPlano são os diretórios do pane no Herdr. Só a limpeza lê (na consulta
+	// ao vivo); ficam fora do JSON do cache e do snapshot.
+	Cwd              string `json:"-"`
+	CwdPrimeiroPlano string `json:"-"`
 }
 
 // WorkspaceHerdr é o que o orq guarda de um workspace.
