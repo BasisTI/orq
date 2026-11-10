@@ -53,9 +53,11 @@
 <span class="onda-sinais">{{range .Sinais}}{{template "sel" .}}{{end}}</span>
 </summary>{{end}}
 
+{{define "onda-epicos"}}<span{{if .Epicos}} class="onda-epicos"{{end}} id="{{.Anchor}}-epicos"{{if .Oob}} hx-swap-oob="true"{{end}}{{if not .Epicos}} hidden{{end}}>{{if .Epicos}}{{if gt (len .Epicos) 1}}Épicos{{else}}Épico{{end}} {{range $i, $e := .Epicos}}{{if $i}}, {{end}}{{if $e.URL}}<a href="{{$e.URL}}" title="{{$e.Titulo}}" rel="noopener noreferrer" target="_blank">#{{$e.Ref}}</a>{{else}}<span title="{{$e.Titulo}}">#{{$e.Ref}}</span>{{end}}{{end}}{{end}}</span>{{end}}
+
 {{define "c-onda"}}<details class="onda" id="{{.Anchor}}">{{template "onda-barra" .}}
 <div class="onda-corpo">
-<p class="onda-meta"><span>Coordenador <b>{{.Coordenador}}</b></span><span>Criada {{.Criada}}</span><a href="{{.Href}}">{{template "ic" "arquivo"}}Diário da onda</a>{{if .Epicos}}<span class="onda-epicos">{{if gt (len .Epicos) 1}}Épicos{{else}}Épico{{end}} {{range $i, $e := .Epicos}}{{if $i}}, {{end}}{{if $e.URL}}<a href="{{$e.URL}}" title="{{$e.Titulo}}" rel="noopener noreferrer" target="_blank">#{{$e.Ref}}</a>{{else}}<span title="{{$e.Titulo}}">#{{$e.Ref}}</span>{{end}}{{end}}</span>{{end}}</p>
+<p class="onda-meta"><span>Coordenador <b>{{.Coordenador}}</b></span><span>Criada {{.Criada}}</span><a href="{{.Href}}">{{template "ic" "arquivo"}}Diário da onda</a>{{template "onda-epicos" .}}</p>
 <div class="us-lista">{{range .US}}{{template "c-us" .}}{{end}}</div>
 </div></details>{{end}}
 
@@ -109,6 +111,6 @@
 {{define "vivo"}}{{template "situacao" .Situacao}}
 {{template "fontes" .}}
 {{range .Abas}}{{template "aba-n" .}}{{end}}
-{{range .Ondas}}{{template "onda-barra" .}}{{range .US}}{{template "us-barra" .}}{{template "us-taiga" .}}{{template "us-mrs" .}}{{template "us-vazio" .}}{{range .PendMuda}}{{template "pend-muda" .}}{{end}}{{end}}{{end}}
+{{range .Ondas}}{{template "onda-barra" .}}{{template "onda-epicos" .}}{{range .US}}{{template "us-barra" .}}{{template "us-taiga" .}}{{template "us-mrs" .}}{{template "us-vazio" .}}{{range .PendMuda}}{{template "pend-muda" .}}{{end}}{{end}}{{end}}
 {{if not .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
 {{end}}{{end}}

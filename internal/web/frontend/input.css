@@ -372,7 +372,7 @@ details[open] > summary .chev { rotate: 90deg; }
 .p-meta { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center; margin: .25rem 0 1rem; color: #2B3A48; }
 .p-meta > span { display: inline-flex; gap: .3rem; align-items: center; }
 .diario { list-style: none; background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); overflow: hidden; }
-.diario li { display: grid; grid-template-columns: 9rem minmax(0, 1fr); grid-template-areas: "q t" "q d"; gap: .1rem .9rem; padding: .65rem .9rem; border-top: 1px solid var(--linha); }
+.diario li { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "q" "t" "d"; gap: .1rem .9rem; padding: .65rem .9rem; border-top: 1px solid var(--linha); }
 .diario li:first-child { border-top: 0; }
 .d-quando { grid-area: q; color: var(--suave); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .d-tipo { grid-area: t; font-weight: 700; font-size: .92rem; overflow-wrap: anywhere; }
@@ -415,10 +415,12 @@ details[open] > summary .chev { rotate: 90deg; }
 .pend[open] > .pend-sum .pend-titulo { -webkit-line-clamp: unset; font-weight: 700; }
 .pend-estado { grid-area: estado; display: flex; flex-wrap: wrap; gap: .35rem; }
 .pend-estado:empty { display: none; }
+.hist-item.pend-sum { grid-template-areas: "chev chave tipo" ". idade idade" ". tit tit" ". estado estado"; }
+.hist-item .pend-idade { display: block; }
 @media (min-width: 760px) {
   .pend-sum { grid-template-columns: 1.25rem 7.5rem 7.4rem 4.5rem minmax(0, 1fr) auto; grid-template-areas: "chev chave tipo idade tit estado"; column-gap: .75rem; }
   .pend-idade { display: block; }
-  .hist-item.pend-sum { grid-template-columns: 1.25rem 7.5rem 7.4rem 13.5rem minmax(0, 1fr) auto; }
+  .hist-item.pend-sum { grid-template-columns: 1.25rem 7.5rem 7.4rem minmax(0, 1fr) auto; grid-template-areas: "chev chave tipo tit estado" ". idade idade tit estado"; }
   .pend-titulo { -webkit-line-clamp: 1; }
 }
 .pend-corpo { padding: .25rem .8rem 1rem .8rem; max-width: 62rem; overflow-wrap: anywhere; }

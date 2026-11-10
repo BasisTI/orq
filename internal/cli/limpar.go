@@ -140,7 +140,8 @@ func textoLimpeza(w io.Writer, r limpeza.Resultado) error {
 			return err
 		}
 	}
-	if len(r.Itens) == 0 {
+	// Com recusa não houve plano a executar: "nada a fazer" ali daria a entender que a pasta foi tratada.
+	if len(r.Itens) == 0 && r.Recusa == "" {
 		_, err := fmt.Fprintln(w, "  nada a fazer")
 		return err
 	}
