@@ -140,3 +140,55 @@ func TestDaemonDetach(t *testing.T) {
 		t.Fatalf("segundo = %+v", r2)
 	}
 }
+
+// A pré-condição da MR em Draft (US #68): `mr add --precondicao`, `mr precondicao` e `--limpar`.
+func TestMRPrecondicaoPelaCLI(t *testing.T) {
+	env := ambiente(t)
+	ok(t, env, "coord", "registrar", "a", "--projeto", "orq")
+	ok(t, env, "onda", "criar", "o", "--us", "4")
+	const url = "https://github.com/BasisTI/orq/pull/1"
+	pre := func(s string) string {
+		var m struct {
+			MR struct {
+				Precondicao *string `json:"precondicao"`
+			} `json:"mr"`
+			Precondicao *string `json:"precondicao"`
+		}
+		if err := json.Unmarshal([]byte(s), &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.MR.Precondicao != nil {
+			return *m.MR.Precondicao
+		}
+		if m.Precondicao != nil {
+			return *m.Precondicao
+		}
+		return ""
+	}
+	if got := pre(ok(t, env, "mr", "add", "4", url, "--precondicao", "Mesclar depois de orq#27")); got != "Mesclar depois de orq#27" {
+		t.Fatalf("add --precondicao = %q", got)
+	}
+	if got := pre(ok(t, env, "mr", "precondicao", "4", url, "Mesclar depois de orq#27 e do orq upgrade")); got != "Mesclar depois de orq#27 e do orq upgrade" {
+		t.Fatalf("precondicao = %q", got)
+	}
+	if !strings.Contains(ok(t, env, "snapshot"), `"precondicao": "Mesclar depois de orq#27 e do orq upgrade"`) {
+		t.Fatal("snapshot sem a pré-condição")
+	}
+	if got := pre(ok(t, env, "mr", "precondicao", "4", url, "--limpar")); got != "" {
+		t.Fatalf("--limpar = %q", got)
+	}
+	// Texto inválido no add não deixa a MR ligada pela metade.
+	const outra = "https://github.com/BasisTI/orq/pull/2"
+	if r := rodar(t, env, "mr", "add", "4", outra, "--precondicao", strings.Repeat("a", 301)); r.code == 0 {
+		t.Fatal("texto grande aceito")
+	}
+	if strings.Contains(ok(t, env, "snapshot"), "pull/2") {
+		t.Fatal("a MR ficou ligada com a pré-condição inválida")
+	}
+	// Sem texto e sem --limpar, ou com os dois, é erro de uso.
+	for _, args := range [][]string{{"mr", "precondicao", "4", url}, {"mr", "precondicao", "4", url, "x", "--limpar"}} {
+		if r := rodar(t, env, args...); r.code == 0 {
+			t.Fatalf("%v aceito", args)
+		}
+	}
+}

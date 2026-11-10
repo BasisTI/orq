@@ -869,3 +869,38 @@ func TestStatusMostraOLinkDaPendenciaSelecionada(t *testing.T) {
 		t.Fatalf("status = %q", st)
 	}
 }
+
+// Os três casos da MR na tela (US #68): pronta verde, draft comum vermelho e draft com
+// pré-condição amarelo, com o texto numa linha própria sob a MR. Só o terceiro ganha a linha.
+func TestMRDraftComPrecondicaoNaTela(t *testing.T) {
+	const gl = "https://gitlab.basis.com.br/basis/"
+	com := mr(gl+"sgo-cli/-/merge_requests/49", "basis/sgo-cli", 49, "draft", false)
+	com.Precondicao = ptr("Mesclar depois de orq#27 e do orq upgrade")
+	pronta := mr(gl+"sgo-cli/-/merge_requests/50", "basis/sgo-cli", 50, "pronta", false)
+	pronta.Precondicao = ptr("texto que sobrou")
+	comum := mr(gl+"sgo-cli/-/merge_requests/51", "basis/sgo-cli", 51, "draft", false)
+	s := snapshot()
+	s.Coordenadores[0].Ondas[0].US = []central.US{us(313, "exec", "", "", "x", 0, com, pronta, comum)}
+	tela := cores.Desenhar(s, Opcoes{Coord: "convey", Largura: 100, Agora: agora})
+	plano, cru := "", ""
+	for _, l := range tela.Linhas {
+		plano += ansi.Strip(l.Texto) + "\n"
+		cru += l.Texto + "\n"
+	}
+	if !strings.Contains(plano, "↳ Mesclar depois de orq#27 e do orq upgrade") {
+		t.Errorf("sem a pré-condição sob a MR:\n%s", plano)
+	}
+	if strings.Contains(plano, "texto que sobrou") || strings.Count(plano, "↳") != 1 {
+		t.Errorf("a pronta ou o draft comum ganharam linha de pré-condição:\n%s", plano)
+	}
+	amarelo, verde, vermelho := "38;2;229;192;123", "38;2;152;195;121", "38;2;224;108;117"
+	for nome, quer := range map[string]string{
+		"draft com pré-condição amarelo": "\x1b[" + amarelo + "msgo-cli!49",
+		"pronta verde":                   "\x1b[" + verde + "msgo-cli!50",
+		"draft comum vermelho":           "\x1b[" + vermelho + "msgo-cli!51",
+	} {
+		if !strings.Contains(cru, quer) {
+			t.Errorf("%s: falta %q", nome, quer)
+		}
+	}
+}

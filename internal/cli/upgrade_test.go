@@ -81,7 +81,7 @@ func bancoV3(t *testing.T, dir string) {
 		"ALTER TABLE pendencia DROP COLUMN arquivo", "ALTER TABLE pendencia DROP COLUMN arquivo_hash", "ALTER TABLE pendencia DROP COLUMN arquivo_alterado", "ALTER TABLE pendencia DROP COLUMN autor",
 		"ALTER TABLE pendencia DROP COLUMN resposta_opcao", "ALTER TABLE pendencia DROP COLUMN respondida_em", "ALTER TABLE pendencia DROP COLUMN respondida_por", "ALTER TABLE pendencia DROP COLUMN avisada_em",
 		"ALTER TABLE pendencia DROP COLUMN abertura_avisada_em", "ALTER TABLE pendencia DROP COLUMN aviso_falhou_em", "ALTER TABLE pendencia DROP COLUMN resposta_versao",
-		"DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
+		"ALTER TABLE mr DROP COLUMN precondicao", "DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +116,7 @@ func TestAvisaAntesDeMigrarQuemNaoAbreOBanco(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d: %s", r.code, r.err)
 	}
-	for _, quer := range []string{"aviso: ao migrar o banco da versão 3 para a 5", "deixa de abrir o banco (versao_do_banco)", "0.3.0-1-gaaaaaaa", "orq upgrade"} {
+	for _, quer := range []string{"aviso: ao migrar o banco da versão 3 para a 6", "deixa de abrir o banco (versao_do_banco)", "0.3.0-1-gaaaaaaa", "orq upgrade"} {
 		if !strings.Contains(r.err, quer) {
 			t.Errorf("stderr sem %q:\n%s", quer, r.err)
 		}
