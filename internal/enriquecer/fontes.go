@@ -31,6 +31,8 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		AgentStatus string            `json:"agent_status"`
 		Name        *string           `json:"name"`
 		Tokens      map[string]string `json:"tokens"`
+		Cwd         string            `json:"cwd"`
+		FgCwd       string            `json:"foreground_cwd"`
 	}
 	var r struct {
 		Result *struct {
@@ -63,7 +65,7 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		s.Workspaces[w.WorkspaceID] = central.WorkspaceHerdr{Tokens: w.Tokens}
 	}
 	for _, p := range snap.Panes {
-		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens}
+		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
 	}
 	// O registro do agente é o de `herdr agent list`: vale mais que o do pane.
 	for _, a := range snap.Agents {
@@ -77,6 +79,12 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		}
 		if a.Name != nil {
 			p.Nome = *a.Name
+		}
+		if a.Cwd != "" {
+			p.Cwd = a.Cwd
+		}
+		if a.FgCwd != "" {
+			p.CwdPrimeiroPlano = a.FgCwd
 		}
 		s.Panes[a.PaneID] = p
 	}
@@ -380,7 +388,8 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 		Subject         string `json:"subject"`
 		URL             string `json:"url"`
 		StatusExtraInfo struct {
-			Name string `json:"name"`
+			Name     string `json:"name"`
+			IsClosed bool   `json:"is_closed"`
 		} `json:"status_extra_info"`
 		Epics []struct {
 			Ref     int    `json:"ref"`
@@ -393,7 +402,7 @@ func (f Ferramentas) ConsultarTaiga(ctx context.Context, projeto string, ref int
 	if err := json.Unmarshal(out, &r); err != nil || r.Subject == "" {
 		return central.ValorTaiga{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "taiga story get devolveu algo que não é uma story: " + resumir(out)}
 	}
-	v := central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, URL: r.URL}
+	v := central.ValorTaiga{Titulo: r.Subject, Status: r.StatusExtraInfo.Name, Fechada: r.StatusExtraInfo.IsClosed, URL: r.URL}
 	for _, e := range r.Epics {
 		v.Epicos = append(v.Epicos, central.EpicoTaiga{Ref: e.Ref, Titulo: e.Subject, URL: urlEpico(r.URL, e.Project.Slug, e.Ref)})
 	}

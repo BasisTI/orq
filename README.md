@@ -397,7 +397,7 @@ Não há migration nova: o estado é esse arquivo e o diário. Por isso a atuali
 
 | Item | Regra |
 |---|---|
-| panes | Só os nomes de agente listados em `panes` do `recursos.json` (nome parecido não prova posse: o Herdr é compartilhado com outros boards). Fecha só com o agente `idle`/`done`, relido do Herdr logo antes de fechar. Nunca fecha o pane do coordenador nem o que roda o comando. |
+| panes | Só os nomes de agente listados em `panes` do `recursos.json` (nome parecido não prova posse: o Herdr é compartilhado com outros boards). Antes de fechar, confere o Taiga ao vivo (a US precisa estar em status fechado, `Ready for test`, `Ready to test` ou `Waiting for deployment`; `In progress` depois do merge e falha na consulta preservam), que o nome e o `PaneID` do Central não são de outra US e que o `cwd` ou o `foreground_cwd` do pane (sem o sufixo ` (deleted)`) está num worktree do `recursos.json`; sem como conferir, preserva e diz o motivo. Fecha só com o agente `idle`/`done`, relido do Herdr por último, logo antes de fechar. Nunca fecha o pane do coordenador nem o que roda o comando. |
 | worktree | Registrado no repositório, na branch da US, sem árvore suja, fora do diretório corrente e com o conteúdo já na branch de destino. Sem `--force`. |
 | branch local e remota | Mesma conferência do conteúdo. A remota só é apagada se ainda está no commit conferido (`--force-with-lease`). Nunca `main`, `master`, `develop`, `trunk` nem a branch de destino da MR. |
 | pasta temporária | `/tmp/orq/<projeto>/TG-<ref>`. |
