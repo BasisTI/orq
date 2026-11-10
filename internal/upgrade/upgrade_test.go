@@ -193,11 +193,14 @@ func (c *casa) pararDaemon() {
 		_ = syscall.Kill(n, syscall.SIGTERM)
 		for i := 0; i < 100; i++ {
 			if a, _, _ := enriquecer.DaemonAtivo(c.estado); !a {
-				return
+				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+	// A trava solta antes de o processo sumir, e o herdr falso que o daemon lançou pode estar
+	// no meio de uma consulta: espera tudo o que está preso à casa, com SIGKILL no fim.
+	semdaemon.Parar(c.raiz)
 }
 
 func (c *casa) versao(bin string) Info {
