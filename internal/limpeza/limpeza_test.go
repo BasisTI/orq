@@ -52,6 +52,9 @@ type cen struct {
 	ondaID int64
 	// extras são panes do Herdr que não pertencem à US (outro board).
 	extras []map[string]any
+	// cwdPane é o diretório que o Herdr informa para os panes da US; vazio usa o worktree.
+	cwdPane string
+	semCwd  bool
 }
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -74,7 +77,7 @@ func novo(t *testing.T) *cen {
 	t.Setenv("GIT_COMMITTER_EMAIL", "t@example.com")
 	dir := t.TempDir()
 	c := &cen{t: t, dir: dir, u: refs.US{Projeto: "orq", Ref: 13}, url: "https://github.com/BasisTI/orq/pull/9", env: map[string]string{"HOME": dir}}
-	for _, n := range []string{"herdr", "gh", "docker"} {
+	for _, n := range []string{"herdr", "gh", "docker", "taiga"} {
 		for _, sub := range []string{"log", "resp/" + n, "bin"} {
 			if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 				t.Fatal(err)
@@ -133,7 +136,16 @@ func novo(t *testing.T) *cen {
 	escrever(t, filepath.Join(raizes.PastaTmp(c.u), "lixo", "f"), "x")
 	c.mr("closed", true, c.tip)
 	c.herdr(map[string]string{"wA:p2": "idle"})
+	c.taiga("Done", true)
 	return c
+}
+
+// taiga responde a leitura da US no board: o status e se ele é de US concluída.
+func (c *cen) taiga(status string, fechada bool) {
+	c.t.Helper()
+	b, _ := json.Marshal(map[string]any{"subject": "titulo", "url": "https://taiga.example/project/orq/us/13",
+		"status_extra_info": map[string]any{"name": status, "is_closed": fechada}})
+	c.responder("taiga", string(b), "story", "get", "13", "--project", "orq", "--output", "json")
 }
 
 func escrever(t *testing.T, p, s string) {
@@ -177,7 +189,15 @@ func (c *cen) herdr(panes map[string]string) {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		ps = append(ps, map[string]any{"pane_id": id, "workspace_id": "wA", "agent": "claude", "agent_status": panes[id], "name": "tg-13_executor"})
+		p := map[string]any{"pane_id": id, "workspace_id": "wA", "agent": "claude", "agent_status": panes[id], "name": "tg-13_executor"}
+		if !c.semCwd {
+			cwd := c.cwdPane
+			if cwd == "" {
+				cwd = c.wt
+			}
+			p["cwd"], p["foreground_cwd"] = cwd, cwd
+		}
+		ps = append(ps, p)
 	}
 	b, _ := json.Marshal(map[string]any{"result": map[string]any{"type": "session_snapshot", "snapshot": map[string]any{"panes": ps, "agents": ps, "workspaces": []any{}}}})
 	c.responder("herdr", string(b), "api", "snapshot")
@@ -1323,6 +1343,8 @@ func TestCicloCompletoDeDuasGeracoes(t *testing.T) {
 			if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
 				t.Fatal(err)
 			}
+			c.cwdPane = c.wt + "-r2"
+			c.herdr(map[string]string{"wA:p2": "idle"})
 			r = c.limpar(false)
 			if r.Recusa != "" || !r.Completa {
 				t.Fatalf("geração 2: %+v %s", r, estados(r))
@@ -1451,8 +1473,12 @@ func TestLimparSemRepoMasComPanePreservaAPastaDeTrabalho(t *testing.T) {
 	if r.Recusa != "" {
 		t.Fatalf("recusou: %s", r.Recusa)
 	}
-	if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+	// Sem worktree registrado não há como provar que o pane é desta US: preserva.
+	if got := c.escritas("herdr"); len(got) != 0 {
 		t.Errorf("herdr = %v", got)
+	}
+	if p := c.estadoDe(r, "pane"); len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "não registra worktree") {
+		t.Errorf("pane = %+v", p)
 	}
 	it := c.estadoDe(r, "pasta_trabalho")[0]
 	if it.Estado != Preservado || !strings.Contains(it.Motivo, "nenhum repo registrado") || r.Completa {
@@ -1460,9 +1486,6 @@ func TestLimparSemRepoMasComPanePreservaAPastaDeTrabalho(t *testing.T) {
 	}
 	if !existe(c.trabalho()) || !existe(filepath.Join(c.trabalho(), ArquivoRecursos)) {
 		t.Error("a pasta de trabalho ou o recursos.json sumiu")
-	}
-	if existe(c.tmp()) {
-		t.Error("a pasta temporária devia ter saído")
 	}
 }
 
@@ -1545,5 +1568,208 @@ func TestWorktreePrunableNaoSeguraAPasta(t *testing.T) {
 	r := c.limpar(false)
 	if n := len(c.estadoDe(r, "worktree_nao_registrado")); n != 0 || !r.Completa || existe(c.trabalho()) {
 		t.Fatalf("prunable segurou: completa=%v %s", r.Completa, estados(r))
+	}
+}
+
+// US reaberta (status aberto no board): o pane fica, e com ele o resto, com o motivo.
+func TestUSReabertaNoBoardNaoFechaOPane(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.taiga("In progress", false)
+	r := c.limpar(false)
+	if got := c.escritas("herdr"); len(got) != 0 {
+		t.Fatalf("fechou pane de US reaberta: %v", got)
+	}
+	p := c.estadoDe(r, "pane")
+	if len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "não está concluída no Taiga") {
+		t.Fatalf("pane = %+v", p)
+	}
+	if r.Completa || !existe(c.wt) || !existe(c.trabalho()) {
+		t.Errorf("limpou além do pane: %+v", estados(r))
+	}
+}
+
+// Sem resposta do Taiga, na dúvida preserva.
+func TestTaigaIndisponivelPreservaOPane(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	if err := os.Remove(filepath.Join(c.dir, "resp", "taiga", chave("story", "get", "13", "--project", "orq", "--output", "json")+".out")); err != nil {
+		t.Fatal(err)
+	}
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "Taiga") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// O Central registra o pane na US 14: o nome igual ao do recursos.json da US 13 não basta.
+func TestPaneRegistradoEmOutraUSNaoEFechado(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	outra := refs.US{Projeto: "orq", Ref: 14}
+	if _, err := c.st.CriarOnda(context.Background(), c.coord, central.NovaOnda{Titulo: "outra", Ate: "merge", US: []refs.US{outra}}); err != nil {
+		t.Fatal(err)
+	}
+	pane := "wA:p2"
+	if _, _, err := c.st.AtualizarStatus(context.Background(), &c.coord, outra, central.MudancaStatus{Status: "exec", Pane: &pane}); err != nil {
+		t.Fatal(err)
+	}
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "orq/14") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// O pane registrado no recursos.json com nome de outra US (nome reaproveitado) é preservado.
+func TestPaneComNomeDeOutraUSNaoEFechado(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	rec, err := LerRecursos(c.l.Raizes.Arquivo(c.u), c.u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Panes = []string{"tg-130_executor"}
+	if _, err := rec.Gravar(c.l.Raizes, c.u); err != nil {
+		t.Fatal(err)
+	}
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "outra US") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// A US é reaberta entre o plano e o fechamento: a conferência na hora de fechar segura o pane.
+func TestReaberturaNoBoardDepoisDoPlanoPreservaOPane(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.l.antesDoItem = func(i *Item) {
+		if i.Tipo == "pane" {
+			c.taiga("In progress", false)
+		}
+	}
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// Agente trabalhando no pane da US concluída: não fecha.
+func TestPaneComAgenteTrabalhandoNaoEFechadoMesmoComBoardConcluido(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.herdr(map[string]string{"wA:p2": "working"})
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "working") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// Outro board com o mesmo ref e o mesmo nome de pane: o diretório não é o worktree da US.
+func TestPaneHomonimoDeOutroBoardNaoEFechado(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.cwdPane = "/home/u/Projetos/plataforma-iac.TG-13"
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "fora dos worktrees") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+func TestPaneSemCwdNoHerdrEPreservado(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.semCwd = true
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	r := c.limpar(false)
+	p := c.estadoDe(r, "pane")
+	if len(c.escritas("herdr")) != 0 || len(p) != 1 || p[0].Estado != Preservado || !strings.Contains(p[0].Motivo, "não informou o diretório") {
+		t.Fatalf("pane = %+v", p)
+	}
+}
+
+// Subpasta do worktree e o sufixo " (deleted)" do Herdr contam como o worktree.
+func TestPaneNaSubpastaOuComSufixoDeletedFecha(t *testing.T) {
+	for _, suf := range []string{"/internal/x", " (deleted)", "/internal (deleted)"} {
+		c := novo(t)
+		c.mergeNaMain(false, false)
+		c.cwdPane = c.wt + suf
+		c.herdr(map[string]string{"wA:p2": "idle"})
+		c.limpar(false)
+		if got := c.escritas("herdr"); len(got) != 1 || got[0] != "pane close wA:p2" {
+			t.Errorf("cwd %q: panes fechados = %v", suf, got)
+		}
+	}
+}
+
+// Um diretório irmão com o mesmo prefixo (TG-13-r2) não é o worktree TG-13.
+func TestPaneEmDiretorioDePrefixoParecidoNaoFecha(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.cwdPane = c.wt + "-r2"
+	c.herdr(map[string]string{"wA:p2": "idle"})
+	c.limpar(false)
+	if got := c.escritas("herdr"); len(got) != 0 {
+		t.Fatalf("fechou %v", got)
+	}
+}
+
+// Depois do merge, a US esperando teste ou deploy conta como concluída; a limpeza roda e a
+// onda encerra.
+func TestStatusPosMergeLimpaEEncerraAOnda(t *testing.T) {
+	for _, st := range []string{"Ready for test", "ready to TEST", "Waiting for deployment"} {
+		t.Run(st, func(t *testing.T) {
+			c := novo(t)
+			c.mergeNaMain(false, false)
+			c.taiga(st, false)
+			r := c.limpar(false)
+			if !r.Completa || existe(c.wt) || existe(c.trabalho()) {
+				t.Fatalf("resultado = %+v %s", r, estados(r))
+			}
+		})
+	}
+}
+
+func TestInProgressDepoisDoMergeSegura(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	c.taiga("In progress", false)
+	r := c.limpar(false)
+	if r.Completa || !existe(c.wt) || len(c.escritas("herdr")) != 0 {
+		t.Fatalf("limpou: %s", estados(r))
+	}
+}
+
+// O agente volta a trabalhar durante a ida ao Taiga: o Herdr é relido por último.
+func TestAgenteVoltaDuranteConsultaAoTaigaPreserva(t *testing.T) {
+	c := novo(t)
+	c.mergeNaMain(false, false)
+	alvo := filepath.Join(c.dir, "resp", "herdr", chave("api", "snapshot")+".out")
+	idle, _ := os.ReadFile(alvo)
+	c.herdr(map[string]string{"wA:p2": "working"})
+	work, _ := os.ReadFile(alvo)
+	if err := os.WriteFile(alvo, idle, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wp := filepath.Join(c.dir, "work.json")
+	if err := os.WriteFile(wp, work, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rj, _ := json.Marshal(map[string]any{"subject": "t", "url": "https://x/project/orq/us/13", "status_extra_info": map[string]any{"name": "Done", "is_closed": true}})
+	c.l.antesDoItem = func(i *Item) {
+		if i.Tipo == "pane" {
+			s := "#!/bin/sh\ncp '" + wp + "' '" + alvo + "'\ncat <<'X'\n" + string(rj) + "\nX\n"
+			_ = os.WriteFile(filepath.Join(c.dir, "bin", "taiga"), []byte(s), 0o755)
+		}
+	}
+	c.limpar(false)
+	if got := c.escritas("herdr"); len(got) != 0 {
+		t.Fatalf("fechou pane com agente trabalhando: %v", got)
 	}
 }

@@ -32,6 +32,7 @@ func TestRecursosGravarELimparRecusaComMRAberta(t *testing.T) {
 	env["ORQ_TMP_DIR"] = filepath.Join(t.TempDir(), "tmp")
 	env["HOME"] = t.TempDir()
 	env["TESTCONTAINERS_RYUK_DISABLED"] = "true"
+	env["ORQ_DOCKER_BIN"] = "/nao/existe/docker" // nunca o docker real da máquina
 	var estadoMR string
 	env["ORQ_GH_BIN"], estadoMR = ghFalso(t, `{"state":"open","merged":false,"draft":false,"mergeable_state":"clean","head":{"sha":"abc1234","ref":"TG-13"},"base":{"ref":"main"}}`)
 	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")

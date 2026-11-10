@@ -402,3 +402,36 @@ func TestCentralMRsDeRepositoriosDiferentes(t *testing.T) {
 		t.Errorf("rótulo de MR sem projeto: %s", html)
 	}
 }
+
+// Os três casos da MR na página (US #68): só o Draft com pré-condição mostra o selo e o texto.
+func TestCentralMRDraftComPrecondicao(t *testing.T) {
+	const texto = "Mesclar depois de orq#27 e do orq upgrade"
+	casos := []struct {
+		nome, estado, pre string
+		quer, nao         []string
+	}{
+		{"pronta", "pronta", "", []string{">pronta<"}, []string{"draft com pré-condição", "mr-precond", "Mesclar depois"}},
+		{"draft comum", "draft", "", []string{">draft<"}, []string{"draft com pré-condição", "mr-precond", "Mesclar depois"}},
+		{"draft com pré-condição", "draft", texto, []string{"draft com pré-condição", "mr-precond", texto, "1 MR em draft com pré-condição"}, nil},
+	}
+	for _, k := range casos {
+		c := vazia(t, false)
+		co, _ := c.coord("alfa", "wA:p1", "proj", 7, "")
+		const url = "https://github.com/Exemplo/repo/pull/21"
+		ref := refs.US{Projeto: "proj", Ref: 7}
+		_, _, err := c.st.AdicionarMR(c.ctx, &co, ref, url)
+		c.ok(err)
+		c.ok(c.st.GravarMR(c.ctx, url, central.ValorMR{Estado: k.estado}, nil))
+		if k.pre != "" {
+			_, err = c.st.DefinirPrecondicaoMR(c.ctx, &co, ref, url, k.pre)
+			c.ok(err)
+		}
+		_, html := c.get("/")
+		contem(t, html, k.quer...)
+		for _, n := range k.nao {
+			if strings.Contains(html, n) {
+				t.Errorf("%s: a página tem %q", k.nome, n)
+			}
+		}
+	}
+}

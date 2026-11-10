@@ -351,7 +351,8 @@ func pendDe(r *http.Request) (refs.Pend, bool) {
 	return refs.Pend{US: refs.US{Projeto: projeto, Ref: ref}, Numero: n}, true
 }
 
-type linkMR struct{ URL, Rotulo, Estado string }
+// linkMR é a MR na página da pendência; Precondicao só vem na MR em Draft de propósito.
+type linkMR struct{ URL, Rotulo, Estado, Precondicao string }
 
 type respostaVista struct{ Quando, Por, Texto string }
 
@@ -427,7 +428,11 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 			if m.Estado != nil {
 				est = *m.Estado
 			}
-			d.MRs = append(d.MRs, linkMR{URL: m.URL, Rotulo: m.RefCurta(), Estado: est})
+			l := linkMR{URL: m.URL, Rotulo: m.RefCurta(), Estado: est}
+			if m.DraftComPrecondicao() {
+				l.Precondicao = *m.Precondicao
+			}
+			d.MRs = append(d.MRs, l)
 		}
 	}
 	for _, h := range hist {

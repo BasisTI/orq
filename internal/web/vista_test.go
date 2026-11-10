@@ -206,3 +206,45 @@ func TestVistaVencidoEFontes(t *testing.T) {
 		t.Errorf("fontes = %+v", c.Fontes)
 	}
 }
+
+// Os três casos da MR: pronta, Draft comum e Draft com pré-condição (US #68). Só o terceiro leva o
+// texto, o selo próprio e o resumo na US; os outros dois ficam como antes.
+func TestVistaMRDraftComPrecondicaoEDistintaDeProntaEDraft(t *testing.T) {
+	com := mrV("draft", "pendente")
+	com.Precondicao = sp("Mesclar depois de orq#27 e do orq upgrade")
+	casos := []struct {
+		nome       string
+		mr         central.MR
+		selo, pre  string
+		resumoTem  string
+		resumoNada bool
+	}{
+		{"pronta", func() central.MR {
+			m := mrV("pronta", "sucesso")
+			m.Precondicao = sp("sobra de quando era draft")
+			return m
+		}(), "pronta", "", "", false},
+		{"draft comum", mrV("draft", "pendente"), "draft", "", "", true},
+		{"draft com pré-condição", com, "draft com pré-condição", "Mesclar depois de orq#27 e do orq upgrade", "1 MR em draft com pré-condição", false},
+	}
+	for _, c := range casos {
+		u := vistaCentral(snapV(nil, ondaV(1, "c", "mr-pronta", usV("p", 1, "exec", []central.MR{c.mr}))), agoraVista, Filtro{}).Ondas[0].US[0]
+		got := u.MRs[0]
+		if got.Estado.Texto != c.selo || got.Precondicao != c.pre {
+			t.Errorf("%s: selo %q, pré-condição %q", c.nome, got.Estado.Texto, got.Precondicao)
+		}
+		if c.pre != "" && !strings.Contains(got.Estado.Title, c.pre) {
+			t.Errorf("%s: o selo não leva o texto: %q", c.nome, got.Estado.Title)
+		}
+		resumo := ""
+		for _, s := range u.ResumoMRs {
+			resumo += s.Texto + "|"
+		}
+		if c.resumoTem != "" && !strings.Contains(resumo, c.resumoTem) {
+			t.Errorf("%s: resumo %q sem %q", c.nome, resumo, c.resumoTem)
+		}
+		if c.pre == "" && strings.Contains(resumo, "pré-condição") {
+			t.Errorf("%s: resumo fala de pré-condição: %q", c.nome, resumo)
+		}
+	}
+}

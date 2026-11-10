@@ -31,6 +31,10 @@ type Escuta struct {
 // Close fecha o socket (o Unix é removido do disco).
 func (e *Escuta) Close() error { return e.Listener.Close() }
 
+// MaxCaminhoSocket é o maior caminho de socket Unix aceito: o sun_path tem 108 bytes no Linux
+// e 104 no macOS, com o NUL; acima disso o bind devolve "invalid argument" sem dizer o motivo.
+const MaxCaminhoSocket = 103
+
 func falhaAbrir(cause, recovery string) error {
 	return &output.Error{Code: "web_nao_abriu", Cause: cause, Recovery: recovery, Exit: output.ExitConflict}
 }
@@ -80,6 +84,10 @@ func abrirUnix(caminho string) (*Escuta, error) {
 		return nil, usoWeb(fmt.Sprintf("o socket %q precisa de caminho absoluto", caminho), "")
 	}
 	caminho = filepath.Clean(caminho)
+	if len(caminho) > MaxCaminhoSocket {
+		return nil, falhaAbrir(fmt.Sprintf("o caminho do socket tem %d bytes, mais que o limite de %d do socket Unix: %s", len(caminho), MaxCaminhoSocket, caminho),
+			"passe --web unix:<caminho curto> ou encurte $XDG_RUNTIME_DIR")
+	}
 	if err := os.MkdirAll(filepath.Dir(caminho), 0o700); err != nil {
 		return nil, falhaAbrir(err.Error(), "confira as permissões de "+filepath.Dir(caminho))
 	}

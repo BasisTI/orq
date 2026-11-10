@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +254,26 @@ func TestDetalheDeTipoDesconhecidoEOmitido(t *testing.T) {
 	for _, tipo := range append([]string{"us.status", "mr.estado", "onda.criar", "onda.adicionar", "pend.add"}, central.TiposExternos...) {
 		if _, ok := camposDoDiario[tipo]; !ok {
 			t.Errorf("tipo %s sem lista de campos", tipo)
+		}
+	}
+	// E todo tipo que o pacote central grava com `tipo: "…"` no código, sem lista escrita à mão.
+	arqs, err := filepath.Glob("../central/*.go")
+	if err != nil || len(arqs) == 0 {
+		t.Fatalf("fontes do central: %v, %v", arqs, err)
+	}
+	reTipo := regexp.MustCompile(`tipo:\s+"([a-z_]+\.[a-z_]+)"`)
+	for _, a := range arqs {
+		if strings.HasSuffix(a, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range reTipo.FindAllStringSubmatch(string(b), -1) {
+			if _, ok := camposDoDiario[m[1]]; !ok {
+				t.Errorf("tipo %s (gravado em %s) sem lista de campos", m[1], a)
+			}
 		}
 	}
 }

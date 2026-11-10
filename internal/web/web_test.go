@@ -16,6 +16,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/refs"
+	"github.com/BasisTI/orq/internal/semdaemon"
 )
 
 const arquivo = `## Contexto
@@ -459,11 +460,7 @@ func TestNaoServeArquivosNemSnapshot(t *testing.T) {
 }
 
 func TestAbrirEscuta(t *testing.T) {
-	dir, err := os.MkdirTemp("", "orqweb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := semdaemon.DirCurto(t, "orqweb")
 	env := func(k string) string {
 		if k == "XDG_RUNTIME_DIR" {
 			return dir
@@ -551,5 +548,18 @@ func TestDetalheDoDiarioFormataAnteriorEm(t *testing.T) {
 	got, _ := textoDetalhe("pend.responder", raw)
 	if strings.Contains(got, "2027-01-01") || !strings.Contains(got, "31/12/2026 23:00") {
 		t.Fatalf("detalhe = %s", got)
+	}
+}
+
+// Caminho de socket além do sun_path vira erro claro, não "bind: invalid argument".
+func TestAbrirUnixRecusaCaminhoLongo(t *testing.T) {
+	dir := semdaemon.DirCurto(t, "orqweb")
+	longo := filepath.Join(dir, strings.Repeat("d", MaxCaminhoSocket), "web.sock")
+	_, err := Abrir("unix:"+longo, func(string) string { return "" })
+	if err == nil || !strings.Contains(err.Error(), "limite de") || strings.Contains(err.Error(), "invalid argument") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(longo)); statErr == nil {
+		t.Error("criou a pasta antes de recusar")
 	}
 }

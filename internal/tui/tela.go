@@ -172,8 +172,8 @@ func (e Estilos) icone(u central.US) string {
 	return e.iconeDe(st)
 }
 
-// mr desenha a referência da MR com o link para ela, na cor do estado: draft vermelho, pronta
-// verde, aberta neutra, mesclada cinza tachado, fechada roxo itálico, sem estado apagada.
+// mr desenha a referência da MR com o link para ela, na cor do estado: draft vermelho, draft com
+// pré-condição amarelo (e a pré-condição na linha de baixo, veja precondicaoMR), pronta verde, aberta neutra, mesclada cinza tachado, fechada roxo itálico, sem estado apagada.
 func (e Estilos) mr(m central.MR) string {
 	p := e.p()
 	st := e.novo()
@@ -184,6 +184,10 @@ func (e Estilos) mr(m central.MR) string {
 	switch estado {
 	case "draft":
 		st = st.Foreground(p.vermelho)
+		if m.DraftComPrecondicao() {
+			// Draft de propósito: amarelo, distinto do vermelho do Draft comum e do verde da pronta.
+			st = st.Foreground(p.amarelo)
+		}
 	case "pronta":
 		st = st.Foreground(p.verde)
 	case "mesclada":
@@ -202,6 +206,25 @@ func (e Estilos) mr(m central.MR) string {
 		s += e.apagado("*")
 	}
 	return s
+}
+
+// precondicaoMR é a linha sob a MR com o "Mesclar depois de …"; vazia sem pré-condição.
+func (e Estilos) precondicaoMR(m central.MR, w int) string {
+	if !m.DraftComPrecondicao() {
+		return ""
+	}
+	return e.cor(e.p().amarelo, cortar("↳ "+limpar(*m.Precondicao), w))
+}
+
+// larguraPrecondicaoMax limita quanto a pré-condição alarga a coluna das MRs; o que passar é cortado.
+const larguraPrecondicaoMax = 48
+
+// larguraPrecondicao é a largura de precondicaoMR sem os escapes (0 sem pré-condição).
+func larguraPrecondicao(m central.MR) int {
+	if !m.DraftComPrecondicao() {
+		return 0
+	}
+	return min(ansi.StringWidth("↳ "+limpar(*m.Precondicao)), larguraPrecondicaoMax)
 }
 
 // larguraMR é a largura de Estilos.mr sem os escapes.
@@ -442,7 +465,7 @@ func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 				l.titulo = max(l.titulo, w)
 				l.status = max(l.status, ansi.StringWidth(statusTexto(u)))
 				for _, m := range u.MRs {
-					l.mr = max(l.mr, larguraMR(m))
+					l.mr = max(l.mr, larguraMR(m), larguraPrecondicao(m))
 				}
 			}
 		}
@@ -748,6 +771,9 @@ func (e Estilos) tabelaUS(us []central.US, l colsUS, o Opcoes) []Linha {
 		var mrs []string
 		for _, m := range u.MRs {
 			mrs = append(mrs, cortar(e.mr(m), l.mr))
+			if linha := e.precondicaoMR(m, l.mr); linha != "" {
+				mrs = append(mrs, linha)
+			}
 		}
 		item := "us:" + u.Chave
 		rows = append(rows, celula{

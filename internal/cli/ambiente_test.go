@@ -85,6 +85,7 @@ func TestLimparDryRunAchaGlabNoNixProfile(t *testing.T) {
 	env["ORQ_TMP_DIR"] = filepath.Join(t.TempDir(), "tmp")
 	env["HOME"] = t.TempDir()
 	env["USER"] = "ana"
+	env["ORQ_DOCKER_BIN"] = "/nao/existe/docker" // nunca o docker real da máquina
 	// O herdr falso é só para o resto do limpar; o glab, o que importa, não tem variável.
 	_, herdr := novoHerdrCentral(t)
 	env["ORQ_HERDR_BIN"] = herdr["ORQ_HERDR_BIN"]

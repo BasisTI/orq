@@ -8,7 +8,7 @@
 <dt>Coordenador</dt><dd>{{.P.Coordenador}} · onda {{.P.OndaID}}</dd>
 {{if .P.Autor}}<dt>Autor</dt><dd>{{.P.Autor}}</dd>{{end}}
 <dt>Aberta em</dt><dd>{{.Aberta}}</dd>
-{{if .MRs}}<dt>MRs</dt><dd>{{range .MRs}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a>{{if .Estado}} <span class="selo selo-tipo">{{.Estado}}</span>{{end}}<br>{{end}}</dd>{{end}}
+{{if .MRs}}<dt>MRs</dt><dd>{{range .MRs}}<a href="{{.URL}}" rel="noopener noreferrer">{{.Rotulo}}</a>{{if .Estado}} <span class="selo selo-tipo">{{.Estado}}</span>{{end}}{{if .Precondicao}} <span class="selo selo-aviso">com pré-condição</span> <span class="apagado">{{.Precondicao}}</span>{{end}}<br>{{end}}</dd>{{end}}
 </dl>
 {{if .P.ArquivoAlterado}}<p class="aviso">O arquivo de origem mudou depois do registro. Esta página mostra o que foi registrado.</p>{{end}}
 

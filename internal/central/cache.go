@@ -50,6 +50,10 @@ type PaneHerdr struct {
 	Nome        string            `json:"nome,omitempty"`
 	WorkspaceID string            `json:"workspace_id"`
 	Tokens      map[string]string `json:"tokens,omitempty"`
+	// Cwd e CwdPrimeiroPlano são os diretórios do pane no Herdr. Só a limpeza lê (na consulta
+	// ao vivo); ficam fora do JSON do cache e do snapshot.
+	Cwd              string `json:"-"`
+	CwdPrimeiroPlano string `json:"-"`
 }
 
 // WorkspaceHerdr é o que o orq guarda de um workspace.
@@ -77,6 +81,9 @@ type ValorTaiga struct {
 	Titulo string `json:"titulo"`
 	Status string `json:"status"`
 	URL    string `json:"url"`
+	// Fechada é o is_closed do status no board: a US concluída. A limpeza só fecha pane de US
+	// fechada, e lê o valor ao vivo, não do cache.
+	Fechada bool `json:"fechada,omitempty"`
 	// Epicos são os épicos a que a US está ligada (vêm no mesmo `story get`, sem consulta extra).
 	Epicos []EpicoTaiga `json:"epicos,omitempty"`
 }
@@ -192,7 +199,7 @@ func (s *Store) GravarMR(ctx context.Context, url string, valor ValorMR, erro *E
 		if err := s.gravarCache(ctx, tx, FonteMR, url, valor, nil); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT mr.id, mr.projeto, mr.ref, mr.estado, onda.id, onda.coordenador FROM mr
+		rows, err := tx.QueryContext(ctx, `SELECT mr.id, mr.projeto, mr.ref, mr.estado, mr.precondicao, onda.id, onda.coordenador FROM mr
 			JOIN us ON us.projeto = mr.projeto AND us.ref = mr.ref JOIN onda ON onda.id = us.onda_id
 			WHERE mr.url = ? AND (mr.estado IS NULL OR mr.estado <> ?)`, url, valor.Estado)
 		if err != nil {
@@ -203,13 +210,14 @@ func (s *Store) GravarMR(ctx context.Context, url string, valor ValorMR, erro *E
 			projeto string
 			ref     int
 			de      *string
+			precond *string
 			onda    int64
 			coord   string
 		}
 		var ms []mudanca
 		for rows.Next() {
 			var m mudanca
-			if err := rows.Scan(&m.id, &m.projeto, &m.ref, &m.de, &m.onda, &m.coord); err != nil {
+			if err := rows.Scan(&m.id, &m.projeto, &m.ref, &m.de, &m.precond, &m.onda, &m.coord); err != nil {
 				rows.Close()
 				return err
 			}
@@ -225,6 +233,17 @@ func (s *Store) GravarMR(ctx context.Context, url string, valor ValorMR, erro *E
 			if err := s.registrar(ctx, tx, evento{coordenador: m.coord, ondaID: m.onda, projeto: m.projeto, ref: m.ref, tipo: "mr.estado",
 				detalhe: map[string]any{"url": url, "de": m.de, "para": valor.Estado}}); err != nil {
 				return err
+			}
+			// A pré-condição vale para aquele Draft: ao sair dele, o texto sai junto, para não
+			// reaparecer se a MR voltar a Draft por outro motivo. Só uma consulta boa chega aqui.
+			if m.de != nil && *m.de == "draft" && valor.Estado != "draft" && m.precond != nil && *m.precond != "" {
+				if _, err := tx.ExecContext(ctx, `UPDATE mr SET precondicao = NULL WHERE id = ?`, m.id); err != nil {
+					return err
+				}
+				if err := s.registrar(ctx, tx, evento{coordenador: m.coord, ondaID: m.onda, projeto: m.projeto, ref: m.ref, tipo: "mr.precondicao",
+					detalhe: map[string]any{"url": url, "de": *m.precond, "para": ""}}); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
