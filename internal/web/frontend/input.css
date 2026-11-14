@@ -264,6 +264,15 @@ details[open] > summary .chev { rotate: 90deg; }
 .us-selos { grid-area: selos; }
 .us-mrs { grid-area: mrs; }
 .conta-wrap { grid-area: conta; justify-self: end; }
+/* modelo do pane: o texto fica na cor do tema; só o ícone da marca leva a cor da família (≥ 3:1 sobre o branco) */
+.modelo { display: inline-flex; align-items: center; gap: .3rem; font-size: .88rem; color: #2B3A48; white-space: nowrap; }
+.modelo .marca { width: 1.05em; height: 1.05em; vertical-align: 0; }
+.modelo-claude .marca { color: #B5532F; }
+.modelo-gpt .marca { color: #0B7D62; }
+.modelo-deepseek .marca { color: #3F5BE8; }
+.modelo-glm .marca { color: #2F4FD0; }
+.modelo-kimi .marca { color: #0A6AD6; }
+.modelo-gemini .marca { color: #6F55A8; }
 .us-selos, .us-mrs { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
 .us-id { font-family: var(--font-display); font-size: .92rem; margin-right: .25rem; color: var(--color-secondary); }
 .mr-res { display: inline-flex; gap: .3rem; align-items: center; font-size: .9rem; }

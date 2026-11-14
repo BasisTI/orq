@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/refs"
@@ -29,6 +30,8 @@ type US struct {
 	PaneID       *string     `json:"pane_id"`
 	Papel        *string     `json:"papel"`
 	Rodada       *int        `json:"rodada"`
+	Modelo       *string     `json:"modelo"`  // id do modelo do pane, ex. "claude-fable-5-2"
+	Esforco      *string     `json:"esforco"` // nível de esforço do pane, ex. "medium"
 	AtualizadoEm string      `json:"atualizado_em"`
 	MRs          []MR        `json:"mrs"`
 	Pendencias   []Pendencia `json:"pendencias"`
@@ -37,14 +40,14 @@ type US struct {
 }
 
 func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]US, error) {
-	rows, err := q.QueryContext(ctx, `SELECT projeto, ref, onda_id, posicao, status, pane_id, papel, rodada, atualizado_em FROM us `+clause+` ORDER BY onda_id, posicao`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT projeto, ref, onda_id, posicao, status, pane_id, papel, rodada, modelo, esforco, atualizado_em FROM us `+clause+` ORDER BY onda_id, posicao`, args...)
 	if err != nil {
 		return nil, err
 	}
 	us := []US{}
 	for rows.Next() {
 		var u US
-		if err := rows.Scan(&u.Projeto, &u.Ref, &u.OndaID, &u.Posicao, &u.Status, &u.PaneID, &u.Papel, &u.Rodada, &u.AtualizadoEm); err != nil {
+		if err := rows.Scan(&u.Projeto, &u.Ref, &u.OndaID, &u.Posicao, &u.Status, &u.PaneID, &u.Papel, &u.Rodada, &u.Modelo, &u.Esforco, &u.AtualizadoEm); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -170,8 +173,14 @@ type MudancaStatus struct {
 	Pane   *string
 	Papel  *string
 	Rodada *int
-	Forcar bool
+	// Modelo e Esforco são os do pane atual da US (id do modelo e nível de esforço).
+	Modelo  *string
+	Esforco *string
+	Forcar  bool
 }
+
+// LimiteModelo é o tamanho máximo, em runas, do id do modelo e do esforço.
+const LimiteModelo = 80
 
 // AtualizarStatus muda o status da US e, se vierem, o pane, o papel e a rodada. Toda transição
 // é livre, inclusive as idas e voltas entre exec e rev, menos sair de done, que exige Forcar.
@@ -186,6 +195,14 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 	if m.Rodada != nil && *m.Rodada < 1 {
 		return US{}, false, uso("--rodada precisa ser 1 ou mais", "")
 	}
+	for nome, v := range map[string]*string{"--modelo": m.Modelo, "--esforco": m.Esforco} {
+		if v == nil {
+			continue
+		}
+		if strings.TrimSpace(*v) == "" || temControle(*v) || strings.ContainsAny(*v, " \t") || utf8.RuneCountInString(*v) > LimiteModelo {
+			return US{}, false, uso(fmt.Sprintf("%s inválido", nome), fmt.Sprintf("use uma palavra sem espaço nem caractere de controle, de até %d caracteres", LimiteModelo))
+		}
+	}
 	if m.Pane != nil && temControle(*m.Pane) {
 		return US{}, false, uso("pane com caractere de controle", "")
 	}
@@ -197,8 +214,8 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 			return err
 		}
 		var atual US
-		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
-			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada)
+		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada, modelo, esforco FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
+			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada, &atual.Modelo, &atual.Esforco)
 		if err != nil {
 			return err
 		}
@@ -218,6 +235,15 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		if m.Rodada != nil && (atual.Rodada == nil || *atual.Rodada != *m.Rodada) {
 			detalhe["rodada"] = *m.Rodada
 		}
+		if m.Modelo != nil && !iguais(atual.Modelo, m.Modelo) {
+			detalhe["modelo"] = *m.Modelo
+			if atual.Modelo != nil {
+				detalhe["modelo_antes"] = *atual.Modelo
+			}
+		}
+		if m.Esforco != nil && !iguais(atual.Esforco, m.Esforco) {
+			detalhe["esforco"] = *m.Esforco
+		}
 		if len(detalhe) == 0 {
 			return nil
 		}
@@ -226,8 +252,8 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		}
 		detalhe["status"] = m.Status
 		alterada = true
-		_, err = tx.ExecContext(ctx, `UPDATE us SET status = ?, pane_id = COALESCE(?, pane_id), papel = COALESCE(?, papel), rodada = COALESCE(?, rodada), atualizado_em = ?
-			WHERE projeto = ? AND ref = ?`, m.Status, m.Pane, m.Papel, m.Rodada, s.agora(), alvo.Projeto, alvo.Ref)
+		_, err = tx.ExecContext(ctx, `UPDATE us SET status = ?, pane_id = COALESCE(?, pane_id), papel = COALESCE(?, papel), rodada = COALESCE(?, rodada), modelo = COALESCE(?, modelo), esforco = COALESCE(?, esforco), atualizado_em = ?
+			WHERE projeto = ? AND ref = ?`, m.Status, m.Pane, m.Papel, m.Rodada, m.Modelo, m.Esforco, s.agora(), alvo.Projeto, alvo.Ref)
 		if err != nil {
 			return err
 		}

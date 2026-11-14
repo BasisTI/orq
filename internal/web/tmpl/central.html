@@ -5,6 +5,8 @@
 {{define "proj"}}<span class="proj"><i class="tom tom-{{.Tom}}" aria-hidden="true"></i>{{.Slug}}</span>{{end}}
 {{define "agente"}}<span class="agente agente-{{.Cls}}" title="{{.Title}}"><i aria-hidden="true"></i>{{.Texto}}</span>{{if .Vencido}} {{template "vencido"}}{{end}}{{end}}
 
+{{define "modelo"}}{{if .Texto}}<span class="modelo{{if .Familia}} modelo-{{.Familia}}{{end}}" title="{{.Title}}">{{if .Familia}}<svg class="ic marca" aria-hidden="true"><use href="#m-{{.Familia}}"/></svg>{{end}}{{.Texto}}</span>{{end}}{{end}}
+
 {{define "c-mr"}}<li class="mr">
 <a class="mr-link" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{template "ic" "pr"}}<span><b>{{.Rotulo}}</b> <span class="mr-path">{{.Caminho}}</span></span><svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>
 <span class="mr-selos">{{template "sel" .Estado}}{{if .IaC}} <span class="selo selo-neutro">iac</span>{{end}}
@@ -18,7 +20,7 @@
 {{define "us-barra"}}<summary class="us-sum" id="{{.Anchor}}-barra"{{if .Oob}} hx-swap-oob="true"{{end}}>
 {{template "chev"}}
 <span class="us-titulo" title="{{.Titulo}}"><b class="us-id">{{.ID}}</b> {{if .Titulo}}{{.Titulo}}{{else}}<span class="apagado">sem título no cache do Taiga</span>{{end}}</span>
-<span class="us-selos">{{template "sel" .Status}} {{template "agente" .Agente}}</span>
+<span class="us-selos">{{template "sel" .Status}} {{template "agente" .Agente}}{{if .Modelo.Texto}} {{template "modelo" .Modelo}}{{end}}</span>
 <span class="us-mrs">{{if .SemMRs}}<span class="apagado">sem MR</span>{{else}}<span class="mr-res">{{template "ic" "pr"}}{{.MRsQtd}} {{if eq .MRsQtd 1}}MR{{else}}MRs{{end}}</span>{{range .ResumoMRs}} {{template "sel" .}}{{end}}{{end}}</span>
 <span class="conta-wrap">{{if .Esperam}}<span class="selo selo-aviso" title="pendências esperando você">{{template "ic" "user"}}{{.Esperam}} {{if eq .Esperam 1}}espera você{{else}}esperam você{{end}}</span>{{end}}</span>
 </summary>{{end}}
@@ -36,6 +38,7 @@
 <div><dt>Projeto</dt><dd>{{template "proj" .Projeto}}</dd></div>
 <div><dt>Depende de</dt><dd>{{range .Dependencias}}<span class="dep">{{.}}</span> {{else}}<span class="apagado">nenhuma</span>{{end}}</dd></div>
 {{if .Papel}}<div><dt>Papel</dt><dd>{{.Papel}}</dd></div>{{end}}
+{{if .Modelo.Texto}}<div><dt>Modelo</dt><dd>{{template "modelo" .Modelo}}</dd></div>{{end}}
 </dl>
 <h3 class="sec">Merge requests</h3>
 {{template "us-mrs" .}}

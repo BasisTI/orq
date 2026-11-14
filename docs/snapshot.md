@@ -21,6 +21,8 @@
 - Ainda versão 1, US #10: o campo `projetos` (raiz) entrou, com o índice de tom de cada projeto. Aditivo.
 - Ainda versão 1, US #15: a `Pendencia` ganhou `chave`, `estado`, `tem_detalhe`, `opcoes`, `slug`, `arquivo`, `autor`, `resposta_opcao`, `respondida_em`, `respondida_por`, `avisada_em`, `resposta_versao`, `arquivo_alterado` e `sem_coordenador`. Aditivo: o sentido dos campos antigos não mudou, e `aberta` continua `true` na pendência respondida (ela só fecha em `orq pend resolver`). O `detalhe` (até 64 KiB por pendência) não vai no snapshot: `orq pend ver` o traz.
 
+- Ainda versão 1, US #81: a `US` ganhou `modelo` e `esforco` (nulos até `orq us status --modelo/--esforco`). Aditivo; a migration 0007 só acrescenta colunas nulas e declara leitor 4 e escritor 5.
+
 - Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
 - Ainda versão 1, US #16: a `MR` ganhou `pipeline` e `aprovacao`. Aditivo, sem migration: saem do último valor bom do cache da MR, que ganhou os dois campos opcionais.
 
@@ -115,6 +117,8 @@ US {
   "pane_id": string|null,                  # pane que conduz a US agora
   "papel": "planejamento"|"implementacao"|"revisao"|null,
   "rodada": int|null,
+  "modelo": string|null,                   # id do modelo do pane ("claude-fable-5-2"); nulo até o status vir com --modelo
+  "esforco": string|null,                  # esforço do pane ("medium"); nulo se não informado
   "atualizado_em": data,
   "mrs": [MR],
   "pendencias": [Pendencia],               # abertas e resolvidas

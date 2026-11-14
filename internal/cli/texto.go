@@ -81,6 +81,12 @@ func linhaStatus(u central.US) string {
 	if u.Papel != nil {
 		s += " " + *u.Papel
 	}
+	if u.Modelo != nil {
+		s += " " + q(*u.Modelo)
+		if u.Esforco != nil {
+			s += " " + q(*u.Esforco)
+		}
+	}
 	if u.PaneID != nil {
 		s += " pane " + q(*u.PaneID)
 		if u.Herdr != nil && u.Herdr.Status != nil {

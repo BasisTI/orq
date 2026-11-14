@@ -58,6 +58,8 @@ Sem diretiva, vale o número da própria migration (só abre quem a tem, como an
 
 **Depois do merge da #15 (migration 0005), rode `orq upgrade`.** A 0005 declara `leitor-minimo 4` e `escritor-minimo 5`: o `orq` 4 (inclusive o daemon do plugin) ainda lê o banco, mas não escreve. Um daemon 4 diante do banco 5 sai com `banco_somente_leitura` (exit 4), e o `--detach` dele falha com `daemon_nao_subiu`; sem o `upgrade`, o daemon não importa as pendências nem avisa ninguém.
 
+A 0007 (US #81, `modelo` e `esforco` em `us`) também só acrescenta colunas nulas e declara `leitor-minimo 4` e `escritor-minimo 5`: o `orq` 5 e o 6 seguem escrevendo (sem tocar nas colunas, então o modelo gravado fica como estava até um `orq` 7 mudar o status), e não exige `orq upgrade` imediato. Sem upgrade, o daemon antigo não publica o token do modelo.
+
 Antes de aplicar uma migration, o `orq` consulta `version` dos outros binários conhecidos (`PATH`, `go install`, plugin e o daemon em execução) e avisa no stderr os que deixam de abrir o banco, ou passam a abri-lo só para leitura, depois dela.
 
 ## Estado
@@ -95,7 +97,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq onda list [--abertas]` | Lista as ondas. |
 | `orq onda proxima [<id>]` | Próxima US em `wait` que pode ser despachada; sem nada elegível, `us` vem nulo e `motivo` diz por quê. Com todas as US no limite, `encerramento` diz o próximo passo (veja [Encerrar a onda](#encerrar-a-onda)). |
 | `orq onda encerrar <id>` | Encerra a onda; as US ficam como estão e podem entrar numa onda nova (veja abaixo o que acontece com o status). Avisa no stderr, uma linha por pendência ainda aberta ou só respondida da onda (chave e estado, sem o texto); não resolve nada nem muda o exit. |
-| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--forcar]` | Muda o status. Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. Ao mudar para `done`, avisa no stderr das pendências abertas da US, como o `onda encerrar`. |
+| `orq us status <ref> <wait\|plan\|exec\|rev\|done> [--pane <id>] [--papel planejamento\|implementacao\|revisao] [--rodada N] [--modelo <id>] [--esforco <nível>] [--forcar]` | Muda o status. `--modelo` e `--esforco` registram o modelo do pane atual (id inteiro, ex. `claude-fable-5-2`, e nível, ex. `medium`); a troca vai para o diário (`modelo`, `modelo_antes`). Transições livres, inclusive idas e voltas entre `exec` e `rev`; sair de `done` exige `--forcar`. Sem mudança, não grava nem gera evento. Ao mudar para `done`, avisa no stderr das pendências abertas da US, como o `onda encerrar`. |
 | `orq mr add <ref> <url>` / `orq mr rm <ref> <url>` | Liga ou desliga a MR da US. A mesma URL de novo não muda nada. `--precondicao "Mesclar depois de orq#27"` registra já a pré-condição. |
 | `orq mr precondicao <ref> <url> "<texto>"` / `--limpar` | Registra ou limpa a pré-condição da MR em Draft. A Central a mostra como **Draft com pré-condição**, distinta de pronta e de Draft comum (migration 0006, evento `mr.precondicao`). O texto só aparece enquanto o estado é `draft`; o mesmo texto de novo não gera evento. |
 | `orq pend importar <arquivo>` | Importa o arquivo de pendência (veja [Pendências com contexto](#pendências-com-contexto-e-resposta-pela-web)), como o daemon faz a cada 5 s; para quando o daemon está parado. |
@@ -347,7 +349,7 @@ Exemplo, a onda do colaboradados:
 orq coord registrar colaboradados --projeto colaboradados
 orq onda criar "Melhorias da noite" --us 215,216,217,218 --ordem estrita --depende 216:215
 orq onda proxima          # TG-215
-orq us status TG-215 exec --pane wB:p3 --papel implementacao --rodada 1
+orq us status TG-215 exec --pane wB:p3 --papel implementacao --rodada 1 --modelo claude-sonnet-5-5 --esforco medium
 orq pend add TG-215 --tipo autorizacao "aplicar a migration no banco de homologação"   # TG-215#P1
 orq mr add TG-215 https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_requests/41
 orq us status TG-215 done
