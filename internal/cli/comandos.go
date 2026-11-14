@@ -299,7 +299,7 @@ func ondaID(s string) (int64, error) {
 
 func (a *App) usCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "us", Short: "Atualiza o status das US"}
-	var pane, papel string
+	var pane, papel, modelo, esforco string
 	var rodada int
 	var forcar bool
 	status := &cobra.Command{
@@ -330,6 +330,12 @@ func (a *App) usCmd() *cobra.Command {
 			if cmd.Flags().Changed("rodada") {
 				m.Rodada = &rodada
 			}
+			if cmd.Flags().Changed("modelo") {
+				m.Modelo = &modelo
+			}
+			if cmd.Flags().Changed("esforco") {
+				m.Esforco = &esforco
+			}
 			u, alterada, err := st.AtualizarStatus(ctx, coord, ref, m)
 			if err != nil {
 				return err
@@ -354,6 +360,8 @@ func (a *App) usCmd() *cobra.Command {
 	status.Flags().StringVar(&pane, "pane", "", "pane do Herdr que conduz a US agora")
 	status.Flags().StringVar(&papel, "papel", "", "papel do pane: planejamento, implementacao ou revisao")
 	status.Flags().IntVar(&rodada, "rodada", 0, "rodada corrente (1, 2…)")
+	status.Flags().StringVar(&modelo, "modelo", "", "id do modelo do pane, ex. claude-fable-5-2")
+	status.Flags().StringVar(&esforco, "esforco", "", "esforço do pane, ex. medium")
 	status.Flags().BoolVar(&forcar, "forcar", false, "permite sair de done")
 	cmd.AddCommand(status)
 	return cmd

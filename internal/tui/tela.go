@@ -75,6 +75,8 @@ type paleta struct {
 	faixa, zebra, selecao, bloqueada, borda                       color.Color
 	// tons são os do título da onda, um por projeto (corDoProjeto), legíveis sobre faixa.
 	tons [8]color.Color
+	// marcas é a cor da marca de cada família de modelo (selo do modelo), por FamiliaModelo.Chave.
+	marcas map[string]color.Color
 }
 
 var (
@@ -86,6 +88,7 @@ var (
 		bloqueada: lipgloss.Color("#4a2a30"), borda: lipgloss.Color("#4b5263"),
 		tons: tonsProjeto(
 			"#61afef", "#e5c07b", "#e07bd6", "#98c379", "#ff9e4a", "#4fd6e0", "#b497ff", "#9fb3c8"),
+		marcas: marcasModelo("#e08b6b", "#3fc29b", "#6f8bff", "#6f8cff", "#4aa3ff", "#a98fe0"),
 	}
 	clara = paleta{
 		vermelho: lipgloss.Color("#e45649"), verde: lipgloss.Color("#50a14f"), amarelo: lipgloss.Color("#b07d00"),
@@ -95,8 +98,19 @@ var (
 		bloqueada: lipgloss.Color("#fbe1e3"), borda: lipgloss.Color("#c5c8cf"),
 		tons: tonsProjeto(
 			"#1f5fd6", "#8a6200", "#a3239a", "#3f7d1f", "#b04a00", "#00798a", "#6b3fd1", "#4f6478"),
+		marcas: marcasModelo("#b94f2c", "#0b7d62", "#2f49d1", "#2744c8", "#0c63c9", "#6a4aa8"),
 	}
 )
+
+// marcasModelo liga as cores às famílias na ordem de central.FamiliaDe: Claude, GPT, DeepSeek,
+// GLM, Kimi e Gemini. São aproximações das cores das marcas, ajustadas para ler sobre o fundo
+// de cada tema.
+func marcasModelo(claude, gpt, deepseek, glm, kimi, gemini string) map[string]color.Color {
+	return map[string]color.Color{
+		"claude": lipgloss.Color(claude), "gpt": lipgloss.Color(gpt), "deepseek": lipgloss.Color(deepseek),
+		"glm": lipgloss.Color(glm), "kimi": lipgloss.Color(kimi), "gemini": lipgloss.Color(gemini),
+	}
+}
 
 // Os tons dos projetos, na mesma ordem nos dois temas: azul, amarelo, magenta, verde, laranja,
 // ciano, lilás e ardósia. Os primeiros são os mais distintos entre si, porque são os que mais
@@ -522,15 +536,54 @@ func tituloTexto(u central.US) string {
 
 func refTexto(u central.US) string { return "#" + strconv.Itoa(u.Ref) }
 
-func statusTexto(u central.US) string {
+// statusBase é o status com a rodada (`Rev r2`).
+func statusBase(u central.US) string {
 	s := rotulo(rotuloStatus, u.Status)
 	if u.Rodada != nil {
 		s += " r" + strconv.Itoa(*u.Rodada)
+	}
+	return s
+}
+
+// statusTexto é o que a coluna de status mostra sem estilo: status e rodada, o selo do modelo
+// (`[C] fable-5-2 medium`) e, com pane, a seta que leva a ele.
+func statusTexto(u central.US) string {
+	s := statusBase(u)
+	if m := modeloTexto(u); m != "" {
+		s += "  " + m
 	}
 	if u.PaneID != nil {
 		s += " ↗"
 	}
 	return s
+}
+
+// modeloTexto é o selo e o modelo sem estilo, `[C] fable-5-2 medium`; família desconhecida
+// sai só com o texto. Vazio quando a US não tem modelo registrado.
+func modeloTexto(u central.US) string {
+	if u.Modelo == nil || *u.Modelo == "" {
+		return ""
+	}
+	t := limpar(central.RotuloModelo(*u.Modelo, u.Esforco))
+	if f, ok := central.FamiliaDe(*u.Modelo); ok {
+		return "[" + f.Letra + "] " + t
+	}
+	return t
+}
+
+// modelo desenha o selo da família (letra entre colchetes na cor da marca, em negrito) e o
+// modelo curto com o esforço, apagados.
+func (e Estilos) modelo(u central.US) string {
+	if modeloTexto(u) == "" {
+		return ""
+	}
+	t := limpar(central.RotuloModelo(*u.Modelo, u.Esforco))
+	f, ok := central.FamiliaDe(*u.Modelo)
+	if !ok {
+		return e.apagado(t)
+	}
+	selo := e.novo().Foreground(e.p().marcas[f.Chave]).Bold(true).Render("[" + f.Letra + "]")
+	return selo + " " + e.cor(e.p().cinza, t)
 }
 
 func (e Estilos) coordenador(c central.CoordSnapshot, abertas []central.Pendencia, cu colsUS, cp colsPend, bloco int, o Opcoes) []Linha {
@@ -749,7 +802,15 @@ func (e Estilos) tabelaUS(us []central.US, l colsUS, o Opcoes) []Linha {
 		if blk {
 			stEstilo = e.novo().Foreground(p.vermelho).Bold(true)
 		}
-		status := linkPane(pane, stEstilo.Render(cortar(statusTexto(u), l.status)))
+		// Sem modelo, o status e a seta saem num trecho só; com ele, o selo fica entre os dois.
+		st := stEstilo.Render(statusTexto(u))
+		if m := e.modelo(u); m != "" {
+			st = stEstilo.Render(statusBase(u)) + "  " + m
+			if u.PaneID != nil {
+				st += stEstilo.Render(" ↗")
+			}
+		}
+		status := linkPane(pane, cortar(st, l.status))
 		// Com erro na última consulta ao Taiga, o título é o último bom e uma marca apagada no
 		// fim diz que a consulta mais recente falhou.
 		tw := l.titulo

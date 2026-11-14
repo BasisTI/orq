@@ -76,6 +76,20 @@ func Resumo(c central.CoordSnapshot) string {
 	return cortar(s, LimiteToken)
 }
 
+// ModeloToken é o token orq do pane de uma US: o selo da família e o modelo curto, ex.
+// `[C] fable-5-2`. O Herdr guarda o token como texto puro (o `--token NOME=VALOR` não aceita
+// cor), então o selo vai sem cor. Família desconhecida sai só com o modelo; sem modelo, vazio.
+func ModeloToken(u central.US) string {
+	if u.Modelo == nil || *u.Modelo == "" {
+		return ""
+	}
+	s := central.ModeloCurto(*u.Modelo)
+	if f, ok := central.FamiliaDe(*u.Modelo); ok {
+		s = "[" + f.Letra + "] " + s
+	}
+	return cortar(s, LimiteToken)
+}
+
 // RefsProntas devolve as refs curtas das MRs pronta das ondas abertas do coordenador: `!32`
 // no GitLab e `repo#29` no GitHub.
 func RefsProntas(c central.CoordSnapshot) []string {
@@ -171,6 +185,25 @@ func (e *Enriquecedor) PublicarTokens(ctx context.Context) (ResultadoTokens, err
 					desejados[chaveToken{"pane", *c.PaneID, TokenResumo}] = r
 				}
 				ws = p.WorkspaceID
+			}
+		}
+		// O pane de cada US em andamento mostra o modelo que o conduz. O pane do coordenador
+		// fica com o resumo, e a primeira US de um pane compartilhado vence.
+		for _, o := range c.Ondas {
+			for _, u := range o.US {
+				if u.PaneID == nil || u.Status == "done" {
+					continue
+				}
+				k := chaveToken{"pane", *u.PaneID, TokenResumo}
+				if _, ok := sessao.Panes[*u.PaneID]; !ok {
+					continue
+				}
+				if _, tem := desejados[k]; tem {
+					continue
+				}
+				if v := ModeloToken(u); v != "" {
+					desejados[k] = v
+				}
 			}
 		}
 		if c.WorkspaceID != nil {

@@ -61,6 +61,30 @@ type AgenteVista struct {
 	Vencido           bool
 }
 
+// ModeloVista é o modelo do pane da US: o ícone da família (vazio para família desconhecida,
+// que sai só como texto), o modelo curto com o esforço e o title com o id inteiro.
+type ModeloVista struct {
+	Familia string // chave da família ("claude"), que escolhe o ícone e a cor; vazio se desconhecida
+	Texto   string // "fable-5-2 medium"
+	Title   string // "Claude · claude-fable-5-2 · esforço medium"
+}
+
+// modeloDe monta o selo do modelo; sem modelo registrado devolve o valor zero (nada na tela).
+func modeloDe(u central.US) ModeloVista {
+	if u.Modelo == nil || *u.Modelo == "" {
+		return ModeloVista{}
+	}
+	m := ModeloVista{Texto: central.RotuloModelo(*u.Modelo, u.Esforco), Title: "modelo: " + *u.Modelo}
+	if f, ok := central.FamiliaDe(*u.Modelo); ok {
+		m.Familia = f.Chave
+		m.Title = f.Nome + " · " + *u.Modelo
+	}
+	if u.Esforco != nil && *u.Esforco != "" {
+		m.Title += " · esforço " + *u.Esforco
+	}
+	return m
+}
+
 // MRVista é uma MR dentro da US.
 type MRVista struct {
 	URL, Rotulo, Caminho string
@@ -82,6 +106,7 @@ type USVista struct {
 	ID, Anchor, Titulo string
 	Status             Selo
 	Agente             AgenteVista
+	Modelo             ModeloVista
 	TaigaStatus        string
 	TaigaURL           string
 	TaigaIdade         string
@@ -484,7 +509,7 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]string, agora time.Time) USVista {
 	uv := USVista{
 		ID: u.ID, Anchor: "us-" + u.Projeto + "-" + strconv.Itoa(u.Ref), Projeto: ProjetoTag{Slug: u.Projeto, Tom: tons[u.Projeto]},
-		Agente: agenteDe(u.Herdr, agora), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
+		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
 	}
 	if s, ok := statusUS[u.Status]; ok {
 		uv.Status = s

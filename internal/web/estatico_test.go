@@ -16,6 +16,7 @@ var arquivosEstaticos = []string{
 	"app.js",
 	"fontes/LICENSE-carlito.txt",
 	"fontes/LICENSE-inter-tight.txt",
+	"fontes/LICENSE-lobehub-icons.txt",
 	"fontes/carlito-latin-400-normal.woff2",
 	"fontes/carlito-latin-700-normal.woff2",
 	"fontes/inter-tight-latin-600-normal.woff2",
@@ -117,7 +118,7 @@ func TestPaginaReferenciaOsEstaticosComHashEServeComCacheCerto(t *testing.T) {
 	for _, c := range []struct{ caminho, tipo string }{
 		{"app.css", "text/css"}, {"htmx.min.js", "text/javascript"}, {"app.js", "text/javascript"},
 		{"fontes/carlito-latin-400-normal.woff2", "font/woff2"}, {"orq-icon-64.png", "image/png"}, {"orq-banner-light.png", "image/png"},
-		{"fontes/LICENSE-carlito.txt", "text/plain"},
+		{"fontes/LICENSE-carlito.txt", "text/plain"}, {"fontes/LICENSE-lobehub-icons.txt", "text/plain"},
 	} {
 		w := f.faz(req{metodo: "GET", caminho: "/estatico/" + c.caminho})
 		if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), c.tipo) {

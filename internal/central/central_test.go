@@ -728,7 +728,7 @@ func TestSnapshot(t *testing.T) {
 		{"coordenador", coordJ, "herdr,nome,ondas,pane_id,projeto_padrao,registrado_em,workspace_id"},
 		{"herdr", coordJ["herdr"], "agente,atualizado_em,erro,nome,status,workspace_id"},
 		{"onda", ondaJ, "autorizacao_ate,coordenador,criada_em,encerrada_em,id,ordem,titulo,us"},
-		{"us", usJ, "atualizado_em,chave,depende_de,herdr,id,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status,taiga"},
+		{"us", usJ, "atualizado_em,chave,depende_de,esforco,herdr,id,modelo,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status,taiga"},
 		{"taiga", usJ["taiga"], "atualizado_em,erro,status,titulo,url"},
 		{"pendencia", pendJ, "aberta,aberta_em,arquivo,arquivo_alterado,autor,avisada_em,chave,coordenador,estado,id,numero,onda_id,opcoes,pane_origem,resolvida_em,respondida_em,respondida_por,resposta,resposta_opcao,resposta_versao,sem_coordenador,slug,tem_detalhe,texto,tipo,us"},
 	}

@@ -21,3 +21,6 @@ for f in inter-tight-latin-600-normal inter-tight-latin-700-normal; do
 done
 cp node_modules/@fontsource/carlito/LICENSE ../estatico/fontes/LICENSE-carlito.txt
 cp node_modules/@fontsource/inter-tight/LICENSE ../estatico/fontes/LICENSE-inter-tight.txt
+# estatico/fontes/LICENSE-lobehub-icons.txt (MIT do LobeHub, dos ícones das famílias de modelo no
+# sprite de base.html) é versionado à mão: o pacote npm dos ícones não traz o LICENSE, que vem do
+# repositório upstream (github.com/lobehub/lobe-icons). O build não o regenera nem o apaga.
