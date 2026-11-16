@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -19,27 +20,36 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func falso(t *testing.T, estado string) *exec.Cmd {
+// Cada processo filho tem um único Wait, numa goroutine do helper: dois Wait no mesmo exec.Cmd
+// são uma corrida de dados. O teste espera pelo canal devolvido; o Cleanup mata e espera o mesmo
+// canal, sem chamar Wait de novo.
+func esperar(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+	return done
+}
+
+func falso(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "daemon")
 	cmd.Env = append(os.Environ(), "ORQ_SEMDAEMON_FILHO=1", "ORQ_STATE_DIR="+estado)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	return cmd
+	return cmd, esperar(t, cmd)
 }
 
 // shellQueIgnoraTerm é um sh que ignora SIGTERM e só tem a raiz na linha de comando, como o
 // processo falso do teste do upgrade.
-func shellQueIgnoraTerm(t *testing.T, estado string) *exec.Cmd {
+func shellQueIgnoraTerm(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", `trap "" TERM; while :; do sleep 0.1; done`, estado)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	return cmd
+	return cmd, esperar(t, cmd)
 }
 
 func raizPrivada(t *testing.T) string {
@@ -52,15 +62,29 @@ func raizPrivada(t *testing.T) string {
 	return raiz
 }
 
+// paiDe lê o PPID de /proc/<pid>/stat (0 se o processo já sumiu).
+func paiDe(pid int) int {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0
+	}
+	// O comm vem entre parênteses e pode ter espaços: o resto começa depois do último ')'.
+	i := strings.LastIndexByte(string(b), ')')
+	campos := strings.Fields(string(b)[i+1:])
+	if i < 0 || len(campos) < 2 {
+		return 0
+	}
+	ppid, _ := strconv.Atoi(campos[1])
+	return ppid
+}
+
 func vivo(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 // O teste que deixa um daemon vivo é achado, nomeado e encerrado.
 func TestAcharEEncerrarDaemonDeixadoDeProposito(t *testing.T) {
 	raiz := raizPrivada(t)
 	estado := filepath.Join(raiz, "TestQueVaza123", "001", "estado")
-	cmd := falso(t, estado)
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	cmd, done := falso(t, estado)
 
 	vazados := Encerrar(raiz)
 	if len(vazados) != 1 || vazados[0].PID != cmd.Process.Pid || vazados[0].Teste != "TestQueVaza" || vazados[0].Caminho != estado {
@@ -82,7 +106,7 @@ func TestAcharEEncerrarDaemonDeixadoDeProposito(t *testing.T) {
 // Daemon fora da raiz (o real, o de outro pacote) e processo que não é `daemon` ficam em paz.
 func TestIgnoraProcessoForaDaRaiz(t *testing.T) {
 	raiz := raizPrivada(t)
-	fora := falso(t, filepath.Join(t.TempDir(), "estado"))
+	fora, _ := falso(t, filepath.Join(t.TempDir(), "estado"))
 	if v := Procurar(raiz); len(v) != 0 {
 		t.Fatalf("achou %+v", v)
 	}
@@ -105,12 +129,25 @@ func TestEncerraShellQueIgnoraTerm(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(raiz)
-	cmd := shellQueIgnoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	cmd, done := shellQueIgnoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
 
 	vazados := Encerrar(raiz)
-	if len(vazados) != 1 || vazados[0].PID != cmd.Process.Pid || vazados[0].Teste != "TestDoShell" {
+	// O sh faz fork do `sleep` a cada volta, e o filho tem a linha de comando do pai até o exec:
+	// uma varredura que cai nessa janela vê um segundo processo, que é filho do shell. O shell
+	// tem de aparecer exatamente uma vez, e nada além dele e dos seus filhos.
+	achou := 0
+	for _, v := range vazados {
+		switch {
+		case v.PID == cmd.Process.Pid:
+			achou++
+			if v.Teste != "TestDoShell" {
+				t.Errorf("teste = %q", v.Teste)
+			}
+		case paiDe(v.PID) != cmd.Process.Pid:
+			t.Errorf("processo estranho entre os vazados: %+v", v)
+		}
+	}
+	if achou != 1 {
 		t.Fatalf("vazados = %+v", vazados)
 	}
 	select {
@@ -215,9 +252,7 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 	if err := os.MkdirAll(estado, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := falso(t, estado)
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	_, done := falso(t, estado)
 	for i := 0; i < 100 && len(procurar(filepath.Join(raiz, "casa"))) == 0; i++ {
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -227,7 +262,6 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 	if v := procurar(filepath.Join(raiz, "casa")); len(v) != 0 {
 		t.Fatalf("ainda vivo: %+v", v)
 	}
-	// Um só Wait (o do Cleanup de falso só roda depois deste canal).
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
