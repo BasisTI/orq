@@ -3,6 +3,7 @@ package semdaemon
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -12,34 +13,64 @@ import (
 
 // Com ORQ_SEMDAEMON_FILHO, o binário de teste faz o papel de um `orq daemon` que não sai.
 func TestMain(m *testing.M) {
-	if os.Getenv("ORQ_SEMDAEMON_FILHO") == "1" {
+	switch os.Getenv("ORQ_SEMDAEMON_FILHO") {
+	case "1":
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	case "ignora":
+		// Ignora SIGTERM sem gerar filho (o runtime do Go não faz fork) e só avisa que está pronto
+		// depois de instalar o Ignore, para o teste não mandar o SIGTERM antes.
+		signal.Ignore(syscall.SIGTERM)
+		if err := os.WriteFile(os.Getenv("ORQ_SEMDAEMON_PRONTO"), nil, 0o600); err != nil {
+			os.Exit(2)
+		}
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
 
-func falso(t *testing.T, estado string) *exec.Cmd {
+// Cada processo filho tem um único Wait, numa goroutine do helper: dois Wait no mesmo exec.Cmd
+// são uma corrida de dados. O teste espera pelo canal devolvido; o Cleanup mata e espera o mesmo
+// canal, sem chamar Wait de novo.
+func esperar(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+	return done
+}
+
+func falso(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "daemon")
 	cmd.Env = append(os.Environ(), "ORQ_SEMDAEMON_FILHO=1", "ORQ_STATE_DIR="+estado)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	return cmd
+	return cmd, esperar(t, cmd)
 }
 
-// shellQueIgnoraTerm é um sh que ignora SIGTERM e só tem a raiz na linha de comando, como o
-// processo falso do teste do upgrade.
-func shellQueIgnoraTerm(t *testing.T, estado string) *exec.Cmd {
+// ignoraTerm é o binário de teste reexecutado como um processo que ignora SIGTERM, não gera
+// filhos e só devolve depois de avisar que está pronto. O estado vai como argumento, que é onde
+// a varredura o acha, como no processo falso do teste do upgrade.
+func ignoraTerm(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", `trap "" TERM; while :; do sleep 0.1; done`, estado)
+	pronto := filepath.Join(t.TempDir(), "pronto")
+	cmd := exec.Command(os.Args[0], "daemon", estado)
+	cmd.Env = append(os.Environ(), "ORQ_SEMDAEMON_FILHO=ignora", "ORQ_SEMDAEMON_PRONTO="+pronto)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	return cmd
+	done := esperar(t, cmd)
+	for i := 0; i < 500; i++ {
+		if _, err := os.Stat(pronto); err == nil {
+			return cmd, done
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("o processo que ignora SIGTERM não ficou pronto")
+	return nil, nil
 }
 
 func raizPrivada(t *testing.T) string {
@@ -58,9 +89,7 @@ func vivo(pid int) bool { return syscall.Kill(pid, 0) == nil }
 func TestAcharEEncerrarDaemonDeixadoDeProposito(t *testing.T) {
 	raiz := raizPrivada(t)
 	estado := filepath.Join(raiz, "TestQueVaza123", "001", "estado")
-	cmd := falso(t, estado)
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	cmd, done := falso(t, estado)
 
 	vazados := Encerrar(raiz)
 	if len(vazados) != 1 || vazados[0].PID != cmd.Process.Pid || vazados[0].Teste != "TestQueVaza" || vazados[0].Caminho != estado {
@@ -82,7 +111,7 @@ func TestAcharEEncerrarDaemonDeixadoDeProposito(t *testing.T) {
 // Daemon fora da raiz (o real, o de outro pacote) e processo que não é `daemon` ficam em paz.
 func TestIgnoraProcessoForaDaRaiz(t *testing.T) {
 	raiz := raizPrivada(t)
-	fora := falso(t, filepath.Join(t.TempDir(), "estado"))
+	fora, _ := falso(t, filepath.Join(t.TempDir(), "estado"))
 	if v := Procurar(raiz); len(v) != 0 {
 		t.Fatalf("achou %+v", v)
 	}
@@ -99,15 +128,14 @@ func TestSobNaoCasaPrefixoDeNome(t *testing.T) {
 }
 
 // Qualquer processo do mesmo UID preso à raiz é achado, e o que ignora SIGTERM leva SIGKILL.
+// O processo não tem filhos: o shell com `sleep` expunha, na varredura, o filho entre fork e exec.
 func TestEncerraShellQueIgnoraTerm(t *testing.T) {
 	raiz, err := novaRaiz()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(raiz)
-	cmd := shellQueIgnoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	cmd, done := ignoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
 
 	vazados := Encerrar(raiz)
 	if len(vazados) != 1 || vazados[0].PID != cmd.Process.Pid || vazados[0].Teste != "TestDoShell" {
@@ -215,9 +243,7 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 	if err := os.MkdirAll(estado, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := falso(t, estado)
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	_, done := falso(t, estado)
 	for i := 0; i < 100 && len(procurar(filepath.Join(raiz, "casa"))) == 0; i++ {
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -227,7 +253,6 @@ func TestPararEsperaOProcessoSumir(t *testing.T) {
 	if v := procurar(filepath.Join(raiz, "casa")); len(v) != 0 {
 		t.Fatalf("ainda vivo: %+v", v)
 	}
-	// Um só Wait (o do Cleanup de falso só roda depois deste canal).
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
