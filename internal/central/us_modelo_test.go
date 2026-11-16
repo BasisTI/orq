@@ -65,7 +65,7 @@ func TestStatusRecusaModeloInvalido(t *testing.T) {
 	ctx := context.Background()
 	a := coord(t, s, "a", "w1:p1", "proj")
 	onda(t, s, a, NovaOnda{Titulo: "o", US: []refs.US{us(t, "1")}})
-	for _, v := range []string{"", "  ", "com espaço", "tab\tx", "ctl\x1b[31m", strings.Repeat("x", LimiteModelo+1)} {
+	for _, v := range []string{"", "  ", "com espaço", "tab\tx", "nbsp\u00a0x", "ideo\u3000x", "em\u2003x", "nl\nx", "ctl\x1b[31m", strings.Repeat("x", LimiteModelo+1)} {
 		v := v
 		for nome, m := range map[string]MudancaStatus{"modelo": {Status: "exec", Modelo: &v}, "esforco": {Status: "exec", Esforco: &v}} {
 			if _, _, err := s.AtualizarStatus(ctx, &a, us(t, "1"), m); codigo(err) != "uso" {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/BasisTI/orq/internal/output"
@@ -199,7 +200,7 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		if v == nil {
 			continue
 		}
-		if strings.TrimSpace(*v) == "" || temControle(*v) || strings.ContainsAny(*v, " \t") || utf8.RuneCountInString(*v) > LimiteModelo {
+		if strings.TrimSpace(*v) == "" || temControle(*v) || strings.ContainsFunc(*v, unicode.IsSpace) || utf8.RuneCountInString(*v) > LimiteModelo {
 			return US{}, false, uso(fmt.Sprintf("%s inválido", nome), fmt.Sprintf("use uma palavra sem espaço nem caractere de controle, de até %d caracteres", LimiteModelo))
 		}
 	}
