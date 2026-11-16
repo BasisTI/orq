@@ -3,8 +3,8 @@ package semdaemon
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,7 +13,17 @@ import (
 
 // Com ORQ_SEMDAEMON_FILHO, o binário de teste faz o papel de um `orq daemon` que não sai.
 func TestMain(m *testing.M) {
-	if os.Getenv("ORQ_SEMDAEMON_FILHO") == "1" {
+	switch os.Getenv("ORQ_SEMDAEMON_FILHO") {
+	case "1":
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	case "ignora":
+		// Ignora SIGTERM sem gerar filho (o runtime do Go não faz fork) e só avisa que está pronto
+		// depois de instalar o Ignore, para o teste não mandar o SIGTERM antes.
+		signal.Ignore(syscall.SIGTERM)
+		if err := os.WriteFile(os.Getenv("ORQ_SEMDAEMON_PRONTO"), nil, 0o600); err != nil {
+			os.Exit(2)
+		}
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
@@ -41,15 +51,26 @@ func falso(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	return cmd, esperar(t, cmd)
 }
 
-// shellQueIgnoraTerm é um sh que ignora SIGTERM e só tem a raiz na linha de comando, como o
-// processo falso do teste do upgrade.
-func shellQueIgnoraTerm(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
+// ignoraTerm é o binário de teste reexecutado como um processo que ignora SIGTERM, não gera
+// filhos e só devolve depois de avisar que está pronto. O estado vai como argumento, que é onde
+// a varredura o acha, como no processo falso do teste do upgrade.
+func ignoraTerm(t *testing.T, estado string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", `trap "" TERM; while :; do sleep 0.1; done`, estado)
+	pronto := filepath.Join(t.TempDir(), "pronto")
+	cmd := exec.Command(os.Args[0], "daemon", estado)
+	cmd.Env = append(os.Environ(), "ORQ_SEMDAEMON_FILHO=ignora", "ORQ_SEMDAEMON_PRONTO="+pronto)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	return cmd, esperar(t, cmd)
+	done := esperar(t, cmd)
+	for i := 0; i < 500; i++ {
+		if _, err := os.Stat(pronto); err == nil {
+			return cmd, done
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("o processo que ignora SIGTERM não ficou pronto")
+	return nil, nil
 }
 
 func raizPrivada(t *testing.T) string {
@@ -60,22 +81,6 @@ func raizPrivada(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(raiz) })
 	return raiz
-}
-
-// paiDe lê o PPID de /proc/<pid>/stat (0 se o processo já sumiu).
-func paiDe(pid int) int {
-	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		return 0
-	}
-	// O comm vem entre parênteses e pode ter espaços: o resto começa depois do último ')'.
-	i := strings.LastIndexByte(string(b), ')')
-	campos := strings.Fields(string(b)[i+1:])
-	if i < 0 || len(campos) < 2 {
-		return 0
-	}
-	ppid, _ := strconv.Atoi(campos[1])
-	return ppid
 }
 
 func vivo(pid int) bool { return syscall.Kill(pid, 0) == nil }
@@ -123,31 +128,17 @@ func TestSobNaoCasaPrefixoDeNome(t *testing.T) {
 }
 
 // Qualquer processo do mesmo UID preso à raiz é achado, e o que ignora SIGTERM leva SIGKILL.
+// O processo não tem filhos: o shell com `sleep` expunha, na varredura, o filho entre fork e exec.
 func TestEncerraShellQueIgnoraTerm(t *testing.T) {
 	raiz, err := novaRaiz()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(raiz)
-	cmd, done := shellQueIgnoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
+	cmd, done := ignoraTerm(t, filepath.Join(raiz, "TestDoShell42", "001", "estado"))
 
 	vazados := Encerrar(raiz)
-	// O sh faz fork do `sleep` a cada volta, e o filho tem a linha de comando do pai até o exec:
-	// uma varredura que cai nessa janela vê um segundo processo, que é filho do shell. O shell
-	// tem de aparecer exatamente uma vez, e nada além dele e dos seus filhos.
-	achou := 0
-	for _, v := range vazados {
-		switch {
-		case v.PID == cmd.Process.Pid:
-			achou++
-			if v.Teste != "TestDoShell" {
-				t.Errorf("teste = %q", v.Teste)
-			}
-		case paiDe(v.PID) != cmd.Process.Pid:
-			t.Errorf("processo estranho entre os vazados: %+v", v)
-		}
-	}
-	if achou != 1 {
+	if len(vazados) != 1 || vazados[0].PID != cmd.Process.Pid || vazados[0].Teste != "TestDoShell" {
 		t.Fatalf("vazados = %+v", vazados)
 	}
 	select {
