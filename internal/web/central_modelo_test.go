@@ -19,7 +19,7 @@ func TestCentralModeloDoPane(t *testing.T) {
 			[]string{`class="modelo modelo-claude"`, `<use href="#m-claude"/>`, "fable-5-2 medium", `title="Claude · claude-fable-5-2 · esforço medium"`, "<dt>Modelo</dt>"}, nil},
 		{"gpt sem esforço", "gpt-5.5", "", []string{`modelo-gpt`, `<use href="#m-gpt"/>`, "gpt-5.5<", `title="GPT · gpt-5.5"`}, []string{"esforço"}},
 		{"desconhecido", "llama-4", "high", []string{`class="modelo"`, "llama-4 high", `title="modelo: llama-4 · esforço high"`}, []string{`<use href="#m-llama`, "modelo-llama"}},
-		{"sem modelo", "", "", nil, []string{`class="modelo`, "<dt>Modelo</dt>"}},
+		{"sem modelo", "", "", []string{` hidden><dt>Modelo</dt>`}, []string{`class="modelo`}},
 	}
 	for _, k := range casos {
 		c := vazia(t, false)
@@ -55,5 +55,35 @@ func TestSpriteTemOsIconesDasFamilias(t *testing.T) {
 	_, html := c.get("/")
 	for _, f := range []string{"claude", "gpt", "deepseek", "glm", "kimi", "gemini"} {
 		contem(t, html, `<symbol id="m-`+f+`"`)
+	}
+}
+
+// Trocar o modelo da US com a página aberta atualiza também a linha "Modelo" do corpo do
+// card, e a linha nasce no lugar quando antes não havia modelo (orq #89).
+func TestVivoTrocaOModeloNoCorpoDoCard(t *testing.T) {
+	c := vazia(t, false)
+	co, _ := c.coord("alfa", "wA:p1", "proj", 7, "")
+	u := refs.US{Projeto: "proj", Ref: 7}
+	pane := "wA:p2"
+	_, _, err := c.st.AtualizarStatus(c.ctx, &co, u, central.MudancaStatus{Status: "exec", Pane: &pane})
+	c.ok(err)
+	_, pagina := c.get("/")
+	contem(t, pagina, ` hidden><dt>Modelo</dt>`)
+	q := queryDaPagina(t, c, "/")
+
+	for _, k := range []struct{ modelo, quer string }{{"claude-fable-5-2", "fable-5-2"}, {"gpt-5.5", "gpt-5.5"}} {
+		m := k.modelo
+		_, _, err = c.st.AtualizarStatus(c.ctx, &co, u, central.MudancaStatus{Status: "exec", Modelo: &m})
+		c.ok(err)
+		_, html, _ := c.vivo(q, "/")
+		i := strings.Index(html, `-modelo"`)
+		if i < 0 {
+			t.Fatalf("%s: o /vivo não trouxe o campo Modelo do corpo:\n%s", m, html)
+		}
+		i = strings.LastIndex(html[:i], "<div")
+		campo := html[i : i+strings.Index(html[i:], "</dd>")]
+		if !strings.Contains(campo, `hx-swap-oob="true"`) || !strings.Contains(campo, k.quer) || strings.Contains(campo, `" hidden>`) || strings.Contains(campo, "\" hidden><dt>") {
+			t.Errorf("%s: campo = %s", m, campo)
+		}
 	}
 }

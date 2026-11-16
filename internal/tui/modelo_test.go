@@ -95,3 +95,31 @@ func TestModeloLimpaControlesDoTexto(t *testing.T) {
 		t.Errorf("controle do modelo chegou ao terminal: %q", got)
 	}
 }
+
+// Modelo longo não leva embora o título nem as colunas à direita: a coluna de status cede
+// ao orçamento e o modelo é truncado dentro dela (orq #89).
+func TestModeloLongoNaoEliminaColunas(t *testing.T) {
+	longo := "claude-" + strings.Repeat("x", 73)
+	for _, l := range []int{80, 100, 120} {
+		linhas := planas(cores.Desenhar(comModelo(longo, "medium"), Opcoes{Coord: "convey", Largura: l, Agora: agora}))
+		achou := false
+		for i, ln := range linhas {
+			if w := ansi.StringWidth(ln); w > l {
+				t.Errorf("largura %d, linha %d com %d colunas", l, i, w)
+			}
+			if !strings.Contains(ln, "Rev r2") {
+				continue
+			}
+			achou = true
+			if !strings.Contains(ln, "sgo jql") {
+				t.Errorf("largura %d: o título sumiu: %s", l, ln)
+			}
+			if !strings.Contains(ln, "sgo-") || !strings.HasSuffix(strings.TrimRight(ln, " "), "│") {
+				t.Errorf("largura %d: MR ou borda direita sumiu: %s", l, ln)
+			}
+		}
+		if !achou {
+			t.Errorf("largura %d: linha da US 312 não achada", l)
+		}
+	}
+}
