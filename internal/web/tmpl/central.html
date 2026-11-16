@@ -29,6 +29,8 @@
 
 {{define "us-mrs"}}<div id="{{.Anchor}}-mrs"{{if .Oob}} hx-swap-oob="true"{{end}}>{{if .MRs}}<ul class="mrs">{{range .MRs}}{{template "c-mr" .}}{{end}}</ul>{{else}}<p class="vazio-linha">Nenhuma MR ligada a esta US.</p>{{end}}</div>{{end}}
 
+{{define "us-modelo"}}<div id="{{.Anchor}}-modelo"{{if .Oob}} hx-swap-oob="true"{{end}}{{if not .Modelo.Texto}} hidden{{end}}><dt>Modelo</dt><dd>{{template "modelo" .Modelo}}</dd></div>{{end}}
+
 {{define "us-vazio"}}<p id="{{.Anchor}}-vazio" class="vazio-linha"{{if .Pendencias}} hidden{{end}}{{if .Oob}} hx-swap-oob="true"{{end}}>Nenhuma pendência.</p>{{end}}
 
 {{define "c-us"}}<details class="us" id="{{.Anchor}}">{{template "us-barra" .}}
@@ -38,7 +40,7 @@
 <div><dt>Projeto</dt><dd>{{template "proj" .Projeto}}</dd></div>
 <div><dt>Depende de</dt><dd>{{range .Dependencias}}<span class="dep">{{.}}</span> {{else}}<span class="apagado">nenhuma</span>{{end}}</dd></div>
 {{if .Papel}}<div><dt>Papel</dt><dd>{{.Papel}}</dd></div>{{end}}
-{{if .Modelo.Texto}}<div><dt>Modelo</dt><dd>{{template "modelo" .Modelo}}</dd></div>{{end}}
+{{template "us-modelo" .}}
 </dl>
 <h3 class="sec">Merge requests</h3>
 {{template "us-mrs" .}}
@@ -114,6 +116,6 @@
 {{define "vivo"}}{{template "situacao" .Situacao}}
 {{template "fontes" .}}
 {{range .Abas}}{{template "aba-n" .}}{{end}}
-{{range .Ondas}}{{template "onda-barra" .}}{{template "onda-epicos" .}}{{range .US}}{{template "us-barra" .}}{{template "us-taiga" .}}{{template "us-mrs" .}}{{template "us-vazio" .}}{{range .PendMuda}}{{template "pend-muda" .}}{{end}}{{end}}{{end}}
+{{range .Ondas}}{{template "onda-barra" .}}{{template "onda-epicos" .}}{{range .US}}{{template "us-barra" .}}{{template "us-taiga" .}}{{template "us-modelo" .}}{{template "us-mrs" .}}{{template "us-vazio" .}}{{range .PendMuda}}{{template "pend-muda" .}}{{end}}{{end}}{{end}}
 {{if not .Igual}}<div id="aviso-lista" class="aviso-lista" role="status" hx-swap-oob="true">A lista mudou. <a href="">Atualizar</a></div>
 {{end}}{{end}}

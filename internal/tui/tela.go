@@ -468,6 +468,7 @@ const (
 
 func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 	l := colsUS{ag: 1, ref: len(cabUS[1]), titulo: len(cabUS[2]), status: len(cabUS[3]), mr: len(cabUS[4])}
+	semModelo := len(cabUS[3])
 	for _, c := range cs {
 		for _, o := range c.Ondas {
 			for _, u := range o.US {
@@ -478,6 +479,12 @@ func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 				}
 				l.titulo = max(l.titulo, w)
 				l.status = max(l.status, ansi.StringWidth(statusTexto(u)))
+				// O que a coluna mostra sem o selo do modelo nunca é cortado pelo teto.
+				sm := statusBase(u)
+				if u.PaneID != nil {
+					sm += " ↗"
+				}
+				semModelo = max(semModelo, ansi.StringWidth(sm))
 				for _, m := range u.MRs {
 					l.mr = max(l.mr, larguraMR(m), larguraPrecondicao(m))
 				}
@@ -486,6 +493,10 @@ func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 	}
 	// O título ocupa o que sobra, até o mais longo da tela: num pane largo as colunas não
 	// esticam além do conteúdo. Num estreito ele encolhe primeiro; depois as MRs.
+	// A coluna de status também tem teto: um modelo longo não pode tomar o lugar do título e
+	// das MRs. O orçamento deixa o título confortável e as MRs no mínimo; o selo do modelo é
+	// truncado dentro dela.
+	l.status = max(min(l.status, largura-molduraTabela-l.ag-l.ref-tituloConfortavel-mrMinima), semModelo)
 	resto := largura - molduraTabela - l.ag - l.ref - l.status
 	if resto-l.mr < tituloConfortavel {
 		l.mr = max(min(l.mr, resto-tituloConfortavel), min(l.mr, mrMinima))
