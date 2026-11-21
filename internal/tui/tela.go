@@ -427,7 +427,7 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 	cp := colunasPend(abertas, o.Largura, o.Agora)
 	// A faixa vai de ponta a ponta do bloco: a largura da tabela mais larga, não a do terminal,
 	// para os selos não ficarem longe do nome num pane muito largo.
-	bloco := molduraTabela + cu.ag + cu.ref + cu.titulo + cu.status + cu.mr
+	bloco := cu.bloco()
 	if len(abertas) > 0 {
 		bloco = max(bloco, molduraTabela+cp.id+cp.tipo+cp.texto+cp.idade+cp.ir)
 	}
@@ -446,13 +446,23 @@ func (e Estilos) Desenhar(s central.Snapshot, o Opcoes) Tela {
 
 // Larguras do conteúdo das colunas (sem o respiro de um espaço de cada lado), iguais em toda
 // a tela para que as tabelas dos coordenadores se alinhem.
-type colsUS struct{ ag, ref, titulo, status, mr int }
+// espera é 0 quando nenhuma US da tela tem motivo de espera: a coluna some (US #100).
+type colsUS struct{ ag, ref, titulo, status, mr, espera int }
+
+// bloco é a largura da tabela de US: bordas, respiros e as colunas.
+func (l colsUS) bloco() int {
+	n := molduraTabela + l.ag + l.ref + l.titulo + l.status + l.mr
+	if l.espera > 0 {
+		n += 3 + l.espera
+	}
+	return n
+}
 
 type colsPend struct{ id, tipo, texto, idade, ir int }
 
 // Cabeçalhos das tabelas.
 var (
-	cabUS   = []string{"", "US", "título", "status", "MRs"}
+	cabUS   = []string{"", "US", "título", "status", "MRs", "espera"}
 	cabPend = []string{"id", "tipo", "texto", "idade", ""}
 )
 
@@ -464,10 +474,13 @@ const (
 	tituloConfortavel = 16
 	mrMinima          = 5
 	textoMaximo       = 96
+	esperaMaxima      = 40 // largura máxima da coluna do motivo da espera
+	esperaMinima      = 12
 )
 
 func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 	l := colsUS{ag: 1, ref: len(cabUS[1]), titulo: len(cabUS[2]), status: len(cabUS[3]), mr: len(cabUS[4])}
+	esperaLarg := 0
 	semModelo := len(cabUS[3])
 	for _, c := range cs {
 		for _, o := range c.Ondas {
@@ -488,16 +501,32 @@ func colunasUS(cs []central.CoordSnapshot, largura int) colsUS {
 				for _, m := range u.MRs {
 					l.mr = max(l.mr, larguraMR(m), larguraPrecondicao(m))
 				}
+				if t := esperaTexto(u); t != "" {
+					esperaLarg = max(esperaLarg, ansi.StringWidth(t))
+				}
 			}
 		}
+	}
+	mold := molduraTabela
+	querEspera := 0
+	if esperaLarg > 0 {
+		mold += 3 // respiro e borda da coluna a mais
+		querEspera = max(len(cabUS[5]), min(esperaLarg, esperaMaxima))
+		l.espera = min(querEspera, esperaMinima)
 	}
 	// O título ocupa o que sobra, até o mais longo da tela: num pane largo as colunas não
 	// esticam além do conteúdo. Num estreito ele encolhe primeiro; depois as MRs.
 	// A coluna de status também tem teto: um modelo longo não pode tomar o lugar do título e
 	// das MRs. O orçamento deixa o título confortável e as MRs no mínimo; o selo do modelo é
 	// truncado dentro dela.
-	l.status = max(min(l.status, largura-molduraTabela-l.ag-l.ref-tituloConfortavel-mrMinima), semModelo)
-	resto := largura - molduraTabela - l.ag - l.ref - l.status
+	l.status = max(min(l.status, largura-mold-l.ag-l.ref-l.espera-tituloConfortavel-mrMinima), semModelo)
+	if querEspera > 0 {
+		// A coluna do motivo ocupa o que sobra depois do status, das MRs e de um título confortável,
+		// sem ficar abaixo do mínimo.
+		sobra := largura - mold - l.ag - l.ref - l.status - l.mr - tituloConfortavel
+		l.espera = min(querEspera, max(esperaMinima, sobra))
+	}
+	resto := largura - mold - l.ag - l.ref - l.status - l.espera
 	if resto-l.mr < tituloConfortavel {
 		l.mr = max(min(l.mr, resto-tituloConfortavel), min(l.mr, mrMinima))
 	}
@@ -543,6 +572,14 @@ func tituloTexto(u central.US) string {
 		return limpar(*u.Taiga.Titulo)
 	}
 	return u.Chave
+}
+
+// esperaTexto é o motivo da espera sem estilo, limpo para o terminal; vazio sem motivo.
+func esperaTexto(u central.US) string {
+	if u.EsperaMotivo == nil {
+		return ""
+	}
+	return limpar(*u.EsperaMotivo)
 }
 
 func refTexto(u central.US) string { return "#" + strconv.Itoa(u.Ref) }
@@ -848,8 +885,12 @@ func (e Estilos) tabelaUS(us []central.US, l colsUS, o Opcoes) []Linha {
 			}
 		}
 		item := "us:" + u.Chave
+		cels := []string{e.icone(u), link(urlTaiga, refTexto(u)), titulo, status, strings.Join(mrs, "\n")}
+		if l.espera > 0 {
+			cels = append(cels, cortar(esperaTexto(u), l.espera))
+		}
 		rows = append(rows, celula{
-			cels:     []string{e.icone(u), link(urlTaiga, refTexto(u)), titulo, status, strings.Join(mrs, "\n")},
+			cels:     cels,
 			altura:   max(len(mrs), 1),
 			pane:     pane,
 			item:     item,
@@ -857,7 +898,11 @@ func (e Estilos) tabelaUS(us []central.US, l colsUS, o Opcoes) []Linha {
 			esmaecer: u.Status == "done" && !blk,
 		})
 	}
-	return e.grade(cabUS, []int{l.ag, l.ref, l.titulo, l.status, l.mr}, rows, o.Largura)
+	cab, larg := cabUS[:5], []int{l.ag, l.ref, l.titulo, l.status, l.mr}
+	if l.espera > 0 {
+		cab, larg = cabUS, append(larg, l.espera)
+	}
+	return e.grade(cab, larg, rows, o.Largura)
 }
 
 // tabelaPend: id | tipo | texto em até 2 linhas (corta com … depois) | idade | ↗, que foca o

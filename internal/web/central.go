@@ -249,6 +249,7 @@ var camposDoDiario = map[string][]string{
 	"onda.adicionar":          {"us", "apos", "movidas"},
 	"onda.encerrar":           {},
 	"us.status":               {"de", "para", "status", "papel", "rodada", "modelo", "modelo_antes", "esforco", "forcado", "motivo"},
+	"us.espera":               {"motivo", "motivo_antes", "limpou"},
 	"mr.add":                  {"url", "projeto_path", "iid", "iac"},
 	"mr.rm":                   {"url"},
 	"mr.estado":               {"url", "de", "para"},
