@@ -121,7 +121,7 @@
   function iniciar(doc, win) {
     var btn = doc.getElementById('avisos-btn');
     var N = win.Notification;
-    if (!btn || !N || !win.fetch) return;
+    if (!btn || !N || !win.fetch) return null;
     var rotulo = btn.querySelector('span') || btn;
     var timer = null;
 
@@ -145,19 +145,44 @@
         var n = new N(t.titulo, { body: t.corpo, tag: t.tag, icon: '/estatico/orq-icon-64.png', data: { href: t.href } });
         n.onclick = function () {
           try { win.focus(); n.close(); } catch (e) { /* já fechada */ }
-          // Destino na própria página (a conversa da resposta, em "/"): o /vivo só atualiza a lista de
-          // mensagens a cada 30 s, então o item pode faltar ou estar sem a resposta. Nesses casos
-          // recarrega (a página abre o <details> do hash ao carregar). Se o item já tem a resposta
-          // e o hash já é o mesmo, não há hashchange: dispara-se um para abrir o que a pessoa fechou.
+          // Destino na própria página (a conversa da resposta, em "/"): a lista de mensagens só
+          // atualiza a cada 30 s no /vivo, então o item pode faltar ou estar sem a resposta. A página
+          // promete não trocar o que está aberto ou digitado, então o clique pede um /vivo na hora
+          // (evento vivo-agora do #vivo, que preserva rascunhos e pendências em edição) e abre o
+          // destino depois da atualização. Recarregar a página (que descarta rascunhos) é o último
+          // recurso: sem #vivo/htmx, ou item ainda sem a resposta depois do /vivo.
           var h = t.href.split('#'), local = win.location, mesma = h[0] === (local.pathname || '') + (local.search || '');
-          var alvo = h[1] ? doc.getElementById(h[1]) : null;
-          var pronto = !!alvo && (it.tipo !== 'resposta' || !!(alvo.querySelector && alvo.querySelector('.msg-resposta')));
-          var igual = local.hash === '#' + h[1];
-          local.href = t.href;
-          if (mesma && h[1]) {
-            if (!pronto) { if (local.reload) local.reload(); }
-            else if (igual && win.dispatchEvent && win.Event) win.dispatchEvent(new win.Event('hashchange'));
-          }
+          var id = h[1];
+          if (!(mesma && id)) { local.href = t.href; return; }
+          var pronto = function () {
+            var alvo = doc.getElementById(id);
+            return !!alvo && (it.tipo !== 'resposta' || !!(alvo.querySelector && alvo.querySelector('.msg-resposta')));
+          };
+          var abrir = function () {
+            var igual = local.hash === '#' + id;
+            local.href = t.href;
+            // Mesmo hash: não há hashchange, e a pessoa pode ter fechado o <details>.
+            if (igual && win.dispatchEvent && win.Event) win.dispatchEvent(new win.Event('hashchange'));
+          };
+          if (pronto()) { abrir(); return; }
+          var vivo = doc.getElementById('vivo');
+          if (!(vivo && win.htmx && win.htmx.trigger && vivo.addEventListener)) { local.href = t.href; if (local.reload) local.reload(); return; }
+          var resolvido = false;
+          var depois = function (falhou) {
+            if (resolvido) return;
+            resolvido = true;
+            vivo.removeEventListener('htmx:afterRequest', ao);
+            if (pronto() || falhou) { abrir(); return; }
+            local.href = t.href;
+            if (local.reload) local.reload();
+          };
+          var ao = function (e) {
+            if (e && e.target && e.target !== vivo) return;
+            depois(!!(e && e.detail && e.detail.failed));
+          };
+          vivo.addEventListener('htmx:afterRequest', ao);
+          win.setTimeout(function () { depois(true); }, 8000);
+          win.htmx.trigger(vivo, 'vivo-agora');
         };
       } catch (e) { /* contexto que só notifica por service worker: sem aviso, sem erro */ }
     }
@@ -198,15 +223,14 @@
     // resolvida e onda encerrada não voltam, então isso não ocorre.
     var baseMem = null;
     function lerBase() {
-      var b = ler(win.sessionStorage, BASE);
-      return b !== null ? b : baseMem;
+      return baseMem !== null ? baseMem : ler(win.sessionStorage, BASE);
     }
     function gravarBase(ids) {
       baseMem = ids;
       gravar(win.sessionStorage, BASE, ids);
     }
     function ciclo() {
-      if (N.permission !== 'granted') { estado(); return Promise.resolve(); }
+      if (N.permission !== 'granted') { desativar(); estado(); return Promise.resolve(); }
       return buscar().then(function (itens) {
         if (!itens) return;
         var base = lerBase();
@@ -221,49 +245,61 @@
     }
 
     function agendar() {
-      if (timer === null) timer = win.setInterval(ciclo, CICLO_MS);
+      if (ativo && timer === null) timer = win.setInterval(ciclo, CICLO_MS);
     }
 
     // ativar começa a consultar: a base nasce agora (o que existe é passado) e o ciclo é agendado.
     // "Avisos ativos" no botão sempre implica consulta em andamento. Idempotente.
     var ativo = false;
+    var ultima = Promise.resolve(); // o último ciclo iniciado por ativar/carregamento (para os testes esperarem)
+    // desativar é o inverso: permissão perdida (revogada nas configurações, outra aba). Para o
+    // timer e esquece a base, para que uma nova concessão passe por ativar() e trate o que chegou
+    // nesse meio-tempo como passado, em vez de notificar o acumulado.
+    function desativar() {
+      ativo = false;
+      if (timer !== null) { try { win.clearInterval(timer); } catch (e) { /* sem clearInterval */ } timer = null; }
+      baseMem = null;
+      try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
+    }
     function ativar() {
       if (ativo || N.permission !== 'granted') return;
       ativo = true;
       baseMem = null;
       try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
-      ciclo().then(agendar);
+      ultima = ciclo().then(agendar);
+      return ultima;
     }
 
     btn.addEventListener('click', function () {
-      if (N.permission === 'granted') { estado(); ativar(); return; } // concedida fora deste clique (outra aba, configuração do site)
+      if (N.permission === 'granted') { estado(); return ativar(); } // concedida fora deste clique (outra aba, configuração do site)
       if (N.permission !== 'default') { estado(); return; }
       var feito = false;
       var fim = function () {
-        if (feito) return;
+        if (feito) return ultima;
         feito = true;
         estado();
-        ativar();
+        return ativar();
       };
       try {
         var p = N.requestPermission(fim);
-        if (p && p.then) p.then(fim, fim);
-      } catch (e) { fim(); }
+        if (p && p.then) return p.then(fim, fim);
+      } catch (e) { return fim(); }
     });
 
     estado();
     // Permissão já concedida ao carregar (por um gesto anterior, nesta ou em outra aba): só consulta,
     // sem pedir nada, mantendo a base da aba se ela já tem uma (recarga). Não fere "permissão só
     // por gesto": o gesto foi o da concessão; carregar a página nunca pede a permissão.
-    if (N.permission === 'granted') { ativo = true; ciclo().then(agendar); }
+    if (N.permission === 'granted') { ativo = true; ultima = ciclo().then(agendar); }
     // Concedida ou revogada em outra aba/configuração depois do carregamento: acompanha, sem clique.
     try {
       if (win.navigator && win.navigator.permissions && win.navigator.permissions.query) {
         win.navigator.permissions.query({ name: 'notifications' }).then(function (ps) {
-          ps.onchange = function () { estado(); ativar(); };
+          ps.onchange = function () { estado(); if (N.permission === 'granted') ativar(); else desativar(); };
         }, function () { /* sem Permissions API */ });
       }
     } catch (e) { /* idem */ }
+    return { aguardar: function () { return ultima; } };
   }
 
   var api = { selecionar: selecionar, textoDe: textoDe, hrefSeguro: hrefSeguro, iniciar: iniciar };

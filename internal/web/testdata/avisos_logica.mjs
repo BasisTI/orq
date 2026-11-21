@@ -25,7 +25,11 @@ assert.deepEqual(tr, { titulo: 'Resposta do coordenador', corpo: 'onda #3 mensag
 assert.equal(textoDe({ ...A, href: '//evil.example' }).href, '/');
 
 // --- navegador simulado
-const espera = () => new Promise((r) => setTimeout(r, 15));
+// Sem espera por tempo fixo: o que o teste espera são as promessas reais (ciclos, cliques, o
+// IndexedDB falso), para não depender da carga da máquina (go test -race roda muitos pacotes juntos).
+const abas = [];
+const tudo = async () => { for (const t of abas) await t.ctl.aguardar(); };
+const espera = tudo;
 const armazem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
 const servidor = { itens: [], consultas: 0, fora: false };
 const notificacoes = [];
@@ -55,7 +59,7 @@ function idbFalso(m, modo = {}) {
 const ouvintesPerm = [];
 const permissoes = { query: async () => { const ps = {}; ouvintesPerm.push(ps); return ps; } };
 
-function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbErro, dom = {}, hash = '' }) {
+function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbErro, dom = {}, hash = '', vivo = null }) {
   const timers = [];
   const btn = { hidden: true, disabled: false, title: '', ouvintes: {}, _span: { textContent: '' }, querySelector() { return this._span; }, addEventListener(e, f) { this.ouvintes[e] = f; } };
   class Notificacao {
@@ -70,11 +74,16 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
     eventos: [], Event: class { constructor(t) { this.type = t; } }, dispatchEvent(e) { this.eventos.push(e.type); },
     location: { href: '/', hash, pathname: '/', search: '', recargas: 0, reload() { this.recargas++; } }, focus() { this.focado = true; },
     setInterval: (f) => { timers.push(f); return timers.length; },
+    clearInterval: (id) => { timers[id - 1] = () => Promise.resolve(); w.limpos = (w.limpos || 0) + 1; },
+    setTimeout: (f, ms) => { const t = setTimeout(f, ms); t.unref(); return t; },
+    htmx: vivo ? { trigger: (el, ev) => { w.disparos.push(ev); vivo.aoDisparar(); } } : undefined, disparos: [],
     fetch: async () => { servidor.consultas++; if (servidor.fora) return { ok: false }; return { ok: true, json: async () => ({ itens: servidor.itens.map((i) => ({ ...i })) }) }; },
   };
-  const doc = { getElementById: (id) => (id === 'avisos-btn' ? btn : dom[id] || null) };
-  iniciar(doc, w);
-  return { w, btn, timers, Notificacao, ciclo: async () => { timers.forEach((f) => f()); await espera(); } };
+  const doc = { getElementById: (id) => (id === 'avisos-btn' ? btn : id === 'vivo' ? vivo : dom[id] || null) };
+  const ctl = iniciar(doc, w);
+  const t = { w, btn, timers, Notificacao, ctl, ciclo: async () => { await tudo(); await Promise.all(timers.map((f) => f())); } };
+  abas.push(t);
+  return t;
 }
 
 // 1) Permissão por gesto: carregar a página não pede nada nem consulta o servidor.
@@ -87,8 +96,7 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
   assert.equal(a.btn.disabled, false);
   assert.equal(a.btn._span.textContent, 'Ativar avisos');
   servidor.itens = [A];
-  a.btn.ouvintes.click();
-  await espera();
+  await a.btn.ouvintes.click();
   assert.equal(a.Notificacao.pedidos, 1, 'o clique pede a permissão uma vez');
   assert.equal(servidor.consultas, 1, 'concedida, a base nasce de uma consulta');
   assert.equal(notificacoes.length, 0, 'o que já existia no clique não notifica');
@@ -121,8 +129,7 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
   assert.equal(servidor.consultas, 0);
   assert.equal(a.btn.disabled, true);
   assert.equal(a.btn._span.textContent, 'Avisos bloqueados');
-  a.btn.ouvintes.click();
-  await espera();
+  await a.btn.ouvintes.click();
   assert.equal(a.Notificacao.pedidos, 0, 'negada, o clique não pede de novo');
 }
 
@@ -237,16 +244,14 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
   assert.equal(a2.timers.length, 0);
   // Outra aba concede: o Notification desta aba passa a granted sem clique aqui. O clique ativa.
   a2.Notificacao.permission = 'granted';
-  a2.btn.ouvintes.click();
-  await espera();
+  await a2.btn.ouvintes.click();
   assert.equal(a2.btn._span.textContent, 'Avisos ativos');
   assert.equal(a2.timers.length, 1, 'o clique com granted agenda o ciclo');
   assert.ok(servidor.consultas >= 1, 'e consulta');
   servidor.itens = [A, B];
   await a2.ciclo();
   assert.equal(notificacoes.length, 1, 'e notifica o que chega depois');
-  a2.btn.ouvintes.click();
-  await espera();
+  await a2.btn.ouvintes.click();
   assert.equal(a2.timers.length, 1, 'clique repetido não agenda duas vezes');
   // Sem clique: a Permissions API avisa a aba aberta.
   const a3 = aba({ permissao: 'default', local: armazem(), sessao: armazem() });
@@ -266,8 +271,7 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
   await espera();
   b1.btn.ouvintes.click();
   b2.Notificacao.permission = 'granted';
-  b2.btn.ouvintes.click();
-  await espera();
+  await b2.btn.ouvintes.click();
   servidor.itens = [A, B];
   await Promise.all([b1.ciclo(), b2.ciclo()]);
   assert.equal(notificacoes.length, 1, 'duas abas: uma notificação');
@@ -320,5 +324,89 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
   await a.ciclo();
   assert.equal(notificacoes.length, 600, 'o antigo não notifica depois');
   assert.ok(!notificacoes.some((n) => n.op.tag === 'orq-' + antigo.id));
+}
+
+// 6b) Clique com #vivo e htmx (r3): pede o /vivo, não recarrega, e abre o destino depois da atualização.
+function vivoFalso({ aoTrocar, falhou = false }) {
+  const ouvintes = [];
+  const v = {
+    addEventListener: (e, f) => { if (e === 'htmx:afterRequest') ouvintes.push(f); },
+    removeEventListener: (e, f) => { const i = ouvintes.indexOf(f); if (i >= 0) ouvintes.splice(i, 1); },
+    ouvintes,
+    aoDisparar: () => {
+      v.fim = new Promise((r) => setTimeout(() => { aoTrocar && aoTrocar(); ouvintes.slice().forEach((f) => f({ target: v, detail: { failed: falhou } })); r(); }, 0));
+    },
+  };
+  return v;
+}
+{
+  const casos = [
+    ['/vivo traz a resposta', { traz: true }, 0, 1, true],
+    ['/vivo não traz a resposta: último recurso', { traz: false }, 1, 1, false],
+    ['/vivo falha: só abre o destino, sem recarregar', { traz: false, falhou: true }, 0, 1, true],
+  ];
+  for (const [nome, { traz, falhou }, recargas, disparos, abre] of casos) {
+    notificacoes.length = 0;
+    servidor.itens = [A];
+    const item = { querySelector: () => null };
+    const dom = { 'msg-7': item };
+    const vivo = vivoFalso({ falhou, aoTrocar: () => { if (traz) item.querySelector = (q) => (q === '.msg-resposta' ? {} : null); } });
+    const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), dom, vivo });
+    await a.ctl.aguardar();
+    servidor.itens = [A, R];
+    await a.ciclo();
+    assert.equal(notificacoes.length, 1, nome);
+    notificacoes[0].onclick();
+    assert.equal(a.w.location.href, '/', `${nome}: o hash só muda depois da atualização`);
+    await vivo.fim;
+    assert.deepEqual(a.w.disparos, ['vivo-agora'].slice(0, disparos), nome);
+    assert.equal(a.w.location.recargas, recargas, `${nome}: recargas`);
+    if (abre) assert.equal(a.w.location.href, '/#msg-7', `${nome}: abre o destino`);
+    assert.equal(vivo.ouvintes.length, 0, `${nome}: o ouvinte sai`);
+  }
+}
+
+// 11) Permissão revogada e concedida de novo na mesma aba (r3): o acumulado não notifica.
+{
+  notificacoes.length = 0;
+  idbCompartilhado.clear();
+  servidor.itens = [A];
+  const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), idb: true });
+  await a.ctl.aguardar();
+  assert.equal(a.timers.length, 1);
+  a.Notificacao.permission = 'denied';
+  ouvintesPerm[ouvintesPerm.length - 1].onchange();
+  assert.equal(a.btn._span.textContent, 'Avisos bloqueados');
+  assert.equal(a.w.limpos, 1, 'o timer é limpo ao perder a permissão');
+  const consultas = servidor.consultas;
+  servidor.itens = [A, B, R];
+  await a.ciclo();
+  assert.equal(servidor.consultas, consultas, 'revogada: nenhuma consulta');
+  a.Notificacao.permission = 'granted';
+  await a.btn.ouvintes.click();
+  assert.equal(notificacoes.length, 0, 'reconcedida: o acumulado é passado, não notifica');
+  assert.equal(a.timers.length, 2, 'novo timer');
+  const C = { id: 'p:z/9#P1@t9', tipo: 'pendencia', chave: 'z/9#P1', titulo: 'depois', projeto: 'z', href: '/p/z/9/1' };
+  servidor.itens = [A, B, R, C];
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1, 'e o que chega depois notifica');
+}
+
+// 12) A base em memória vale mais que o sessionStorage (r3).
+{
+  notificacoes.length = 0;
+  const velho = armazem();
+  let falha = false;
+  const sessao = { getItem: (k) => velho.getItem(k), setItem: (k, v) => { if (falha) throw new Error('cota'); velho.setItem(k, v); }, removeItem: (k) => velho.removeItem(k) };
+  servidor.itens = [A];
+  const a = aba({ permissao: 'granted', local: armazem(), sessao });
+  await a.ctl.aguardar();
+  falha = true; // a partir daqui o sessionStorage guarda só a base antiga
+  servidor.itens = [A, B];
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1);
+  await a.ciclo();
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1, 'B notifica uma vez, não a cada ciclo');
 }
 console.log('avisos_logica: ok');

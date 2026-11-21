@@ -163,8 +163,18 @@ await Promise.all([p1.waitForResponse((r) => r.url().includes('/onda/1/mensagens
 const novoId = await p1.evaluate(() => [...document.querySelectorAll('#onda-1-msgs .msg-item')].map((e) => Number(e.id.slice(4))).sort((a, b) => b - a)[0]);
 confere(Number.isInteger(novoId), 'a pergunta enviada pela página deveria estar no DOM');
 confere((await p1.locator(`#msg-${novoId} .msg-resposta`).count()) === 0, 'a pergunta ainda não tem resposta');
+// Rascunhos que o clique não pode apagar: uma nova mensagem digitada e uma pendência aberta com texto.
+await p1.fill('#onda-1-msgs-sec textarea[name=texto]', 'rascunho da mensagem');
+const pendId = await p1.evaluate(() => {
+  const d = document.querySelector('details.pend[data-estado="aberta"]');
+  for (let e = d.parentElement; e; e = e.parentElement) if (e.tagName === 'DETAILS') e.open = true;
+  return d.id;
+});
+await Promise.all([p1.waitForResponse((r) => r.url().includes('/corpo')), p1.click(`#${pendId} > summary`)]);
+await p1.waitForSelector(`#${pendId} form textarea`, { state: 'visible' });
+await p1.fill(`#${pendId} form textarea`, 'rascunho da pendência');
 await muda(`resp-msg?id=${novoId}`);
-await p1.evaluate(() => { window.__n.length = 0; });
+await p1.evaluate(() => { window.__n.length = 0; window.__marca = 'mesma-pagina'; });
 await ciclos(p1);
 const nn = await notificacoes(p1);
 confere(nn.length === 1 && nn[0].titulo === 'Resposta do coordenador', `resposta da pergunta feita pela página: ${JSON.stringify(nn)}`);
@@ -172,6 +182,9 @@ confere((await p1.locator(`#msg-${novoId} .msg-resposta`).count()) === 0, 'o /vi
 await p1.evaluate(() => window.__n[0].clica());
 await p1.waitForSelector(`#msg-${novoId} .msg-resposta`, { state: 'visible', timeout: 5000 }).catch(() => falha('o clique deveria mostrar a resposta do coordenador (.msg-resposta visível)'));
 confere(/#msg-\d+$/.test(p1.url()), `URL depois do clique: ${p1.url()}`);
+confere((await p1.evaluate(() => window.__marca)) === 'mesma-pagina', 'o clique recarregou a página (perdeu rascunhos)');
+confere((await p1.inputValue('#onda-1-msgs-sec textarea[name=texto]')) === 'rascunho da mensagem', 'rascunho da mensagem perdido');
+confere((await p1.locator(`#${pendId}`).evaluate((d) => d.open)) && (await p1.inputValue(`#${pendId} form textarea`)) === 'rascunho da pendência', 'rascunho da pendência perdido ou item fechado');
 
 for (const c of consoles) falha(c);
 await navegador.close();
