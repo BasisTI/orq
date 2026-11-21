@@ -23,6 +23,8 @@
 
 - Ainda versão 1, US #81: a `US` ganhou `modelo` e `esforco` (nulos até `orq us status --modelo/--esforco`). Aditivo; a migration 0007 só acrescenta colunas nulas e declara leitor 4 e escritor 5.
 
+- Ainda versão 1, US #64: a `Onda` ganhou `mensagens` (`[Mensagem]`, em ordem decrescente de envio). Aditivo; a migration 0008 cria a tabela `mensagem` e declara leitor 4 e escritor 5.
+
 - Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
 - Ainda versão 1, US #16: a `MR` ganhou `pipeline` e `aprovacao`. Aditivo, sem migration: saem do último valor bom do cache da MR, que ganhou os dois campos opcionais.
 
@@ -102,7 +104,23 @@ Onda {
   "ordem": "estrita"|"livre",
   "criada_em": data,
   "encerrada_em": data|null,
-  "us": [US]
+  "us": [US],
+  "mensagens": [Mensagem]                  # mensagens enviadas pela web ao coordenador, em ordem decrescente de envio
+}
+
+Mensagem {
+  "id": int,
+  "onda_id": int,
+  "coordenador": string,
+  "texto": string,                         # texto livre da pessoa (até 8 KiB)
+  "enviada_por": string,                   # usuário da web ou "local" (web em TCP)
+  "enviada_em": data,
+  "avisada_em": data|null,                 # quando o daemon entregou o aviso ao coordenador
+  "aviso_falhou_em": data|null,            # quando o aviso falhou (ex.: coordenador ausente)
+  "resposta": string|null,                 # resposta única do coordenador (markdown, até 64 KiB)
+  "respondida_por": string|null,
+  "respondida_em": data|null,
+  "sem_coordenador": bool                  # sem resposta e o aviso falhou porque o coordenador sumiu
 }
 
 US {

@@ -11,7 +11,7 @@ import (
 	"github.com/BasisTI/orq/internal/output"
 )
 
-// migrationsMais devolve as migrations embutidas com uma 0008 a mais, o orq "do futuro".
+// migrationsMais devolve as migrations embutidas com uma 0009 a mais, o orq "do futuro".
 func migrationsMais(t *testing.T, extra string) fs.FS {
 	t.Helper()
 	m := fstest.MapFS{}
@@ -26,11 +26,11 @@ func migrationsMais(t *testing.T, extra string) fs.FS {
 		}
 		m["migrations/"+e.Name()] = &fstest.MapFile{Data: b}
 	}
-	m["migrations/0008_futura.sql"] = &fstest.MapFile{Data: []byte(extra + "\nCREATE TABLE futura (id INTEGER PRIMARY KEY);\n")}
+	m["migrations/0009_futura.sql"] = &fstest.MapFile{Data: []byte(extra + "\nCREATE TABLE futura (id INTEGER PRIMARY KEY);\n")}
 	return m
 }
 
-// novoDoFuturo migra um banco novo com a 0008 e devolve o diretório.
+// novoDoFuturo migra um banco novo com a 0009 e devolve o diretório.
 func novoDoFuturo(t *testing.T, diretivas string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -68,6 +68,10 @@ func TestMigrationsEmbutidasDeclaramValoresValidos(t *testing.T) {
 	if m := ms[6]; m.leitor != 4 || m.escritor != 5 {
 		t.Fatalf("0007 declara %d/%d", m.leitor, m.escritor)
 	}
+	// A 0008 (US #64) é aditiva: tabela nova mensagem.
+	if m := ms[7]; m.leitor != 4 || m.escritor != 5 {
+		t.Fatalf("0008 declara %d/%d", m.leitor, m.escritor)
+	}
 }
 
 func TestMigrationGravaOMinimo(t *testing.T) {
@@ -85,8 +89,8 @@ func TestMigrationGravaOMinimo(t *testing.T) {
 	// Sem a diretiva, a migration vale o próprio número: só abre quem a tem.
 	d := novoDoFuturo(t, "-- sem diretiva")
 	got, existe, err := LerEstado(ctx, d)
-	if err != nil || !existe || got.Banco != 8 || got.LeitorMinimo != 8 || got.EscritorMinimo != 8 {
-		t.Fatalf("estado da 0008 sem diretiva = %+v, %v, %v", got, existe, err)
+	if err != nil || !existe || got.Banco != 9 || got.LeitorMinimo != 9 || got.EscritorMinimo != 9 {
+		t.Fatalf("estado da 0009 sem diretiva = %+v, %v, %v", got, existe, err)
 	}
 }
 
@@ -104,10 +108,10 @@ func TestAbreBancoMaisNovoQuandoOLeitorMinimoPermite(t *testing.T) {
 		t.Fatal("abrir um banco mais novo não migra nem avisa")
 	}
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 8 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 9 {
 		t.Fatalf("user_version = %d, %v", v, err)
 	}
-	// Escreve normalmente (escritor mínimo 4) e o banco continua na versão 8.
+	// Escreve normalmente (escritor mínimo 4) e o banco continua na versão 9.
 	if _, err := s.RegistrarCoord(ctx, Registro{Nome: "a", Pane: "wA:p1"}); err != nil {
 		t.Fatalf("escrever: %v", err)
 	}
@@ -133,14 +137,14 @@ func TestBancoMaisNovoSomenteLeitura(t *testing.T) {
 		t.Fatalf("recovery não aponta orq upgrade: %v", err)
 	}
 	e, err := s.Versoes(ctx)
-	if err != nil || e.EscritorMinimo != 8 || e.LeitorMinimo != 4 || e.Binario != Schema() {
+	if err != nil || e.EscritorMinimo != 9 || e.LeitorMinimo != 4 || e.Binario != Schema() {
 		t.Fatalf("versoes = %+v, %v", e, err)
 	}
 }
 
 // Migration que exige a própria versão (ou mais) para ler recusa o binário anterior.
 func TestBancoMaisNovoRecusadoAbaixoDoLeitorMinimo(t *testing.T) {
-	dir := novoDoFuturo(t, "-- orq:leitor-minimo 8")
+	dir := novoDoFuturo(t, "-- orq:leitor-minimo 9")
 	_, err := Open(context.Background(), dir)
 	if codigo(err) != "versao_do_banco" {
 		t.Fatalf("abrir = %v", err)
@@ -204,20 +208,20 @@ func TestAntesDeMigrarInformaOExigido(t *testing.T) {
 	}
 	_ = s.Close()
 	var m Migracao
-	s, err = OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 7\n-- orq:escritor-minimo 8"), AntesDeMigrar: func(x Migracao) { m = x }})
+	s, err = OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 8\n-- orq:escritor-minimo 9"), AntesDeMigrar: func(x Migracao) { m = x }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
-	if (m != Migracao{De: 7, Para: 8, LeitorMinimo: 7, EscritorMinimo: 8}) {
+	if (m != Migracao{De: 8, Para: 9, LeitorMinimo: 8, EscritorMinimo: 9}) {
 		t.Fatalf("migração = %+v", m)
 	}
 }
 
 func TestDiretivaInvalida(t *testing.T) {
-	for _, d := range []string{"-- orq:leitor-minimo 9", "-- orq:leitor-minimo x", "-- orq:leitor-minimo 8\n-- orq:escritor-minimo 4"} {
+	for _, d := range []string{"-- orq:leitor-minimo 10", "-- orq:leitor-minimo x", "-- orq:leitor-minimo 9\n-- orq:escritor-minimo 4"} {
 		_, err := OpenCom(context.Background(), t.TempDir(), Opcoes{Migracoes: migrationsMais(t, d)})
-		if err == nil || !strings.Contains(err.Error(), "0008_futura.sql") {
+		if err == nil || !strings.Contains(err.Error(), "0009_futura.sql") {
 			t.Errorf("%q: err = %v", d, err)
 		}
 	}
@@ -265,11 +269,11 @@ func TestMigracaoConcorrenteRespeitaATrava(t *testing.T) {
 	}
 }
 
-// desfazer0005 devolve o esquema ao da 0004 (sem a pendência detalhada da 0005 nem a pré-condição
-// da MR da 0006 nem o modelo da US da 0007), para simular um banco anterior à 0005.
+// desfazer0005 devolve o esquema ao da 0004 (sem a pendência detalhada da 0005, a pré-condição
+// da MR da 0006, o modelo da US da 0007 nem a tabela mensagem da 0008), para simular um banco anterior à 0005.
 func desfazer0005(t *testing.T, s *Store) {
 	t.Helper()
-	for _, q := range []string{"ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco"} {
+	for _, q := range []string{"DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco"} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -299,7 +303,7 @@ func TestConexaoAbertaAntesDaMigrationRespeitaOEscritorMinimo(t *testing.T) {
 	if _, err := antigo.RegistrarCoord(ctx, Registro{Nome: "antes"}); err != nil {
 		t.Fatalf("antes da migration: %v", err)
 	}
-	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 4\n-- orq:escritor-minimo 8")})
+	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 4\n-- orq:escritor-minimo 9")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +337,7 @@ func TestConexaoAbertaAntesDaMigrationRespeitaOLeitorMinimo(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer antigo.Close()
-	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 8\n-- orq:escritor-minimo 8")})
+	novo, err := OpenCom(ctx, dir, Opcoes{Migracoes: migrationsMais(t, "-- orq:leitor-minimo 9\n-- orq:escritor-minimo 9")})
 	if err != nil {
 		t.Fatal(err)
 	}

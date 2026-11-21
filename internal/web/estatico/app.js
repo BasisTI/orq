@@ -71,7 +71,7 @@
       esperas.push(Object.assign(f, { chave: chave }));
       indicar(true);
     }
-    function deResposta(el) { return el && el.closest && el.closest('form.resposta[hx-post]'); }
+    function deResposta(el) { return el && el.closest && el.closest('form.resposta[hx-post], form.msg-form[hx-post]'); }
     // O que a pessoa escolheu ao clicar em Enviar é o que vai ao servidor, mesmo que o pedido saia
     // da fila depois: guardamos a opção e o texto no envio e travamos os campos até a resposta.
     function fixar(f) {
@@ -119,7 +119,12 @@
       }
     });
     document.addEventListener('htmx:afterRequest', function (e) {
-      encerrar(deResposta(e.detail.elt));
+      var f = deResposta(e.detail.elt);
+      if (f && f.matches('form.msg-form') && e.detail.successful) {
+        var t = f.querySelector('textarea[name="texto"]');
+        if (t) t.value = '';
+      }
+      encerrar(f);
       liberar();
     });
     // O htmx dispara htmx:afterRequest antes destes três: o formulário já está solto e a fila segue.
