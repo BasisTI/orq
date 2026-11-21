@@ -23,7 +23,7 @@ const (
 )
 
 // comHash são os arquivos que o base referencia com ?v=<hash>.
-var comHash = []string{"app.css", "htmx.min.js", "app.js"}
+var comHash = []string{"app.css", "htmx.min.js", "app.js", "avisos.js"}
 
 var tiposEstaticos = map[string]string{
 	".css":   "text/css; charset=utf-8",

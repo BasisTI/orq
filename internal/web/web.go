@@ -38,7 +38,8 @@ const (
 )
 
 // Servidor atende as páginas. Não serve arquivo do disco e não expõe o snapshot em JSON: só
-// desenha, em HTML escapado, as pendências e a Central (somente leitura).
+// desenha, em HTML escapado, as pendências e a Central (somente leitura). A única saída JSON é
+// /avisos, com chave, título, projeto e link do que o navegador pode notificar.
 type Servidor struct {
 	St *central.Store
 	// Leitura, se definida, substitui o St nas leituras (Fonte); a escrita é sempre do St.
@@ -89,6 +90,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /historico", s.historico)
 	mux.HandleFunc("GET /projeto/{slug}", s.projeto)
 	mux.HandleFunc("GET /vivo", s.vivo)
+	mux.HandleFunc("GET /avisos", s.avisos)
 	mux.HandleFunc("GET /onda/{id}", s.onda)
 	mux.HandleFunc("POST /onda/{id}/mensagens", s.enviarMensagem)
 	mux.HandleFunc("GET /saude", s.saude)

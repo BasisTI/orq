@@ -116,6 +116,10 @@ a.btn-primary, .btn-primary { color: var(--color-primary-content); }
 .marca-nome { font-family: var(--font-display); font-weight: 700; font-size: 1.4rem; letter-spacing: -0.02em; }
 .marca-sub { color: color-mix(in oklab, #fff 72%, transparent); font-size: .95rem; padding-left: .75rem; border-left: 1px solid color-mix(in oklab, #fff 25%, transparent); }
 .cab-user { margin-left: auto; display: flex; align-items: center; gap: .4rem; color: color-mix(in oklab, #fff 72%, transparent); font-size: .95rem; }
+.cab-avisos { margin-left: auto; background: transparent; color: #fff; border-color: color-mix(in oklab, #fff 35%, transparent); }
+.cab-avisos:hover:not(:disabled) { background: color-mix(in oklab, #fff 12%, transparent); }
+.cab-avisos:disabled { color: color-mix(in oklab, #fff 65%, transparent); border-color: transparent; background: transparent; }
+.cab-avisos + .cab-user { margin-left: 0; }
 .cab :focus-visible { outline-color: var(--laranja); }
 .cab a:hover { color: #fff; }
 
