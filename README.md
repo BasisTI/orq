@@ -91,7 +91,7 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 |---|---|
 | `orq coord registrar <nome> [--pane <id>] [--workspace <id>] [--projeto <slug>]` | Cria ou atualiza o coordenador. Campo omitido mantém o valor gravado; o pane fica com um coordenador só. |
 | `orq coord list` | Lista os coordenadores. |
-| `orq onda criar <titulo> --us 215,216,217,218 [--projeto <slug>] [--ate plano\|mr-pronta\|merge] [--ordem estrita\|livre] [--depende 216:215]` | Cria a onda com as US em `wait`, na ordem dada. `--ate` padrão `mr-pronta`, `--ordem` padrão `livre`. `--depende` é repetível e aceita `218:216+217`. US sem projeto usam `--projeto` ou o projeto padrão do coordenador. |
+| `orq onda criar <titulo> --nome <nome> --us 215,216,217,218 [--projeto <slug>] [--ate plano\|mr-pronta\|merge] [--ordem estrita\|livre] [--depende 216:215]` | Cria a onda com as US em `wait`, na ordem dada. `--nome` (obrigatório) é o nome da onda, validado como nome de agente do Herdr (`[a-z][a-z0-9_-]{0,31}`), gravado na coluna `onda.nome` (migration 0009) e devolvido no campo `nome` do JSON e do snapshot. `--ate` padrão `mr-pronta`, `--ordem` padrão `livre`. `--depende` é repetível e aceita `218:216+217`. US sem projeto usam `--projeto` ou o projeto padrão do coordenador. Depois de gravar, o orq renomeia o pane do coordenador (ver [Nome do pane do coordenador](#nome-do-pane-do-coordenador)). |
 | `orq onda adicionar <id> <ref>… [--apos <ref>] [--projeto <slug>]` | Inclui US numa onda aberta, no fim ou logo depois de `--apos` (que precisa estar na onda); a US entra em `wait`, ou guarda o status se veio de onda encerrada de mesmo limite (com limite diferente volta a `wait`); grava `onda.adicionar` no diário. Mesma regra do `onda criar` para quem já tem onda: onda aberta recusa (`us_em_outra_onda`; `us_ja_na_onda` se já está nesta), onda encerrada cede a US. Onda encerrada não recebe (`onda_encerrada`). Não cria dependências. `onda proxima` e a regra de encerramento passam a contar a US nova. Sem coordenador corrente, assina o dono da onda. |
 | `orq onda ver [<id>]` | Onda com US, dependências, MRs e pendências. Sem id, a única onda aberta do coordenador. |
 | `orq onda list [--abertas]` | Lista as ondas. |
@@ -351,7 +351,7 @@ Exemplo, a onda do colaboradados:
 
 ```bash
 orq coord registrar colaboradados --projeto colaboradados
-orq onda criar "Melhorias da noite" --us 215,216,217,218 --ordem estrita --depende 216:215
+orq onda criar "Melhorias da noite" --nome melhorias-noite --us 215,216,217,218 --ordem estrita --depende 216:215
 orq onda proxima          # TG-215
 orq us status TG-215 exec --pane wB:p3 --papel implementacao --rodada 1 --modelo claude-sonnet-5-5 --esforco medium
 orq pend add TG-215 --tipo autorizacao "aplicar a migration no banco de homologação"   # TG-215#P1
@@ -359,6 +359,14 @@ orq mr add TG-215 https://gitlab.basis.com.br/basis/colaboradados/api/-/merge_re
 orq us status TG-215 done
 orq onda proxima          # TG-216
 ```
+
+### Nome do pane do coordenador
+
+O rótulo do pane (`herdr pane rename`) e o nome do agente (`herdr agent rename`) do coordenador têm de ser o nome da onda aberta **mais recente** dele; quem renomeia é o orq, não o agente. O pane é o registrado em `orq coord registrar` (não o `$HERDR_PANE_ID` do momento).
+
+- `orq onda criar --nome`, `orq onda adicionar` e `orq onda encerrar` renomeiam ao terminar: com duas ondas abertas vale a mais recente, e ao encerrar volta o nome da que restou (encerrada a última, o pane fica como está). A saída traz o que foi feito (`pane_nome` no JSON; uma linha `pane: …` no texto), e cada renomeio vira o evento `onda.pane_nome` no diário. Falha do Herdr (ou pane sem agente registrado, caso em que só o rótulo muda) não impede criar, ampliar nem encerrar: sai como `aviso: pane …` e no evento (`erros`).
+- O daemon confere a cada `--tick` (`herdr api snapshot`) o rótulo e o nome do agente do pane de cada coordenador com onda aberta e corrige o que divergiu (inclusive o que alguém renomeou à mão e a onda criada por um orq anterior). A mesma recusa do Herdr não volta ao diário nem ao log a cada tick.
+- Onda antiga, criada sem `--nome`: o nome é o início do título, se for um nome válido; senão o campo `nome` fica vazio, o `orq onda ver` avisa `(sem nome …)` e o orq não renomeia o pane por ela (se for a mais recente, o pane fica como está).
 
 ### Encerrar a onda
 

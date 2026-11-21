@@ -70,12 +70,17 @@ func (a *App) coordCmd() *cobra.Command {
 func (a *App) ondaCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "onda", Short: "Cria, amplia, consulta e encerra ondas de US"}
 
-	var projeto, us, ate, ordem string
+	var projeto, us, ate, ordem, nome string
 	var depende []string
 	criar := &cobra.Command{
-		Use:   "criar <titulo> --us <refs>",
-		Short: "Cria uma onda com as US em wait, na ordem dada",
-		Args:  cobra.ExactArgs(1),
+		Use:   "criar <titulo> --nome <nome> --us <refs>",
+		Short: "Cria uma onda com as US em wait, na ordem dada, e dá o nome dela ao pane do coordenador",
+		Long: `--nome é o nome da onda: o rótulo e o nome de agente que o orq põe no pane do coordenador
+(letra minúscula, depois até 31 letras minúsculas, dígitos, - ou _). Com várias ondas abertas, o
+pane leva o nome da mais recente; o orq renomeia ao criar, ao ampliar e ao encerrar, e o daemon
+corrige divergência feita à mão. Falha do Herdr não impede criar a onda: aparece na saída e no
+diário.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			st, err := a.store(ctx)
@@ -86,7 +91,10 @@ func (a *App) ondaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			n := central.NovaOnda{Titulo: args[0], Projeto: projeto, Ate: ate, Ordem: ordem}
+			if strings.TrimSpace(nome) == "" {
+				return usoErr("falta --nome: o nome da onda, que o orq põe no pane do coordenador (ex. --nome orq-comunicacao)")
+			}
+			n := central.NovaOnda{Titulo: args[0], Nome: nome, Projeto: projeto, Ate: ate, Ordem: ordem}
 			for _, s := range strings.Split(us, ",") {
 				if s = strings.TrimSpace(s); s == "" {
 					continue
@@ -118,9 +126,10 @@ func (a *App) ondaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(o, func(w io.Writer) error { return textoOnda(w, o) })
+			return a.emitOnda(ctx, st, o, textoOnda)
 		},
 	}
+	criar.Flags().StringVar(&nome, "nome", "", "nome da onda no pane do coordenador (obrigatório): [a-z][a-z0-9_-]{0,31}")
 	criar.Flags().StringVar(&projeto, "projeto", "", "slug do projeto Taiga das US sem projeto (padrão: o do coordenador)")
 	criar.Flags().StringVar(&us, "us", "", "US da onda, na ordem: 215,216 ou projeto/215")
 	criar.Flags().StringVar(&ate, "ate", "mr-pronta", "até onde a onda está autorizada: plano, mr-pronta ou merge")
@@ -212,7 +221,7 @@ func (a *App) ondaCmd() *cobra.Command {
 				return err
 			}
 			a.avisarPendenciasAbertas(ctx, st, o.ID, "")
-			return a.emit(o, func(w io.Writer) error { return textoOndaResumo(w, o) })
+			return a.emitOnda(ctx, st, o, textoOndaResumo)
 		},
 	}
 	var projetoAdd, apos string
@@ -258,7 +267,7 @@ func (a *App) ondaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(o, func(w io.Writer) error { return textoOnda(w, o) })
+			return a.emitOnda(ctx, st, o, textoOnda)
 		},
 	}
 	adicionar.Flags().StringVar(&projetoAdd, "projeto", "", "slug do projeto Taiga das US sem projeto (padrão: o do coordenador)")

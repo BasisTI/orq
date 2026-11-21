@@ -91,7 +91,7 @@ func TestLimparDryRunAchaGlabNoNixProfile(t *testing.T) {
 	env["ORQ_HERDR_BIN"] = herdr["ORQ_HERDR_BIN"]
 	mr := "https://gitlab.exemplo.test/basis/proj/-/merge_requests/5"
 	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "13", "--ate", "merge")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "13", "--ate", "merge")
 	ok(t, env, "mr", "add", "13", mr)
 	ok(t, env, "recursos", "gravar", "13", "--pane", "tg-13_executor", "--aprovado", mr+"=abc1234")
 

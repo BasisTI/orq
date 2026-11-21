@@ -210,6 +210,7 @@ plugin) valem como padrão das três flags.`,
 			}
 			imp.BaseURL, imp.Log = web.URL, func(format string, args ...any) { logw("pendências: "+format, args...) }
 			d.Pendencias = &pendencias.Servico{St: e.St, Imp: imp, Av: pendencias.Herdr{F: e.F}, Log: func(format string, args ...any) { logw("pendências: "+format, args...) }}
+			d.Nomes = &enriquecer.Nomes{St: e.St, F: e.F, Log: func(format string, args ...any) { logw(format, args...) }}
 			if limpeza.LigadaPeloAmbiente(a.Env) {
 				l, err := a.limpador(ctx)
 				if err != nil {

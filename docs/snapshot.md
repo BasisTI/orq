@@ -100,6 +100,7 @@ Onda {
   "id": int,
   "coordenador": string,
   "titulo": string,
+  "nome": string,                          # nome da onda no pane do coordenador (orq onda criar --nome); "" numa onda antiga cujo título não começa por um nome válido (campo novo, aditivo: não sobe `versao`)
   "autorizacao_ate": "plano"|"mr-pronta"|"merge",
   "ordem": "estrita"|"livre",
   "criada_em": data,
@@ -230,6 +231,7 @@ Opcao {"id": int, "titulo": string, "descricao": string, "recomendada": bool}
           "id": 1,
           "coordenador": "colaboradados",
           "titulo": "Melhorias da noite",
+          "nome": "melhorias-noite",
           "autorizacao_ate": "mr-pronta",
           "ordem": "estrita",
           "criada_em": "2026-10-11T14:00:01Z",

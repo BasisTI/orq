@@ -88,7 +88,7 @@ func ambiente(t *testing.T) map[string]string {
 func TestErroJSONTipado(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "colaboradados")
-	ok(t, env, "onda", "criar", "o", "--us", "215,216")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "215,216")
 	ok(t, env, "us", "status", "215", "done")
 	cases := []struct {
 		args []string
@@ -126,7 +126,7 @@ func TestErroJSONTipado(t *testing.T) {
 func TestCoordenadorPeloPane(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	out := ok(t, env, "onda", "criar", "Primeira", "--us", "1,2", "--ordem", "estrita", "--depende", "2:1")
+	out := ok(t, env, "onda", "criar", "Primeira", "--nome", "teste", "--us", "1,2", "--ordem", "estrita", "--depende", "2:1")
 	var o struct {
 		ID          int64
 		Coordenador string
@@ -137,7 +137,7 @@ func TestCoordenadorPeloPane(t *testing.T) {
 	}
 	// Outro pane, sem coordenador registrado: criar onda falha, mas ler e mudar status não.
 	outro := map[string]string{"ORQ_STATE_DIR": env["ORQ_STATE_DIR"], "HERDR_PANE_ID": "wB:p9"}
-	if r := rodar(t, outro, "onda", "criar", "x", "--us", "3"); r.code != 2 || !strings.Contains(r.err, "coord_nao_resolvido") {
+	if r := rodar(t, outro, "onda", "criar", "x", "--nome", "teste", "--us", "3"); r.code != 2 || !strings.Contains(r.err, "coord_nao_resolvido") {
 		t.Fatalf("criar sem coordenador = %+v", r)
 	}
 	ok(t, outro, "us", "status", "p/1", "exec")
@@ -155,7 +155,7 @@ func TestCoordenadorPeloPane(t *testing.T) {
 func TestProximaEncerramentoCLI(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1")
 	url := "https://gitlab.basis.com.br/basis/x/-/merge_requests/7"
 	ok(t, env, "mr", "add", "1", url)
 	type saida struct {
@@ -215,7 +215,7 @@ func TestProximaEncerramentoCLI(t *testing.T) {
 func TestFaltamComDoisProjetosCLI(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "demo-a")
-	ok(t, env, "onda", "criar", "o", "--us", "demo-a/1,demo-b/1")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "demo-a/1,demo-b/1")
 	ok(t, env, "us", "status", "demo-a/1", "done")
 	ok(t, env, "us", "status", "demo-b/1", "done")
 	ok(t, env, "pend", "add", "demo-b/1", "--tipo", "duvida", "fictícia")
@@ -240,7 +240,7 @@ func TestFaltamComDoisProjetosCLI(t *testing.T) {
 func TestPendCLI(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "312")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "312")
 	if id := ok(t, env, "--output", "text", "pend", "add", "TG-312", "--tipo", "autorizacao", "instalar o binário", "--pane", "wB:p4"); id != "TG-312#P1\n" {
 		t.Fatalf("id = %q", id)
 	}
@@ -285,7 +285,7 @@ func TestConcorrenciaDoisProcessos(t *testing.T) {
 	}
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1,2")
 	const n = 40
 	procs := []struct {
 		args []string
@@ -451,7 +451,7 @@ func TestConcorrenciaTomDoProjeto(t *testing.T) {
 func TestDiarioTomIdentificaOProjeto(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a")
-	ok(t, env, "onda", "criar", "o", "--us", "projeto-a/1,projeto-b/1")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "projeto-a/1,projeto-b/1")
 	var es []struct {
 		Tipo    string
 		Detalhe struct {
@@ -509,7 +509,7 @@ func TestBancoMaisNovoApontaOUpgrade(t *testing.T) {
 func TestOndaAdicionarCLI(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1,2")
 	out := ok(t, env, "onda", "adicionar", "1", "3", "4", "--apos", "1")
 	var o struct{ US []struct{ Chave string } }
 	if err := json.Unmarshal([]byte(out), &o); err != nil || len(o.US) != 4 || o.US[1].Chave != "p/3" || o.US[2].Chave != "p/4" {
@@ -529,7 +529,7 @@ func TestOndaAdicionarCLI(t *testing.T) {
 		{[]string{"onda", "adicionar", "1", "5", "--apos", "9"}, 2, "uso"},
 		{[]string{"onda", "adicionar", "7", "5"}, 5, "nao_encontrado"},
 	}
-	ok(t, env, "onda", "criar", "outra", "--us", "10")
+	ok(t, env, "onda", "criar", "outra", "--nome", "teste", "--us", "10")
 	cases = append(cases, struct {
 		args []string
 		exit int
