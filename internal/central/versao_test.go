@@ -81,6 +81,10 @@ func TestMigrationsEmbutidasDeclaramValoresValidos(t *testing.T) {
 	if m := ms[7]; m.leitor != 4 || m.escritor != 5 {
 		t.Fatalf("0008 declara %d/%d", m.leitor, m.escritor)
 	}
+	// A 0010 (US #100) é aditiva: coluna nula em us.
+	if m := ms[9]; m.leitor != 4 || m.escritor != 5 {
+		t.Fatalf("0010 declara %d/%d", m.leitor, m.escritor)
+	}
 }
 
 func TestMigrationGravaOMinimo(t *testing.T) {
@@ -282,7 +286,7 @@ func TestMigracaoConcorrenteRespeitaATrava(t *testing.T) {
 // da MR da 0006, o modelo da US da 0007 nem a tabela mensagem da 0008), para simular um banco anterior à 0005.
 func desfazer0005(t *testing.T, s *Store) {
 	t.Helper()
-	for _, q := range []string{"DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
+	for _, q := range []string{"DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

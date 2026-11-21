@@ -373,6 +373,50 @@ func (a *App) usCmd() *cobra.Command {
 	status.Flags().StringVar(&esforco, "esforco", "", "esforço do pane, ex. medium")
 	status.Flags().BoolVar(&forcar, "forcar", false, "permite sair de done")
 	cmd.AddCommand(status)
+	var limpar bool
+	espera := &cobra.Command{
+		Use:   "espera <ref> [motivo]",
+		Short: "Registra, troca ou limpa (--limpar) o motivo da espera da US",
+		Long: "Registra o motivo curto (até 200 caracteres, numa linha) por que a US espera, ex. algo externo. " +
+			"Ele aparece na lista de US da Central, depois da MR. Um novo motivo troca o anterior; --limpar o remove. " +
+			"Não muda o status da US.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if limpar == (len(args) == 2) {
+				return usoErr("use um motivo ou --limpar, não os dois nem nenhum")
+			}
+			ctx, st, coord, ref, err := a.preparar(cmd, args[0])
+			if err != nil {
+				return err
+			}
+			var motivo *string
+			if !limpar {
+				motivo = &args[1]
+			}
+			u, alterada, err := st.DefinirEspera(ctx, coord, ref, motivo)
+			if err != nil {
+				return err
+			}
+			res := struct {
+				Alterada bool       `json:"alterada"`
+				US       central.US `json:"us"`
+			}{alterada, u}
+			return a.emit(res, func(w io.Writer) error {
+				sufixo := ""
+				if !alterada {
+					sufixo = " (sem mudança)"
+				}
+				txt := "sem motivo de espera"
+				if u.EsperaMotivo != nil {
+					txt = "espera: " + q(*u.EsperaMotivo)
+				}
+				_, err := fmt.Fprintf(w, "%s %s%s\n", u.Chave, txt, sufixo)
+				return err
+			})
+		},
+	}
+	espera.Flags().BoolVar(&limpar, "limpar", false, "remove o motivo da espera")
+	cmd.AddCommand(espera)
 	return cmd
 }
 

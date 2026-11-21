@@ -23,6 +23,8 @@
 
 - Ainda versão 1, US #81: a `US` ganhou `modelo` e `esforco` (nulos até `orq us status --modelo/--esforco`). Aditivo; a migration 0007 só acrescenta colunas nulas e declara leitor 4 e escritor 5.
 
+- Ainda versão 1, US #100: a `US` ganhou `espera_motivo` (texto curto ou nulo, até 200 caracteres; nulo até `orq us espera`). Aditivo, `versao` não sobe; a migration 0010 só acrescenta uma coluna nula e declara leitor 4 e escritor 5. O diário ganhou o evento `us.espera`. Sair de `wait` limpa o motivo.
+
 - Ainda versão 1, US #64: a `Onda` ganhou `mensagens` (`[Mensagem]`, em ordem decrescente de envio). Aditivo; a migration 0008 cria a tabela `mensagem` e declara leitor 4 e escritor 5.
 
 - Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
@@ -138,6 +140,7 @@ US {
   "rodada": int|null,
   "modelo": string|null,                   # id do modelo do pane ("claude-fable-5-2"); nulo até o status vir com --modelo
   "esforco": string|null,                  # esforço do pane ("medium"); nulo se não informado
+  "espera_motivo": string|null,            # por que a US espera (bloqueio externo), registrado por `orq us espera`; nulo sem motivo
   "atualizado_em": data,
   "mrs": [MR],
   "pendencias": [Pendencia],               # abertas e resolvidas

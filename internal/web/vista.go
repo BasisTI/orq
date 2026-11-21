@@ -107,6 +107,7 @@ type USVista struct {
 	Status             Selo
 	Agente             AgenteVista
 	Modelo             ModeloVista
+	Espera             string // motivo da espera da US; vazio sem motivo
 	TaigaStatus        string
 	TaigaURL           string
 	TaigaIdade         string
@@ -554,10 +555,18 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 	return ov
 }
 
+// esperaDe é o motivo da espera da US; vazio sem motivo. O html/template escapa o texto.
+func esperaDe(u central.US) string {
+	if u.EsperaMotivo == nil {
+		return ""
+	}
+	return *u.EsperaMotivo
+}
+
 func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]string, agora time.Time) USVista {
 	uv := USVista{
 		ID: u.ID, Anchor: "us-" + u.Projeto + "-" + strconv.Itoa(u.Ref), Projeto: ProjetoTag{Slug: u.Projeto, Tom: tons[u.Projeto]},
-		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
+		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), Espera: esperaDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
 	}
 	if s, ok := statusUS[u.Status]; ok {
 		uv.Status = s
