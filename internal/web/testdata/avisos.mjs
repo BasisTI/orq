@@ -65,7 +65,32 @@ const notificacoes = async (...ps) => (await Promise.all(ps.map((p) => p.evaluat
   await p.goto(base + '/', { waitUntil: 'networkidle' });
   confere(!(await p.locator('#avisos-btn').isVisible()), 'indisponível: o botão deveria ficar escondido');
   confere(p.avisosReq === 0, 'indisponível: consultou /avisos');
+  // Botão hidden: o usuário continua na borda direita (o seletor "+ .cab-user" não pode casar).
+  const g = await p.evaluate(() => { const u = document.querySelector('.cab-user').getBoundingClientRect(); return { dir: u.right, larg: document.querySelector('.cab-in').getBoundingClientRect().right }; });
+  confere(g.larg - g.dir < 40, `indisponível: .cab-user fora da borda direita: ${JSON.stringify(g)}`);
   await ctx.close();
+}
+
+// ---- permissão concedida na outra aba: o clique na segunda aba também liga a consulta
+{
+  const ctx2 = await navegador.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctx2.addInitScript(simulado);
+  const q1 = await aba(ctx2);
+  const q2 = await aba(ctx2);
+  await q1.goto(base + '/', { waitUntil: 'networkidle' });
+  await q2.goto(base + '/pendencias', { waitUntil: 'networkidle' });
+  await Promise.all([q1.waitForResponse((r) => r.url().endsWith('/avisos')), q1.locator('#avisos-btn').click()]);
+  confere((await q2.locator('#avisos-btn').innerText()).trim() === 'Ativar avisos', 'a segunda aba ainda mostra "Ativar avisos"');
+  await Promise.all([q2.waitForResponse((r) => r.url().endsWith('/avisos')), q2.locator('#avisos-btn').click()]);
+  await q2.waitForTimeout(300);
+  confere((await q2.locator('#avisos-btn').innerText()).trim() === 'Avisos ativos', 'segunda aba: rótulo');
+  confere((await q2.evaluate(() => window.__ciclos.length)) === 1, 'segunda aba: "Avisos ativos" sem ciclo agendado');
+  confere(q2.avisosReq >= 1, 'segunda aba: "Avisos ativos" sem consulta');
+  await muda('nova-pend?proj=catalogo&ref=404');
+  await q1.close();
+  await ciclos(q2);
+  confere((await notificacoes(q2)).length === 1, 'segunda aba sozinha deveria notificar a pendência nova');
+  await ctx2.close();
 }
 
 // ---- fluxo principal, duas abas
@@ -127,6 +152,26 @@ confere(await quem.locator(`#msg-${idMsg}`).isVisible(), 'o clique da resposta d
 await ciclos(p1, p2);
 // A aba que clicou recarregou (o #msg-N ainda não estava nela): a base dela vem da sessionStorage.
 confere((await notificacoes(p1, p2)).length <= antesDoClique, 'notificação repetida depois do clique');
+
+// ---- clique na resposta com a pergunta feita pela página (#msg-N já no DOM, sem resposta)
+await p2.close();
+await p1.goto(base + '/', { waitUntil: 'networkidle' });
+await p1.waitForTimeout(500);
+await p1.evaluate(() => { for (let e = document.getElementById('onda-1-msgs-sec'); e; e = e.parentElement) if (e.tagName === 'DETAILS') e.open = true; });
+await p1.fill('#onda-1-msgs-sec textarea[name=texto]', 'pergunta feita pela página');
+await Promise.all([p1.waitForResponse((r) => r.url().includes('/onda/1/mensagens')), p1.click('#onda-1-msgs-sec button[type=submit]')]);
+const novoId = await p1.evaluate(() => [...document.querySelectorAll('#onda-1-msgs .msg-item')].map((e) => Number(e.id.slice(4))).sort((a, b) => b - a)[0]);
+confere(Number.isInteger(novoId), 'a pergunta enviada pela página deveria estar no DOM');
+confere((await p1.locator(`#msg-${novoId} .msg-resposta`).count()) === 0, 'a pergunta ainda não tem resposta');
+await muda(`resp-msg?id=${novoId}`);
+await p1.evaluate(() => { window.__n.length = 0; });
+await ciclos(p1);
+const nn = await notificacoes(p1);
+confere(nn.length === 1 && nn[0].titulo === 'Resposta do coordenador', `resposta da pergunta feita pela página: ${JSON.stringify(nn)}`);
+confere((await p1.locator(`#msg-${novoId} .msg-resposta`).count()) === 0, 'o /vivo não deveria ter trazido a resposta ainda (o teste perde o sentido)');
+await p1.evaluate(() => window.__n[0].clica());
+await p1.waitForSelector(`#msg-${novoId} .msg-resposta`, { state: 'visible', timeout: 5000 }).catch(() => falha('o clique deveria mostrar a resposta do coordenador (.msg-resposta visível)'));
+confere(/#msg-\d+$/.test(p1.url()), `URL depois do clique: ${p1.url()}`);
 
 for (const c of consoles) falha(c);
 await navegador.close();

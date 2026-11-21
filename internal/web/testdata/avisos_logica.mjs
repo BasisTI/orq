@@ -32,21 +32,30 @@ const notificacoes = [];
 const lockFila = { cadeia: Promise.resolve() };
 const locks = { request: (_nome, fn) => (lockFila.cadeia = lockFila.cadeia.then(() => fn())) };
 
-// IndexedDB simulado: um store compartilhado, add() recusa chave repetida com ConstraintError.
+// IndexedDB simulado: um store compartilhado; o add() recusa chave repetida com ConstraintError e a
+// transação só completa (oncomplete) depois do pedido. modo.erro faz todo add() falhar com esse nome.
 const idbCompartilhado = new Map();
-function idbFalso(m) {
-  const req = (f) => { const r = {}; setTimeout(() => f(r), 0); return r; };
-  const loja = {
-    add: (v, k) => req((r) => {
-      if (m.has(k)) { const e = { preventDefault() {}, target: r }; r.error = { name: 'ConstraintError' }; r.onerror && r.onerror(e); return; }
-      m.set(k, v); r.onsuccess && r.onsuccess({});
-    }),
-    openCursor: () => req((r) => { r.result = null; r.onsuccess && r.onsuccess({}); }),
-  };
-  return { open: () => { const r = {}; setTimeout(() => { r.result = { createObjectStore() {}, transaction: () => ({ objectStore: () => loja }) }; r.onupgradeneeded && r.onupgradeneeded(); r.onsuccess && r.onsuccess({}); }, 0); return r; } };
+function idbFalso(m, modo = {}) {
+  const loja = (tx) => ({
+    add: (v, k) => {
+      const r = {};
+      setTimeout(() => {
+        if (modo.erro) { r.error = { name: modo.erro }; r.onerror && r.onerror({ preventDefault() {} }); tx.onabort && tx.onabort(); return; }
+        if (m.has(k)) { r.error = { name: 'ConstraintError' }; r.onerror && r.onerror({ preventDefault() {} }); setTimeout(() => tx.oncomplete && tx.oncomplete(), 0); return; }
+        m.set(k, v); r.onsuccess && r.onsuccess({}); setTimeout(() => tx.oncomplete && tx.oncomplete(), 0);
+      }, 0);
+      return r;
+    },
+    openCursor: () => { const r = {}; setTimeout(() => { r.result = null; r.onsuccess && r.onsuccess({}); }, 0); return r; },
+  });
+  return { open: () => { const r = {}; setTimeout(() => { r.result = { createObjectStore() {}, transaction: () => { const tx = {}; tx.objectStore = () => loja(tx); return tx; } }; r.onupgradeneeded && r.onupgradeneeded(); r.onsuccess && r.onsuccess({}); }, 0); return r; } };
 }
 
-function aba({ permissao, local, sessao, concede = 'granted', idb = false }) {
+// Permissions API simulada: a aba que conhece a mudança de permissão recebe o onchange.
+const ouvintesPerm = [];
+const permissoes = { query: async () => { const ps = {}; ouvintesPerm.push(ps); return ps; } };
+
+function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbErro, dom = {}, hash = '' }) {
   const timers = [];
   const btn = { hidden: true, disabled: false, title: '', ouvintes: {}, _span: { textContent: '' }, querySelector() { return this._span; }, addEventListener(e, f) { this.ouvintes[e] = f; } };
   class Notificacao {
@@ -57,12 +66,13 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false }) {
     close() { this.fechada = true; }
   }
   const w = {
-    Notification: Notificacao, indexedDB: idb ? idbFalso(idbCompartilhado) : undefined, localStorage: local, sessionStorage: sessao, navigator: { locks },
-    location: { href: '/', pathname: '/', search: '', recargas: 0, reload() { this.recargas++; } }, focus() { this.focado = true; },
+    Notification: Notificacao, indexedDB: idb ? idbFalso(idbCompartilhado, { erro: idbErro }) : undefined, localStorage: local, sessionStorage: sessao, navigator: { locks, permissions: permissoes },
+    eventos: [], Event: class { constructor(t) { this.type = t; } }, dispatchEvent(e) { this.eventos.push(e.type); },
+    location: { href: '/', hash, pathname: '/', search: '', recargas: 0, reload() { this.recargas++; } }, focus() { this.focado = true; },
     setInterval: (f) => { timers.push(f); return timers.length; },
     fetch: async () => { servidor.consultas++; if (servidor.fora) return { ok: false }; return { ok: true, json: async () => ({ itens: servidor.itens.map((i) => ({ ...i })) }) }; },
   };
-  const doc = { getElementById: (id) => (id === 'avisos-btn' ? btn : null) };
+  const doc = { getElementById: (id) => (id === 'avisos-btn' ? btn : dom[id] || null) };
   iniciar(doc, w);
   return { w, btn, timers, Notificacao, ciclo: async () => { timers.forEach((f) => f()); await espera(); } };
 }
@@ -190,11 +200,125 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false }) {
   assert.equal(local.getItem('orq.avisos.notificados'), null, 'IDB: o registro de reserva não é usado');
 }
 
-// 5) Armazenamento indisponível: a página não quebra.
+
+// 6) Clique na resposta do coordenador (achado 1 da r1).
 {
+  notificacoes.length = 0;
+  const msg = (comResposta) => ({ querySelector: (q) => (q === '.msg-resposta' && comResposta ? {} : null) });
+  const casos = [
+    ['sem o item no DOM', {}, '', 1, 0],
+    ['item sem .msg-resposta', { 'msg-7': msg(false) }, '', 1, 0],
+    ['item sem .msg-resposta e hash já igual', { 'msg-7': msg(false) }, '#msg-7', 1, 0],
+    ['item com a resposta, hash diferente', { 'msg-7': msg(true) }, '', 0, 0],
+    ['item com a resposta e hash já igual: hashchange à mão', { 'msg-7': msg(true) }, '#msg-7', 0, 1],
+  ];
+  for (const [nome, dom, hash, recargas, hashchanges] of casos) {
+    notificacoes.length = 0;
+    servidor.itens = [A];
+    const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), dom, hash });
+    await espera();
+    servidor.itens = [A, R];
+    await a.ciclo();
+    assert.equal(notificacoes.length, 1, nome);
+    notificacoes[0].onclick();
+    assert.equal(a.w.location.href, '/#msg-7', nome);
+    assert.equal(a.w.location.recargas, recargas, `${nome}: recargas`);
+    assert.equal(a.w.eventos.filter((e) => e === 'hashchange').length, hashchanges, `${nome}: hashchange`);
+  }
+}
+
+// 7) Permissão concedida fora do clique da aba (achado 2 da r1): "Avisos ativos" implica consulta.
+{
+  notificacoes.length = 0;
+  servidor.itens = [A];
+  servidor.consultas = 0;
+  const a2 = aba({ permissao: 'default', local: armazem(), sessao: armazem() });
+  await espera();
+  assert.equal(a2.timers.length, 0);
+  // Outra aba concede: o Notification desta aba passa a granted sem clique aqui. O clique ativa.
+  a2.Notificacao.permission = 'granted';
+  a2.btn.ouvintes.click();
+  await espera();
+  assert.equal(a2.btn._span.textContent, 'Avisos ativos');
+  assert.equal(a2.timers.length, 1, 'o clique com granted agenda o ciclo');
+  assert.ok(servidor.consultas >= 1, 'e consulta');
+  servidor.itens = [A, B];
+  await a2.ciclo();
+  assert.equal(notificacoes.length, 1, 'e notifica o que chega depois');
+  a2.btn.ouvintes.click();
+  await espera();
+  assert.equal(a2.timers.length, 1, 'clique repetido não agenda duas vezes');
+  // Sem clique: a Permissions API avisa a aba aberta.
+  const a3 = aba({ permissao: 'default', local: armazem(), sessao: armazem() });
+  await espera();
+  a3.Notificacao.permission = 'granted';
+  ouvintesPerm[ouvintesPerm.length - 1].onchange();
+  await espera();
+  assert.equal(a3.btn._span.textContent, 'Avisos ativos');
+  assert.equal(a3.timers.length, 1, 'onchange da permissão agenda o ciclo');
+  // Duas abas, a segunda carregada antes da concessão, concedida na primeira: uma notificação só.
+  notificacoes.length = 0;
+  idbCompartilhado.clear();
+  servidor.itens = [A];
+  const local = armazem();
+  const b1 = aba({ permissao: 'default', local, sessao: armazem(), idb: true });
+  const b2 = aba({ permissao: 'default', local, sessao: armazem(), idb: true });
+  await espera();
+  b1.btn.ouvintes.click();
+  b2.Notificacao.permission = 'granted';
+  b2.btn.ouvintes.click();
+  await espera();
+  servidor.itens = [A, B];
+  await Promise.all([b1.ciclo(), b2.ciclo()]);
+  assert.equal(notificacoes.length, 1, 'duas abas: uma notificação');
+}
+
+// 8) Sem sessionStorage, a base fica na memória da página (achado 4 da r1).
+{
+  notificacoes.length = 0;
   const quebrado = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } };
   servidor.itens = [A];
   const a = aba({ permissao: 'granted', local: quebrado, sessao: quebrado });
   await a.ciclo();
+  assert.equal(notificacoes.length, 0, 'o que existia não notifica');
+  servidor.itens = [A, B];
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1, 'o item novo notifica mesmo sem sessionStorage');
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1);
+}
+
+// 9) Erro do IndexedDB que não é ConstraintError cai para o registro de reserva (achado 5).
+{
+  notificacoes.length = 0;
+  servidor.itens = [A];
+  const local = armazem();
+  const a = aba({ permissao: 'granted', local, sessao: armazem(), idb: true, idbErro: 'QuotaExceededError' });
+  await espera();
+  servidor.itens = [A, B];
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1, 'erro de cota: notifica pela reserva, não silencia');
+  assert.ok(String(local.getItem('orq.avisos.notificados')).includes(B.id));
+  await a.ciclo();
+  assert.equal(notificacoes.length, 1);
+}
+
+// 10) A base não expulsa item antigo ainda aberto (achado 6): 600 itens novos e o antigo não notifica.
+{
+  notificacoes.length = 0;
+  idbCompartilhado.clear();
+  const antigo = { id: 'p:old/1#P1@t0', tipo: 'pendencia', chave: 'old/1#P1', titulo: 'Antigo', projeto: 'old', href: '/p/old/1/1' };
+  servidor.itens = [antigo];
+  const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), idb: true });
+  await espera();
+  const muitos = Array.from({ length: 600 }, (_, i) => ({ id: `p:n/${i}#P1@t`, tipo: 'pendencia', chave: `n/${i}#P1`, titulo: 't', projeto: 'n', href: `/p/n/${i}/1` }));
+  servidor.itens = [antigo, ...muitos];
+  await a.ciclo();
+  assert.equal(notificacoes.length, 600);
+  assert.ok(!notificacoes.some((n) => n.op.tag === 'orq-' + antigo.id));
+  await a.ciclo();
+  await a.ciclo();
+  assert.equal(notificacoes.length, 600, 'o antigo não notifica depois');
+  assert.ok(!notificacoes.some((n) => n.op.tag === 'orq-' + antigo.id));
 }
 console.log('avisos_logica: ok');

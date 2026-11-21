@@ -91,19 +91,31 @@
     });
     return win.__orqAvisosRegistro;
   }
-  // reivindicarIDB tenta registrar cada id; só o add() que vence a corrida devolve o item.
+  // reivindicarIDB tenta registrar cada id e devolve {ganhou, erro}: ganhou são os itens cujo add()
+  // venceu e já foi confirmado (oncomplete, não só onsuccess do pedido); erro são os que falharam
+  // por motivo que não é "outra aba chegou antes" (cota, conexão fechada) e vão para o registro de
+  // reserva. ConstraintError é a derrota normal e não notifica.
   function reivindicarIDB(db, itens) {
     return Promise.all(itens.map(function (it) {
       return new Promise(function (ok) {
+        var fim = false;
+        function acaba(r) { if (!fim) { fim = true; ok({ it: it, r: r }); } }
         try {
           var tx = db.transaction('notificados', 'readwrite');
           var rq = tx.objectStore('notificados').add(Date.now(), it.id);
-          rq.onsuccess = function () { ok(it); };
-          rq.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); ok(null); };
-          tx.onabort = function () { ok(null); };
-        } catch (e) { ok(null); }
+          rq.onerror = function (e) {
+            if (rq.error && rq.error.name === 'ConstraintError') { if (e && e.preventDefault) e.preventDefault(); acaba('perdeu'); }
+            else acaba('erro');
+          };
+          tx.oncomplete = function () { acaba('ganhou'); };
+          tx.onabort = function () { acaba('erro'); };
+        } catch (e) { acaba('erro'); }
       });
-    })).then(function (r) { return r.filter(Boolean); });
+    })).then(function (rs) {
+      var sai = { ganhou: [], erro: [] };
+      rs.forEach(function (x) { if (x.r !== 'perdeu') sai[x.r].push(x.it); });
+      return sai;
+    });
   }
 
   function iniciar(doc, win) {
@@ -133,11 +145,19 @@
         var n = new N(t.titulo, { body: t.corpo, tag: t.tag, icon: '/estatico/orq-icon-64.png', data: { href: t.href } });
         n.onclick = function () {
           try { win.focus(); n.close(); } catch (e) { /* já fechada */ }
-          // Link para um item da própria página que o /vivo ainda não trouxe (a lista de mensagens
-          // atualiza a cada 30 s): só mudar o hash não acharia o alvo, então recarrega.
+          // Destino na própria página (a conversa da resposta, em "/"): o /vivo só atualiza a lista de
+          // mensagens a cada 30 s, então o item pode faltar ou estar sem a resposta. Nesses casos
+          // recarrega (a página abre o <details> do hash ao carregar). Se o item já tem a resposta
+          // e o hash já é o mesmo, não há hashchange: dispara-se um para abrir o que a pessoa fechou.
           var h = t.href.split('#'), local = win.location, mesma = h[0] === (local.pathname || '') + (local.search || '');
+          var alvo = h[1] ? doc.getElementById(h[1]) : null;
+          var pronto = !!alvo && (it.tipo !== 'resposta' || !!(alvo.querySelector && alvo.querySelector('.msg-resposta')));
+          var igual = local.hash === '#' + h[1];
           local.href = t.href;
-          if (mesma && h[1] && !doc.getElementById(h[1]) && local.reload) local.reload();
+          if (mesma && h[1]) {
+            if (!pronto) { if (local.reload) local.reload(); }
+            else if (igual && win.dispatchEvent && win.Event) win.dispatchEvent(new win.Event('hashchange'));
+          }
         };
       } catch (e) { /* contexto que só notifica por service worker: sem aviso, sem erro */ }
     }
@@ -155,27 +175,47 @@
     }
     function reivindicar(novos) {
       return abrirRegistro(win).then(function (db) {
-        if (db) return reivindicarIDB(db, novos);
-        if (win.navigator && win.navigator.locks && win.navigator.locks.request) {
-          return win.navigator.locks.request('orq-avisos', function () { return reivindicarReserva(novos); });
+        if (db) {
+          return reivindicarIDB(db, novos).then(function (r) {
+            if (!r.erro.length) return r.ganhou;
+            return Promise.resolve(reservar(r.erro)).then(function (m) { return r.ganhou.concat(m); });
+          });
         }
-        return reivindicarReserva(novos);
+        return reservar(novos);
       });
     }
+    function reservar(novos) {
+      if (win.navigator && win.navigator.locks && win.navigator.locks.request) {
+          return win.navigator.locks.request('orq-avisos', function () { return reivindicarReserva(novos); });
+      }
+      return reivindicarReserva(novos);
+    }
 
+    // A base da aba vive em sessionStorage (sobrevive a recarga) e, se ele falhar, na memória da
+    // página: sem isso a aba nunca saberia o que é novo. Ela guarda só os ids da última resposta do
+    // servidor, então não cresce nem expulsa item antigo ainda aberto. Custo aceito: um item que
+    // some e volta com o mesmo id, sem nunca ter sido notificado, voltaria a ser "novo"; pendência
+    // resolvida e onda encerrada não voltam, então isso não ocorre.
+    var baseMem = null;
+    function lerBase() {
+      var b = ler(win.sessionStorage, BASE);
+      return b !== null ? b : baseMem;
+    }
+    function gravarBase(ids) {
+      baseMem = ids;
+      gravar(win.sessionStorage, BASE, ids);
+    }
     function ciclo() {
       if (N.permission !== 'granted') { estado(); return Promise.resolve(); }
       return buscar().then(function (itens) {
         if (!itens) return;
-        var base = ler(win.sessionStorage, BASE);
-        if (base === null) {
-          // Primeira consulta desta aba: o que existe agora é o passado, não notifica.
-          gravar(win.sessionStorage, BASE, itens.map(function (i) { return i.id; }));
-          return;
-        }
+        var base = lerBase();
+        var ids = itens.map(function (i) { return i.id; });
+        gravarBase(ids);
+        // Primeira consulta desta aba: o que existe agora é o passado, não notifica.
+        if (base === null) return;
         var novos = selecionar(itens, base, []);
         if (!novos.length) return;
-        gravar(win.sessionStorage, BASE, base.concat(novos.map(function (i) { return i.id; })).slice(-LIMITE_REGISTRO));
         return reivindicar(novos).then(function (meus) { meus.forEach(exibir); });
       });
     }
@@ -184,18 +224,26 @@
       if (timer === null) timer = win.setInterval(ciclo, CICLO_MS);
     }
 
+    // ativar começa a consultar: a base nasce agora (o que existe é passado) e o ciclo é agendado.
+    // "Avisos ativos" no botão sempre implica consulta em andamento. Idempotente.
+    var ativo = false;
+    function ativar() {
+      if (ativo || N.permission !== 'granted') return;
+      ativo = true;
+      baseMem = null;
+      try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
+      ciclo().then(agendar);
+    }
+
     btn.addEventListener('click', function () {
+      if (N.permission === 'granted') { estado(); ativar(); return; } // concedida fora deste clique (outra aba, configuração do site)
       if (N.permission !== 'default') { estado(); return; }
       var feito = false;
       var fim = function () {
         if (feito) return;
         feito = true;
         estado();
-        if (N.permission === 'granted') {
-          // O que já existe no clique é o passado: a base nasce agora.
-          try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
-          ciclo().then(agendar);
-        }
+        ativar();
       };
       try {
         var p = N.requestPermission(fim);
@@ -204,7 +252,18 @@
     });
 
     estado();
-    if (N.permission === 'granted') { ciclo().then(agendar); }
+    // Permissão já concedida ao carregar (por um gesto anterior, nesta ou em outra aba): só consulta,
+    // sem pedir nada, mantendo a base da aba se ela já tem uma (recarga). Não fere "permissão só
+    // por gesto": o gesto foi o da concessão; carregar a página nunca pede a permissão.
+    if (N.permission === 'granted') { ativo = true; ciclo().then(agendar); }
+    // Concedida ou revogada em outra aba/configuração depois do carregamento: acompanha, sem clique.
+    try {
+      if (win.navigator && win.navigator.permissions && win.navigator.permissions.query) {
+        win.navigator.permissions.query({ name: 'notifications' }).then(function (ps) {
+          ps.onchange = function () { estado(); ativar(); };
+        }, function () { /* sem Permissions API */ });
+      }
+    } catch (e) { /* idem */ }
   }
 
   var api = { selecionar: selecionar, textoDe: textoDe, hrefSeguro: hrefSeguro, iniciar: iniciar };

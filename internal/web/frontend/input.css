@@ -119,7 +119,7 @@ a.btn-primary, .btn-primary { color: var(--color-primary-content); }
 .cab-avisos { margin-left: auto; background: transparent; color: #fff; border-color: color-mix(in oklab, #fff 35%, transparent); }
 .cab-avisos:hover:not(:disabled) { background: color-mix(in oklab, #fff 12%, transparent); }
 .cab-avisos:disabled { color: color-mix(in oklab, #fff 65%, transparent); border-color: transparent; background: transparent; }
-.cab-avisos + .cab-user { margin-left: 0; }
+.cab-avisos:not([hidden]) + .cab-user { margin-left: 0; }
 .cab :focus-visible { outline-color: var(--laranja); }
 .cab a:hover { color: #fff; }
 
