@@ -77,7 +77,7 @@ func (s *Servidor) cabecalho() string {
 func (s *Servidor) Handler() http.Handler {
 	if s.modelos == nil {
 		s.estatico = carregarEstaticos()
-		s.modelos = template.Must(template.New("").Funcs(template.FuncMap{"ver": s.estatico.versao}).ParseFS(modelosFS, "tmpl/*.html"))
+		s.modelos = template.Must(template.New("").Funcs(template.FuncMap{"ver": s.estatico.versao, "md": RenderizarMarkdown}).ParseFS(modelosFS, "tmpl/*.html"))
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.inicio)
@@ -90,6 +90,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /projeto/{slug}", s.projeto)
 	mux.HandleFunc("GET /vivo", s.vivo)
 	mux.HandleFunc("GET /onda/{id}", s.onda)
+	mux.HandleFunc("POST /onda/{id}/mensagens", s.enviarMensagem)
 	mux.HandleFunc("GET /saude", s.saude)
 	mux.HandleFunc("GET /estatico/{caminho...}", s.servirEstatico)
 	// O mux grava o padrão no Request que recebe; os de fora são cópias (WithContext), então a
@@ -262,6 +263,8 @@ func (s *Servidor) falha(w http.ResponseWriter, r *http.Request, err error, volt
 		s.erro(w, r, http.StatusNotFound, "Página não encontrada", e.Cause, "/")
 	case e.Code == "pendencia_resolvida":
 		s.erro(w, r, http.StatusConflict, "Já resolvida", e.Cause, voltar)
+	case e.Code == "onda_encerrada":
+		s.erro(w, r, http.StatusConflict, "Onda encerrada", e.Cause, voltar)
 	case e.Exit == output.ExitUsage:
 		s.erro(w, r, http.StatusBadRequest, "Resposta recusada", e.Cause, voltar)
 	case e.Code == "banco_somente_leitura" || e.Code == "versao_do_banco" || e.Code == "banco_ocupado":

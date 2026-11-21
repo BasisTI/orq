@@ -25,14 +25,15 @@ var Limites = map[string]string{
 
 // Onda é um grupo de US conduzido por um coordenador com uma autorização declarada.
 type Onda struct {
-	ID             int64   `json:"id"`
-	Coordenador    string  `json:"coordenador"`
-	Titulo         string  `json:"titulo"`
-	AutorizacaoAte string  `json:"autorizacao_ate"`
-	Ordem          string  `json:"ordem"`
-	CriadaEm       string  `json:"criada_em"`
-	EncerradaEm    *string `json:"encerrada_em"`
-	US             []US    `json:"us"`
+	ID             int64      `json:"id"`
+	Coordenador    string     `json:"coordenador"`
+	Titulo         string     `json:"titulo"`
+	AutorizacaoAte string     `json:"autorizacao_ate"`
+	Ordem          string     `json:"ordem"`
+	CriadaEm       string     `json:"criada_em"`
+	EncerradaEm    *string    `json:"encerrada_em"`
+	US             []US       `json:"us"`
+	Mensagens      []Mensagem `json:"mensagens"`
 }
 
 // NovaOnda são os dados de `orq onda criar`.
@@ -704,6 +705,11 @@ func carregarOndas(ctx context.Context, q querier, clause string, args ...any) (
 			return nil, err
 		}
 		os[i].US = us
+		ms, err := carregarMensagens(ctx, q, `WHERE m.onda_id = ? ORDER BY m.id DESC`, os[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		os[i].Mensagens = ms
 	}
 	return os, nil
 }

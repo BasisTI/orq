@@ -38,6 +38,7 @@ const foto = () => pagina.evaluate(() => ({
   vivos: document.querySelectorAll('#vivo').length,
   filhosDoVivo: document.querySelector('#vivo')?.children.length,
   formularios: document.querySelectorAll('form, textarea:not(#teste-texto), input:not([name=pi])').length,
+  formulariosExtras: document.querySelectorAll('form:not(.msg-form), textarea:not(#teste-texto):not(form.msg-form textarea), input:not([name=pi])').length,
   aviso: document.querySelector('#aviso-lista')?.textContent.trim(),
 }));
 
@@ -73,7 +74,8 @@ if (depois.texto !== 'texto digitado pela pessoa') falha(`o /vivo apagou o que f
 if (Number(depois.pendAba) !== Number(antes.pendAba) - 1) falha(`a contagem da aba Pendências não caiu 1: ${antes.pendAba} -> ${depois.pendAba}`);
 if (depois.situacao === antes.situacao) falha('a linha de situação não mudou depois da resposta');
 if (depois.vivos !== 1 || depois.filhosDoVivo !== 0) falha(`#vivo: ${depois.vivos} elemento(s), ${depois.filhosDoVivo} filho(s)`);
-if (depois.formularios !== 0) falha(`o /vivo trouxe ${depois.formularios} formulário(s)/campo(s) para a página`);
+if (depois.formularios !== antes.formularios) falha(`o /vivo alterou a quantidade de formulários/campos na página: ${antes.formularios} -> ${depois.formularios}`);
+if (depois.formulariosExtras !== 0) falha(`o /vivo trouxe ${depois.formulariosExtras} formulário(s)/campo(s) inesperado(s) para a página`);
 if (depois.aviso) falha(`aviso de lista sem a lista ter mudado: ${depois.aviso}`);
 if (pedidos.length !== 1) falha(`pedidos ao /vivo no primeiro ciclo = ${pedidos.length}, quer 1`);
 

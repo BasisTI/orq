@@ -134,6 +134,50 @@ type EpicoVista struct {
 	URL    string
 }
 
+// MsgVista é uma mensagem enviada ao coordenador e sua resposta (se houver).
+// Texto e Resposta ficam em texto puro; o template escapa Texto e renderiza Resposta com goldmark (md).
+type MsgVista struct {
+	ID            int64
+	Texto         string
+	EnviadaPor    string
+	EnviadaEm     string
+	Estado        string // "aguardando envio", "enviada ao coordenador", "sem coordenador" (vazio se respondida)
+	EstadoCls     string // "neutro", "info", "aviso"
+	Respondida    bool
+	Resposta      string
+	RespondidaPor string
+	RespondidaEm  string
+}
+
+func vistaMsgs(ms []central.Mensagem) []MsgVista {
+	out := make([]MsgVista, 0, len(ms))
+	for _, m := range ms {
+		mv := MsgVista{
+			ID:         m.ID,
+			Texto:      m.Texto,
+			EnviadaPor: m.EnviadaPor,
+			EnviadaEm:  hora.DataHoraRFC(m.EnviadaEm),
+		}
+		if m.RespondidaEm != nil {
+			mv.Respondida = true
+			mv.Resposta = derefStr(m.Resposta)
+			mv.RespondidaPor = derefStr(m.RespondidaPor)
+			mv.RespondidaEm = hora.DataHoraRFC(*m.RespondidaEm)
+		} else if m.SemCoordenador {
+			mv.Estado = "sem coordenador"
+			mv.EstadoCls = "aviso"
+		} else if m.AvisadaEm != nil {
+			mv.Estado = "enviada ao coordenador"
+			mv.EstadoCls = "info"
+		} else {
+			mv.Estado = "aguardando envio"
+			mv.EstadoCls = "neutro"
+		}
+		out = append(out, mv)
+	}
+	return out
+}
+
 // OndaVista é a barra e o corpo de uma onda.
 type OndaVista struct {
 	ID                       int64
@@ -149,6 +193,9 @@ type OndaVista struct {
 	Esperam                  int
 	Sinais                   []Selo
 	US                       []USVista
+	Msgs                     []MsgVista
+	MsgsQtd                  int
+	LimiteMsg                int
 	Atencao                  int
 	Concluida                bool
 	Oob                      bool
@@ -428,6 +475,7 @@ func vistaOnda(o central.Onda, esperam int, tons map[string]int, agora time.Time
 	ov := OndaVista{
 		ID: o.ID, Anchor: "onda-" + id, BarraID: "onda-" + id + "-barra", Titulo: o.Titulo, Coordenador: o.Coordenador,
 		Limite: "até " + o.AutorizacaoAte + " · " + o.Ordem, Href: "/onda/" + id, Total: len(o.US), Esperam: esperam,
+		Msgs: vistaMsgs(o.Mensagens), MsgsQtd: len(o.Mensagens), LimiteMsg: LimiteTexto,
 	}
 	ov.Criada = hora.DataRFC(o.CriadaEm)
 	if ov.Titulo == "" {

@@ -119,20 +119,27 @@ func (s *Servico) logf(f string, a ...any) {
 
 // Ciclo importa e avisa. Falha de um passo não impede o outro; o primeiro erro volta no fim.
 func (s *Servico) Ciclo(ctx context.Context) error {
-	_, err1 := s.Imp.Varrer(ctx)
+	var err1 error
+	if s.Imp != nil {
+		_, err1 = s.Imp.Varrer(ctx)
+	}
 	err2 := s.Avisar(ctx)
 	return errors.Join(err1, err2)
 }
 
-// Avisar entrega os avisos devidos. Manda no máximo um por coordenador a cada ciclo: depois do
-// primeiro, o agente vai a working e o próximo espera a vez.
+// Avisar entrega os avisos devidos (pendências e mensagens ao coordenador). Manda no máximo um por
+// coordenador a cada ciclo: depois do primeiro, o agente vai a working e o próximo espera a vez.
 func (s *Servico) Avisar(ctx context.Context) error {
-	avisos, err := s.St.AvisosPendentes(ctx)
-	if err != nil || len(avisos) == 0 {
-		return err
-	}
 	atendidos := map[string]bool{}
 	var primeiro error
+	avisos, err := s.St.AvisosPendentes(ctx)
+	if err != nil {
+		primeiro = err
+	}
+	baseURL := ""
+	if s.Imp != nil {
+		baseURL = s.Imp.BaseURL
+	}
 	for _, a := range avisos {
 		if ctx.Err() != nil {
 			break
@@ -144,7 +151,7 @@ func (s *Servico) Avisar(ctx context.Context) error {
 		if a.Pane != nil {
 			pane = *a.Pane
 		}
-		err := s.Av.Avisar(ctx, Destino{Coordenador: a.Coordenador, Pane: pane}, TextoAviso(a, s.Imp.BaseURL))
+		err := s.Av.Avisar(ctx, Destino{Coordenador: a.Coordenador, Pane: pane}, TextoAviso(a, baseURL))
 		switch {
 		case err == nil:
 			s.ultimoErro = ""
@@ -167,6 +174,9 @@ func (s *Servico) Avisar(ctx context.Context) error {
 			}
 			atendidos[a.Coordenador] = true
 		}
+	}
+	if err := s.avisarMensagens(ctx, atendidos); err != nil && primeiro == nil {
+		primeiro = err
 	}
 	return primeiro
 }

@@ -106,6 +106,9 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq pend resolver <ref>#P<n> [--resposta "…"]` | Resolve a pendência. Sem `--resposta`, vale a que a pessoa registrou (o texto dela ou `opção N (título)`). |
 | `orq pend list [--abertas\|--respondidas\|--resolvidas] [--coord X] [--onda N] [--projeto P]` | Lista as pendências. `--abertas` inclui as respondidas que ainda não foram resolvidas. |
 | `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre uma pendência só com o título, sem detalhe (o caminho antigo; o normal é o arquivo) e imprime o id (`TG-312#P2`). |
+| `orq msg ver <id>` | Mostra a mensagem enviada pela web ao coordenador e a resposta (se houver). |
+| `orq msg responder <id> ["texto"] [--arquivo <caminho>]` | Registra a resposta única do coordenador (até 64 KiB, aceita markdown; `--arquivo -` lê de `stdin`). |
+| `orq msg list [--onda <id>] [--abertas]` | Lista as mensagens em ordem decrescente de envio. |
 | `orq diario [--us <ref>] [--onda N] [--coord X] [--limite 50]` | Eventos gravados, do mais antigo ao mais novo (toda escrita gera um). |
 | `orq snapshot [--incluir-encerradas] [--json]` | Estado consolidado em JSON versionado (`--json` é aceito, mas a saída já é sempre JSON); contrato em [`docs/snapshot.md`](docs/snapshot.md). |
 | `orq atualizar [--fonte herdr\|mr\|taiga] [--forcar]` | Consulta as fontes uma vez (todas, sem `--fonte`; repetível ou `mr,taiga`), grava o cache e, com o Herdr entre elas, confere os tokens de sidebar. Cada chave respeita o TTL; `--forcar` ignora o TTL e a suspensão por autenticação. |
@@ -212,6 +215,7 @@ Só com o coordenador `idle` ou `done` (`herdr agent get`); senão, tenta no cic
 | `GET /projeto/<slug>` | a mesma Central, só com as ondas que têm US do projeto; 404 se o slug não tem onda aberta |
 | `GET /vivo?v=<hash>` | fragmento da atualização de 30 s, por aba (só `hx-swap-oob`: situação, abas, idade dos dados, o `<summary>` de cada onda e US; na Central, também o status do Taiga, as MRs e a lista de pendências de cada US, por diferença contra o `pi` que a página manda; na aba Pendências, os contadores dos grupos); nunca devolve o corpo nem o formulário de uma pendência e não troca nem remove a que está aberta ou com texto digitado (o `app.js` a retém e a marca como desatualizada); lista de ondas ou US diferente da da página vira o aviso "A lista mudou" |
 | `GET /onda/<id>?pagina=N` | o diário da onda (`orq diario --onda`), do mais recente ao mais antigo, 25 por página; recarrega a cada 30 s |
+| `POST /onda/<id>/mensagens` | envia uma mensagem ao coordenador da onda aberta (campo `texto`, até 8 KiB, `application/x-www-form-urlencoded`, mesma proteção de origem e usuário); sem `HX-Request` faz 303 para `/#onda-<id>`, com `HX-Request` devolve a lista `#onda-<id>-msgs` e atualiza `(N)` e `#aviso` via `hx-swap-oob`. O daemon avisa o coordenador via `herdr agent prompt` com `orq msg ver <id>` / `orq msg responder <id>` (sem texto livre no prompt) |
 | `GET /saude` | `ok` se o banco responde e aceita escrita deste `orq` |
 | `GET /estatico/<arquivo>` | o CSS (`app.css`), o `htmx.min.js`, o `app.js`, as fontes e as imagens embutidos no binário; `/estilo.css` deixou de existir. Só `GET`; diretório e o que não está no embed dão 404 |
 

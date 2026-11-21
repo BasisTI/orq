@@ -254,6 +254,24 @@ details[open] > summary .chev { rotate: 90deg; }
 .onda-meta { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; padding: .6rem .9rem; font-size: .9rem; color: #2B3A48; background: var(--color-base-200); align-items: center; }
 .onda-meta a { display: inline-flex; gap: .3rem; align-items: center; margin-left: auto; font-weight: 700; min-height: 2.25rem; }
 
+/* mensagens ao coordenador (US #64) */
+.onda-msgs { border-top: 1px solid var(--linha); background: color-mix(in oklab, var(--color-base-200) 25%, #fff); }
+.onda-msgs-sum { display: flex; align-items: center; gap: .5rem; padding: .65rem .9rem; font-weight: 700; font-size: .95rem; color: var(--color-secondary); min-height: 2.75rem; }
+.onda-msgs-sum:hover { background: color-mix(in oklab, var(--color-base-200) 55%, #fff); }
+.onda-msgs-corpo { padding: .25rem .9rem 1rem 1.5rem; display: grid; gap: .9rem; border-top: 1px dashed var(--linha); }
+.msg-form { display: grid; gap: .6rem; max-width: 70ch; }
+.msg-form .erro:empty { display: none; }
+.msg-form .erro { background: #FBE6E3; color: #9C1F18; border-radius: var(--radius-field); padding: .55rem .8rem; }
+.msg-form .erro p { margin: 0; }
+.onda-msgs-lista { display: grid; gap: .75rem; max-width: 70ch; }
+.msg-item { background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); overflow: hidden; }
+.msg-pergunta { padding: .7rem .85rem; }
+.msg-meta { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; font-size: .88rem; color: var(--suave); margin-bottom: .35rem; }
+.msg-meta b { color: var(--color-secondary); }
+.msg-texto { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.msg-resposta { padding: .7rem .85rem; border-top: 1px solid var(--linha); background: color-mix(in oklab, var(--color-base-200) 40%, #fff); }
+.msg-resp-corpo { background: transparent; border: 0; padding: 0; margin: 0; }
+
 /* linha da US */
 .us { border-top: 1px solid var(--linha); }
 .us:first-child { border-top: 0; }
