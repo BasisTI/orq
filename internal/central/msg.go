@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/BasisTI/orq/internal/output"
 )
 
 // Limites de tamanho para mensagens enviadas ao coordenador e respostas dele.
@@ -42,16 +45,33 @@ type FiltroMensagens struct {
 	Abertas bool // sem resposta
 }
 
+// controleMensagem recusa caracteres de controle (incluindo \r solto), liberando apenas \n e \t.
+func controleMensagem(r rune) bool {
+	return output.UnsafeRune(r) && r != '\n' && r != '\t'
+}
+
+// textoMensagemValido valida texto de mensagem/resposta após normalização de CRLF para LF.
+func textoMensagemValido(campo, v string, limite int) error {
+	if len(v) > limite {
+		return uso(fmt.Sprintf("%s com mais de %d bytes", campo, limite), "")
+	}
+	if !utf8.ValidString(v) || strings.ContainsFunc(v, controleMensagem) {
+		return uso(campo+" com caractere de controle ou UTF-8 inválido", "")
+	}
+	return nil
+}
+
 // EnviarMensagem grava uma nova mensagem ligada a uma onda aberta e registra o evento msg.enviar
 // no diário.
 func (s *Store) EnviarMensagem(ctx context.Context, ondaID int64, texto, por string) (Mensagem, error) {
-	texto = strings.ReplaceAll(strings.TrimSpace(texto), "\r\n", "\n")
+	texto = strings.ReplaceAll(texto, "\r\n", "\n")
 	if err := linhaValida("enviada_por", por, limiteAutor, true); err != nil {
 		return Mensagem{}, err
 	}
-	if err := TextoLivreValido("mensagem", texto, LimiteMensagem); err != nil {
+	if err := textoMensagemValido("mensagem", texto, LimiteMensagem); err != nil {
 		return Mensagem{}, err
 	}
+	texto = strings.TrimSpace(texto)
 	if texto == "" {
 		return Mensagem{}, uso("mensagem vazia", "escreva a mensagem ao coordenador")
 	}
@@ -135,10 +155,11 @@ func (s *Store) ListarMensagens(ctx context.Context, f FiltroMensagens) ([]Mensa
 // ResponderMensagem grava a resposta única do coordenador à mensagem e registra msg.responder no
 // diário. Tentar responder novamente falha com conflito mensagem_respondida.
 func (s *Store) ResponderMensagem(ctx context.Context, coord *Coordenador, id int64, texto string) (Mensagem, error) {
-	texto = strings.ReplaceAll(strings.TrimSpace(texto), "\r\n", "\n")
-	if err := TextoLivreValido("resposta", texto, LimiteRespostaMensagem); err != nil {
+	texto = strings.ReplaceAll(texto, "\r\n", "\n")
+	if err := textoMensagemValido("resposta", texto, LimiteRespostaMensagem); err != nil {
 		return Mensagem{}, err
 	}
+	texto = strings.TrimSpace(texto)
 	if texto == "" {
 		return Mensagem{}, uso("resposta vazia", "passe o texto da resposta ou --arquivo <caminho> (- para stdin)")
 	}

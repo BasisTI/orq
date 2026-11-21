@@ -119,8 +119,8 @@ func TestMensagensSegurancaEErros(t *testing.T) {
 		}
 	}
 
-	// 400 vazio e caractere de controle.
-	for _, body := range []string{"texto=", "texto=%20%20", "texto=oi%00x"} {
+	// 400 vazio e caractere de controle (inclusive \r solto).
+	for _, body := range []string{"texto=", "texto=%20%20", "texto=oi%00x", "texto=antes%0ddepois"} {
 		w := c.f.faz(req{metodo: "POST", caminho: rota, corpo: body, cab: map[string]string{"HX-Request": "true"}})
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("body %q = %d, quer 400", body, w.Code)
@@ -130,7 +130,25 @@ func TestMensagensSegurancaEErros(t *testing.T) {
 		}
 	}
 
-	// 413 texto > 8 KiB e corpo > 16 KiB.
+	// 400 sem HX-Request traz título coerente ("Mensagem recusada", não "Resposta recusada").
+	w = c.f.faz(req{metodo: "POST", caminho: rota, corpo: "texto="})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("400 sem HX = %d", w.Code)
+	}
+	contem(t, corpo(w), "Mensagem recusada")
+	naoContem(t, corpo(w), "Resposta recusada")
+
+	// 8.190 bytes com 30 quebras de linha enviadas como CRLF (8.220 bytes brutos) -> 200 após normalização.
+	textoCRLF := strings.Repeat("a\r\n", 30) + strings.Repeat("b", 8190-60)
+	if len(textoCRLF) != 8220 {
+		t.Fatalf("len(textoCRLF) = %d, quer 8220", len(textoCRLF))
+	}
+	w = c.f.faz(req{metodo: "POST", caminho: rota, corpo: url.Values{"texto": {textoCRLF}}.Encode(), cab: map[string]string{"HX-Request": "true"}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("CRLF 8190 LF (8220 bruto) = %d, quer 200: %s", w.Code, corpo(w))
+	}
+
+	// 413 texto > 8 KiB (mesmo após normalização) e corpo > 16 KiB.
 	grande8k := url.Values{"texto": {strings.Repeat("a", LimiteTexto+1)}}.Encode()
 	w = c.f.faz(req{metodo: "POST", caminho: rota, corpo: grande8k, cab: map[string]string{"HX-Request": "true"}})
 	if w.Code != http.StatusRequestEntityTooLarge {

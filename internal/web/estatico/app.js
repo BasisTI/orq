@@ -129,11 +129,12 @@
     });
     // O htmx dispara htmx:afterRequest antes destes três: o formulário já está solto e a fila segue.
     var FALHA = 'Não foi possível confirmar o envio. Confira se a resposta já aparece como respondida antes de enviar de novo. O texto continua aqui.';
+    var FALHA_MSG = 'Não foi possível confirmar o envio. Confira se a mensagem já aparece na lista antes de enviar de novo. O texto continua aqui.';
     function falhou(e) {
       var f = deResposta(e.detail.elt), erro = f && f.isConnected && f.querySelector('.erro');
       if (!erro) return;
       var p = document.createElement('p');
-      p.textContent = FALHA;
+      p.textContent = f.matches('form.msg-form') ? FALHA_MSG : FALHA;
       erro.replaceChildren(p);
     }
     ['htmx:sendError', 'htmx:timeout', 'htmx:sendAbort'].forEach(function (ev) { document.addEventListener(ev, falhou); });

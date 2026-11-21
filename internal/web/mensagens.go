@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/output"
 )
 
 // enviarMensagem atende POST /onda/{id}/mensagens: grava uma mensagem ao coordenador da onda.
@@ -34,13 +35,13 @@ func (s *Servidor) enviarMensagem(w http.ResponseWriter, r *http.Request) {
 		s.erro(w, r, http.StatusBadRequest, "Formulário inválido", "Não consegui ler o formulário.", voltar)
 		return
 	}
-	texto := r.PostForm.Get("texto")
+	texto := strings.ReplaceAll(r.PostForm.Get("texto"), "\r\n", "\n")
 	if len(texto) > LimiteTexto {
 		s.erro(w, r, http.StatusRequestEntityTooLarge, "Mensagem grande demais", fmt.Sprintf("O texto passa de %d KiB.", LimiteTexto>>10), voltar)
 		return
 	}
 	if _, err := s.St.EnviarMensagem(r.Context(), id, texto, usuarioDe(r)); err != nil {
-		s.falha(w, r, err, voltar)
+		s.falhaMensagem(w, r, err, voltar)
 		return
 	}
 	if !ehFragmento(r) {
@@ -49,7 +50,7 @@ func (s *Servidor) enviarMensagem(w http.ResponseWriter, r *http.Request) {
 	}
 	ms, err := s.St.ListarMensagens(r.Context(), central.FiltroMensagens{OndaID: id})
 	if err != nil {
-		s.falha(w, r, err, voltar)
+		s.falhaMensagem(w, r, err, voltar)
 		return
 	}
 	ov := OndaVista{
@@ -63,5 +64,26 @@ func (s *Servidor) enviarMensagem(w http.ResponseWriter, r *http.Request) {
 		Aviso string
 	}{Onda: ov, Aviso: "Mensagem enviada ao coordenador."}); err != nil && s.Log != nil {
 		s.Log("web: modelo msg-enviada: %v", err)
+	}
+}
+
+// falhaMensagem traduz o erro da Central para o fluxo de envio de mensagem ao coordenador,
+// mantendo os textos das pendências em s.falha inalterados.
+func (s *Servidor) falhaMensagem(w http.ResponseWriter, r *http.Request, err error, voltar string) {
+	e := output.AsError(err)
+	switch {
+	case e.Exit == output.ExitNotFound:
+		s.erro(w, r, http.StatusNotFound, "Página não encontrada", e.Cause, "/")
+	case e.Code == "onda_encerrada":
+		s.erro(w, r, http.StatusConflict, "Onda encerrada", e.Cause, voltar)
+	case e.Exit == output.ExitUsage:
+		s.erro(w, r, http.StatusBadRequest, "Mensagem recusada", e.Cause, voltar)
+	case e.Code == "banco_somente_leitura" || e.Code == "versao_do_banco" || e.Code == "banco_ocupado":
+		s.erro(w, r, http.StatusServiceUnavailable, "Indisponível", "A Central está indisponível agora; tente de novo em instantes.", voltar)
+	default:
+		if s.Log != nil {
+			s.Log("web: erro interno: %s", e.Code)
+		}
+		s.erro(w, r, http.StatusInternalServerError, "Erro interno", "Algo falhou do nosso lado. A mensagem não foi enviada.", voltar)
 	}
 }

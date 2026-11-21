@@ -177,14 +177,14 @@ func TestMensagensValidacoesEOndaEncerrada(t *testing.T) {
 	if _, err := st.EnviarMensagem(ctx, 999, "oi", "ana"); output.AsError(err).Exit != output.ExitNotFound {
 		t.Fatalf("onda inexistente = %v", err)
 	}
-	// Texto vazio, controle, acima de 8 KiB.
-	for _, txt := range []string{"", "   \n\t ", "com\x00nulo", "com\x1besc", strings.Repeat("a", LimiteMensagem+1)} {
+	// Texto vazio, controle (inclusive \r solto), acima de 8 KiB.
+	for _, txt := range []string{"", "   \n\t ", "com\x00nulo", "com\x1besc", "antes\rdepois", "\rinicio", strings.Repeat("a", LimiteMensagem+1)} {
 		if _, err := st.EnviarMensagem(ctx, o.ID, txt, "ana"); output.AsError(err).Exit != output.ExitUsage {
 			t.Errorf("texto inválido %q: err = %v", txt[:min(len(txt), 16)], err)
 		}
 	}
 
-	// Resposta até 64 KiB aceita; 64 KiB + 1 recusa.
+	// Resposta até 64 KiB aceita; 64 KiB + 1 e \r solto recusam.
 	m, err := st.EnviarMensagem(ctx, o.ID, "pergunta", "ana")
 	if err != nil {
 		t.Fatal(err)
@@ -192,8 +192,10 @@ func TestMensagensValidacoesEOndaEncerrada(t *testing.T) {
 	if _, err := st.ResponderMensagem(ctx, nil, m.ID, strings.Repeat("r", LimiteRespostaMensagem+1)); output.AsError(err).Exit != output.ExitUsage {
 		t.Fatalf("resposta > 64KiB = %v", err)
 	}
-	if _, err := st.ResponderMensagem(ctx, nil, m.ID, "com\x07sino"); output.AsError(err).Exit != output.ExitUsage {
-		t.Fatalf("resposta com controle = %v", err)
+	for _, bad := range []string{"com\x07sino", "resp\rcom_cr", "\rinicio"} {
+		if _, err := st.ResponderMensagem(ctx, nil, m.ID, bad); output.AsError(err).Exit != output.ExitUsage {
+			t.Fatalf("resposta com controle %q = %v", bad, err)
+		}
 	}
 	if _, err := st.ResponderMensagem(ctx, nil, m.ID, strings.Repeat("r", LimiteRespostaMensagem)); err != nil {
 		t.Fatalf("resposta de 64KiB falhou: %v", err)

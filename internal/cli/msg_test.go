@@ -142,3 +142,75 @@ func TestCLIMsgVerResponderList(t *testing.T) {
 		t.Fatalf("msg responder --arquivo exit %d, out=%s, err=%s", code, out, errOut)
 	}
 }
+
+func TestCLIMsgResponderLimitesTruncamentoECR(t *testing.T) {
+	env, _ := pendEnv(t)
+	ctx := context.Background()
+	st, err := central.Open(ctx, env["ORQ_STATE_DIR"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ondas, err := st.ListarOndas(ctx, central.FiltroOndas{Abertas: true})
+	if err != nil || len(ondas) == 0 {
+		t.Fatalf("ondas = %+v, %v", ondas, err)
+	}
+	m, err := st.EnviarMensagem(ctx, ondas[0].ID, "Pergunta longa", "cedric")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	idStr := strconv.FormatInt(m.ID, 10)
+
+	// Caso 1: stdin com quebra inicial ultrapassando 64 KiB (65553 bytes).
+	stdinGrande := "\n" + strings.Repeat("A", 65535) + "FIM_PERDIDO_12345"
+	code, _, errOut := rodarApp(env, stdinGrande, false, "msg", "responder", idStr, "--arquivo", "-")
+	if code != output.ExitUsage || !strings.Contains(errOut, "65536") {
+		t.Fatalf("caso 1 (stdin): exit=%d err=%s", code, errOut)
+	}
+
+	// Caso 2: arquivo em disco com CRLF ultrapassando 64 KiB (65552 bytes).
+	arqCRLF := filepath.Join(t.TempDir(), "resp_crlf.md")
+	if err := os.WriteFile(arqCRLF, []byte("linha1\r\n"+strings.Repeat("B", 65528)+"PERDIDO_NO_FINAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut = rodarApp(env, "", false, "msg", "responder", idStr, "--arquivo", arqCRLF)
+	if code != output.ExitUsage || !strings.Contains(errOut, "65536") {
+		t.Fatalf("caso 2 (arquivo CRLF): exit=%d err=%s", code, errOut)
+	}
+
+	// Caso 3: UTF-8 multibyte cortado no byte 65537 (65543 bytes) — deve dar erro de tamanho, não UTF-8 inválido.
+	utf8Cortado := "\n" + strings.Repeat("a", 65535) + "é" + "resto"
+	code, _, errOut = rodarApp(env, utf8Cortado, false, "msg", "responder", idStr, "--arquivo", "-")
+	if code != output.ExitUsage || !strings.Contains(errOut, "65536") || strings.Contains(errOut, "UTF-8") {
+		t.Fatalf("caso 3 (UTF-8 cortado): exit=%d err=%s", code, errOut)
+	}
+
+	// Achado 3 (CLI): \r solto recusado com exit 2.
+	code, _, errOut = rodarApp(env, "", false, "msg", "responder", idStr, "resp\rcom_cr")
+	if code != output.ExitUsage || !strings.Contains(errOut, "controle") {
+		t.Fatalf("CR solto na CLI: exit=%d err=%s", code, errOut)
+	}
+
+	// Mensagem continua sem resposta e pode ser respondida normalmente (com CRLF normalizado).
+	st, err = central.Open(ctx, env["ORQ_STATE_DIR"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv, err := st.VerMensagem(ctx, m.ID)
+	_ = st.Close()
+	if err != nil || mv.RespondidaEm != nil {
+		t.Fatalf("mensagem foi respondida indevidamente: %+v, %v", mv, err)
+	}
+
+	code, out, errOut := rodarApp(env, "", false, "msg", "responder", idStr, "linha1\r\nlinha2")
+	if code != 0 {
+		t.Fatalf("resposta válida depois das recusas: exit=%d err=%s", code, errOut)
+	}
+	var resp central.Mensagem
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Resposta == nil || *resp.Resposta != "linha1\nlinha2" {
+		t.Fatalf("resposta normalizada = %+v", resp.Resposta)
+	}
+}

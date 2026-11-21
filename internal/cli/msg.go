@@ -132,21 +132,26 @@ func parseMsgID(s string) (int64, error) {
 
 func (a *App) lerTextoResposta(caminho string) (string, error) {
 	limite := int64(central.LimiteRespostaMensagem + 1)
+	var b []byte
+	var err error
 	if caminho == "-" {
-		b, err := io.ReadAll(io.LimitReader(a.In, limite))
+		b, err = io.ReadAll(io.LimitReader(a.In, limite))
 		if err != nil {
 			return "", &output.Error{Code: "leitura", Cause: err.Error(), Exit: output.ExitUnexpected}
 		}
-		return string(b), nil
+	} else {
+		f, errOpen := os.Open(caminho)
+		if errOpen != nil {
+			return "", &output.Error{Code: "leitura", Cause: errOpen.Error(), Recovery: "confira o caminho de --arquivo", Exit: output.ExitUsage}
+		}
+		defer f.Close()
+		b, err = io.ReadAll(io.LimitReader(f, limite))
+		if err != nil {
+			return "", &output.Error{Code: "leitura", Cause: err.Error(), Exit: output.ExitUnexpected}
+		}
 	}
-	f, err := os.Open(caminho)
-	if err != nil {
-		return "", &output.Error{Code: "leitura", Cause: err.Error(), Recovery: "confira o caminho de --arquivo", Exit: output.ExitUsage}
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, limite))
-	if err != nil {
-		return "", &output.Error{Code: "leitura", Cause: err.Error(), Exit: output.ExitUnexpected}
+	if len(b) > central.LimiteRespostaMensagem {
+		return "", usoErr("resposta com mais de %d bytes", central.LimiteRespostaMensagem)
 	}
 	return string(b), nil
 }
