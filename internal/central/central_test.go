@@ -726,7 +726,7 @@ func TestSnapshot(t *testing.T) {
 		{"fontes", m["fontes"], "herdr,mr,taiga"},
 		{"fonte", m["fontes"].(map[string]any)["mr"], "atualizado_em,consultado_em,erro"},
 		{"coordenador", coordJ, "herdr,nome,ondas,pane_id,projeto_padrao,registrado_em,workspace_id"},
-		{"herdr", coordJ["herdr"], "agente,atualizado_em,erro,nome,status,workspace_id"},
+		{"herdr", coordJ["herdr"], "agente,atualizado_em,erro,nome,referencia,status,workspace_id"},
 		{"onda", ondaJ, "autorizacao_ate,coordenador,criada_em,encerrada_em,id,mensagens,nome,ordem,titulo,us"},
 		{"us", usJ, "atualizado_em,chave,depende_de,esforco,espera_motivo,herdr,id,modelo,mrs,onda_id,pane_id,papel,pendencias,posicao,projeto,ref,rodada,status,taiga"},
 		{"taiga", usJ["taiga"], "atualizado_em,erro,status,titulo,url"},

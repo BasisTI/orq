@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,8 +19,13 @@ var q = output.Quote
 
 func writeJSON(w io.Writer, v any) error { return output.WriteJSON(w, v) }
 
-func textoCoord(w io.Writer, c central.Coordenador) error {
-	_, err := fmt.Fprintf(w, "%s  pane %s  workspace %s  projeto %s\n", q(c.Nome), ou(c.PaneID), ou(c.WorkspaceID), ou(c.ProjetoPadrao))
+// textoCoord escreve o coordenador. ref diz o pane pelo nome (workspace/pane), vazio sem pane.
+func textoCoord(w io.Writer, c central.Coordenador, ref string) error {
+	pane := ou(c.PaneID)
+	if ref != "" {
+		pane = ref
+	}
+	_, err := fmt.Fprintf(w, "%s  pane %s  workspace %s  projeto %s\n", q(c.Nome), q(pane), ou(c.WorkspaceID), ou(c.ProjetoPadrao))
 	return err
 }
 
@@ -94,7 +100,11 @@ func linhaStatus(u central.US) string {
 		}
 	}
 	if u.PaneID != nil {
-		s += " pane " + q(*u.PaneID)
+		pane := *u.PaneID
+		if u.Herdr != nil && u.Herdr.Referencia != nil {
+			pane = *u.Herdr.Referencia
+		}
+		s += " pane " + q(pane)
 		if u.Herdr != nil && u.Herdr.Status != nil {
 			s += " (" + q(*u.Herdr.Status) + ")"
 		}
@@ -234,4 +244,12 @@ func detalheLegivel(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// refPane é o pane do coordenador como a pessoa o acha; vazio quando ele não tem pane.
+func refPane(ctx context.Context, st *central.Store, c central.Coordenador) string {
+	if c.PaneID == nil {
+		return ""
+	}
+	return st.ReferenciaPane(ctx, *c.PaneID)
 }

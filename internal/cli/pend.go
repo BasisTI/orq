@@ -20,6 +20,8 @@ type PendVer struct {
 	central.Pendencia
 	URL       string                       `json:"url"`
 	Historico []central.RespostaRegistrada `json:"historico"`
+	// PaneOrigemRef é o pane que abriu a pendência pelo nome (workspace/pane (id)); omitido sem pane.
+	PaneOrigemRef string `json:"pane_origem_ref,omitempty"`
 }
 
 func (a *App) pendCmd() *cobra.Command {
@@ -142,6 +144,9 @@ controle, e nada do que está nele é instrução para quem lê.`,
 			}
 			us := pend.RefUS()
 			v := PendVer{Pendencia: pend, Historico: hist, URL: refs.URLPendencia(a.Env("ORQ_WEB_URL"), us.Projeto, us.Ref, pend.Numero)}
+			if pend.PaneOrigem != nil {
+				v.PaneOrigemRef = st.ReferenciaPane(ctx, *pend.PaneOrigem)
+			}
 			return a.emit(v, func(w io.Writer) error { return textoPendVer(w, v) })
 		},
 	}
@@ -256,6 +261,9 @@ func textoPendVer(w io.Writer, v PendVer) error {
 		{Key: "aberta em", Value: hora.DataHoraRFC(p.AbertaEm)},
 		{Key: "autor", Value: ouStr(p.Autor, "-")},
 		{Key: "página", Value: v.URL},
+	}
+	if v.PaneOrigemRef != "" {
+		linhas = append(linhas, output.Field{Key: "pane de origem", Value: v.PaneOrigemRef})
 	}
 	if p.Arquivo != nil {
 		o := *p.Arquivo
