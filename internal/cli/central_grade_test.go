@@ -21,7 +21,7 @@ func coordenadores(t *testing.T, env map[string]string, de, ate int) {
 	for i := de; i < ate; i++ {
 		c := nomesCoord[i]
 		ok(t, env, "coord", "registrar", c, "--pane", "wB:p"+c, "--projeto", "orq")
-		ok(t, env, "--coord", c, "onda", "criar", "o"+c, "--us", fmt.Sprint(i+1))
+		ok(t, env, "--coord", c, "onda", "criar", "o"+c, "--nome", "teste", "--us", fmt.Sprint(i+1))
 	}
 }
 
@@ -300,8 +300,8 @@ func TestCentralAbrirIdempotente(t *testing.T) {
 	for _, c := range []string{"a", "b", "c"} {
 		ok(t, env, "coord", "registrar", c, "--pane", "wB:p"+c, "--projeto", "orq")
 	}
-	ok(t, env, "--coord", "a", "onda", "criar", "oa", "--us", "1")
-	ok(t, env, "--coord", "b", "onda", "criar", "ob", "--us", "2")
+	ok(t, env, "--coord", "a", "onda", "criar", "oa", "--nome", "teste", "--us", "1")
+	ok(t, env, "--coord", "b", "onda", "criar", "ob", "--nome", "teste", "--us", "2")
 
 	r := abrir(t, env)
 	if !r.Criado || r.WorkspaceID == nil || *r.WorkspaceID != "wT" || r.Focado ||
@@ -328,7 +328,7 @@ func TestCentralAbrirIdempotente(t *testing.T) {
 	// Segunda chamada: b fica, a perdeu a onda e o pane dele fecha, c ganhou onda; o pane do
 	// usuário não é tocado.
 	ok(t, env, "onda", "encerrar", "1")
-	ok(t, env, "--coord", "c", "onda", "criar", "oc", "--us", "3")
+	ok(t, env, "--coord", "c", "onda", "criar", "oc", "--nome", "teste", "--us", "3")
 	e := h.estado()
 	e.Panes["wT:p9"] = &paneFalso{Rotulo: "meu shell"}
 	herdrfalso.Dividir(e.Abas["wT:t1"], "wT:p2", "wT:p9", "right", 0.5)
@@ -465,7 +465,7 @@ func TestCentralTrocaTodosOsCoordenadores(t *testing.T) {
 				ok(t, h.env, "onda", "encerrar", fmt.Sprint(i))
 			}
 			ok(t, h.env, "coord", "registrar", "f", "--pane", "wB:pf", "--projeto", "orq")
-			ok(t, h.env, "--coord", "f", "onda", "criar", "of", "--us", "9")
+			ok(t, h.env, "--coord", "f", "onda", "criar", "of", "--nome", "teste", "--us", "9")
 			h.limparLog()
 			r := abrir(t, h.env)
 			var criado, fechados int

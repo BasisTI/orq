@@ -38,8 +38,9 @@ type EventoExterno struct {
 	Detalhe map[string]any
 }
 
-// TiposExternos são os eventos que a limpeza e os recursos gravam no diário.
-var TiposExternos = []string{"recursos.gravar", "recursos.reabrir", "limpar.removido", "limpar.preservado", "limpar.falhou", "limpar.recusada", "limpar.onda"}
+// TiposExternos são os eventos que a limpeza, os recursos e a renomeação do pane do coordenador
+// gravam no diário.
+var TiposExternos = []string{"recursos.gravar", "recursos.reabrir", "limpar.removido", "limpar.preservado", "limpar.falhou", "limpar.recusada", "limpar.onda", "onda.pane_nome"}
 
 // RegistrarExternos grava os eventos de uma US numa transação só. Eles descrevem o que o orq
 // fez fora do banco; o fato de gravar não muda o estado da Central.

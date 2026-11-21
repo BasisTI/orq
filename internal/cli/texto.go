@@ -34,7 +34,13 @@ func textoOndaResumo(w io.Writer, o central.Onda) error {
 	if o.EncerradaEm != nil {
 		estado = "  encerrada " + hora.DataHoraRFC(*o.EncerradaEm)
 	}
-	_, err := fmt.Fprintf(w, "onda %d  %s  [%s · até %s · %s]  %d/%d done%s\n", o.ID, q(o.Titulo), q(o.Coordenador), o.AutorizacaoAte, o.Ordem, feitas, len(o.US), estado)
+	nome := ""
+	if o.Nome != "" {
+		nome = "  nome " + q(o.Nome)
+	} else if o.EncerradaEm == nil {
+		nome = "  (sem nome: o orq não renomeia o pane do coordenador por esta onda)"
+	}
+	_, err := fmt.Fprintf(w, "onda %d  %s%s  [%s · até %s · %s]  %d/%d done%s\n", o.ID, q(o.Titulo), nome, q(o.Coordenador), o.AutorizacaoAte, o.Ordem, feitas, len(o.US), estado)
 	return err
 }
 

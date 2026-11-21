@@ -9,7 +9,7 @@ import (
 func TestUsStatusModeloEEsforco(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1,2")
 	var res struct {
 		Alterada bool
 		US       struct{ Modelo, Esforco *string }

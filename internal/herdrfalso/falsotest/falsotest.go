@@ -139,3 +139,32 @@ func (f *Falso) Chamadas() []string {
 	}
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
 }
+
+// Rotulo põe o rótulo no pane (cria o pane se ele não existe), como `herdr pane rename`.
+func (f *Falso) Rotulo(pane, rotulo string) {
+	f.t.Helper()
+	e, err := herdrfalso.Ler(f.Dir)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if e.Panes[pane] == nil {
+		e.Panes[pane] = &herdrfalso.Pane{}
+	}
+	e.Panes[pane].Rotulo = rotulo
+	if err := e.Salvar(f.Dir); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// RotuloENome devolve o rótulo do pane e o nome do agente dele.
+func (f *Falso) RotuloENome(pane string) (rotulo, nome string) {
+	f.t.Helper()
+	e, err := herdrfalso.Ler(f.Dir)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if p := e.Panes[pane]; p != nil {
+		return p.Rotulo, p.Nome
+	}
+	return "", ""
+}

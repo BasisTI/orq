@@ -245,7 +245,7 @@ func (s *Servidor) onda(w http.ResponseWriter, r *http.Request) {
 var camposDoDiario = map[string][]string{
 	"coord.registrar":         {"projeto_padrao"},
 	"projeto.tom":             {"projeto", "indice"},
-	"onda.criar":              {"titulo", "autorizacao_ate", "ordem", "us", "depende_de", "movidas"},
+	"onda.criar":              {"titulo", "nome", "autorizacao_ate", "ordem", "us", "depende_de", "movidas"},
 	"onda.adicionar":          {"us", "apos", "movidas"},
 	"onda.encerrar":           {},
 	"us.status":               {"de", "para", "status", "papel", "rodada", "modelo", "modelo_antes", "esforco", "forcado", "motivo"},
@@ -269,6 +269,7 @@ var camposDoDiario = map[string][]string{
 	"limpar.falhou":           {"tipo", "alvo", "motivo"},
 	"limpar.recusada":         {"motivo"},
 	"limpar.onda":             {"acao", "motivo"},
+	"onda.pane_nome":          {"nome", "rotulo", "agente", "notas", "erros"},
 	"recursos.gravar":         {"arquivo", "repos", "panes", "aprovados"},
 	"recursos.reabrir":        {"geracao", "mrs_encerradas"},
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/BasisTI/orq/internal/refs"
@@ -25,9 +26,13 @@ var Limites = map[string]string{
 
 // Onda é um grupo de US conduzido por um coordenador com uma autorização declarada.
 type Onda struct {
-	ID             int64      `json:"id"`
-	Coordenador    string     `json:"coordenador"`
-	Titulo         string     `json:"titulo"`
+	ID          int64  `json:"id"`
+	Coordenador string `json:"coordenador"`
+	Titulo      string `json:"titulo"`
+	// Nome é o nome da onda no pane do coordenador: o gravado em `orq onda criar --nome` ou, nas
+	// ondas antigas, o início do título quando é um nome válido. Vazio quando não há nenhum dos
+	// dois: o orq não renomeia o pane por essa onda.
+	Nome           string     `json:"nome"`
 	AutorizacaoAte string     `json:"autorizacao_ate"`
 	Ordem          string     `json:"ordem"`
 	CriadaEm       string     `json:"criada_em"`
@@ -39,11 +44,95 @@ type Onda struct {
 // NovaOnda são os dados de `orq onda criar`.
 type NovaOnda struct {
 	Titulo  string
+	Nome    string // nome da onda no pane do coordenador (NomeValido); vazio só em quem não renomeia o pane
 	Projeto string // completa as US sem projeto; vazio usa o projeto padrão do coordenador
 	Ate     string // vazio = mr-pronta
 	Ordem   string // vazio = livre
 	US      []refs.US
 	Deps    [][2]refs.US // {dependente, dependência}
+}
+
+// nomeOndaRe é o nome de agente que o Herdr aceita.
+var nomeOndaRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+
+// NomeValido diz se nome serve de nome de onda e de agente do Herdr: `[a-z][a-z0-9_-]{0,31}`.
+func NomeValido(nome string) bool { return nomeOndaRe.MatchString(nome) }
+
+// nomeDoTitulo é o nome das ondas antigas: a primeira palavra do título, se for um nome válido.
+func nomeDoTitulo(titulo string) string {
+	if p := strings.Fields(titulo); len(p) > 0 && NomeValido(p[0]) {
+		return p[0]
+	}
+	return ""
+}
+
+// PaneEsperado é o pane de um coordenador e o nome que ele deve ter agora: o da onda aberta
+// mais recente dele. Nome vazio quer dizer que essa onda não tem nome (onda antiga com título
+// sem nome válido) e o orq não renomeia o pane. Sem onda aberta, o coordenador não aparece.
+type PaneEsperado struct {
+	Coordenador string
+	Pane        string
+	OndaID      int64
+	Nome        string
+}
+
+// PanesEsperados devolve, por coordenador registrado com pane e com onda aberta, o nome que o
+// rótulo e o agente do pane têm de ter. Com várias ondas abertas vale a mais recente (maior id).
+func (s *Store) PanesEsperados(ctx context.Context) ([]PaneEsperado, error) {
+	var out []PaneEsperado
+	err := s.ler(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = panesEsperados(ctx, tx, "")
+		return err
+	})
+	return out, err
+}
+
+// PaneEsperadoDe é o PaneEsperado de um coordenador; nulo quando ele não tem pane registrado ou
+// não tem onda aberta.
+func (s *Store) PaneEsperadoDe(ctx context.Context, coord string) (*PaneEsperado, error) {
+	var out []PaneEsperado
+	err := s.ler(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = panesEsperados(ctx, tx, coord)
+		return err
+	})
+	if err != nil || len(out) == 0 {
+		return nil, err
+	}
+	return &out[0], nil
+}
+
+func panesEsperados(ctx context.Context, q querier, coord string) ([]PaneEsperado, error) {
+	cs, err := listarCoords(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var out []PaneEsperado
+	for _, c := range cs {
+		if c.PaneID == nil || *c.PaneID == "" || (coord != "" && c.Nome != coord) {
+			continue
+		}
+		var id int64
+		var nome *string
+		var titulo string
+		err := q.QueryRowContext(ctx, `SELECT id, nome, titulo FROM onda WHERE coordenador = ? AND encerrada_em IS NULL ORDER BY id DESC LIMIT 1`, c.Nome).Scan(&id, &nome, &titulo)
+		if semLinha(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PaneEsperado{Coordenador: c.Nome, Pane: *c.PaneID, OndaID: id, Nome: nomeEfetivo(nome, titulo)})
+	}
+	return out, nil
+}
+
+func nomeEfetivo(nome *string, titulo string) string {
+	if nome != nil && NomeValido(*nome) {
+		return *nome
+	}
+	return nomeDoTitulo(titulo)
 }
 
 // CriarOnda grava a onda e as US dela em wait, na ordem dada. Uma US numa onda aberta não
@@ -53,6 +142,10 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 	titulo := strings.TrimSpace(n.Titulo)
 	if titulo == "" || temControle(titulo) {
 		return Onda{}, uso("título da onda vazio ou com caractere de controle", "")
+	}
+	nome := strings.TrimSpace(n.Nome)
+	if nome != "" && !NomeValido(nome) {
+		return Onda{}, uso(fmt.Sprintf("--nome %q inválido", nome), "use o nome da onda como nome de agente do Herdr: letra minúscula e até 31 letras minúsculas, dígitos, - ou _")
 	}
 	ate, ordem := valorOu(n.Ate, "mr-pronta"), valorOu(n.Ordem, "livre")
 	if !contem(Autorizacoes, ate) {
@@ -124,8 +217,8 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 	var id int64
 	err := s.escrever(ctx, func(tx *sql.Tx) error {
 		agora := s.agora()
-		res, err := tx.ExecContext(ctx, `INSERT INTO onda (coordenador, titulo, autorizacao_ate, ordem, criada_em) VALUES (?, ?, ?, ?, ?)`,
-			coord.Nome, titulo, ate, ordem, agora)
+		res, err := tx.ExecContext(ctx, `INSERT INTO onda (coordenador, titulo, nome, autorizacao_ate, ordem, criada_em) VALUES (?, ?, ?, ?, ?, ?)`,
+			coord.Nome, titulo, nulo(nome), ate, ordem, agora)
 		if err != nil {
 			return err
 		}
@@ -160,7 +253,7 @@ func (s *Store) CriarOnda(ctx context.Context, coord Coordenador, n NovaOnda) (O
 				depende[de.Chave()] = append(depende[de.Chave()], para.Chave())
 			}
 		}
-		detalhe := map[string]any{"titulo": titulo, "autorizacao_ate": ate, "ordem": ordem, "us": chaves, "depende_de": depende}
+		detalhe := map[string]any{"titulo": titulo, "nome": nome, "autorizacao_ate": ate, "ordem": ordem, "us": chaves, "depende_de": depende}
 		if len(movidas) > 0 {
 			detalhe["movidas"] = movidas
 		}
@@ -680,17 +773,19 @@ func proxima(o Onda) Proxima {
 }
 
 func carregarOndas(ctx context.Context, q querier, clause string, args ...any) ([]Onda, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, coordenador, titulo, autorizacao_ate, ordem, criada_em, encerrada_em FROM onda `+clause+` ORDER BY id`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT id, coordenador, titulo, nome, autorizacao_ate, ordem, criada_em, encerrada_em FROM onda `+clause+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	os := []Onda{}
 	for rows.Next() {
 		var o Onda
-		if err := rows.Scan(&o.ID, &o.Coordenador, &o.Titulo, &o.AutorizacaoAte, &o.Ordem, &o.CriadaEm, &o.EncerradaEm); err != nil {
+		var nome *string
+		if err := rows.Scan(&o.ID, &o.Coordenador, &o.Titulo, &nome, &o.AutorizacaoAte, &o.Ordem, &o.CriadaEm, &o.EncerradaEm); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		o.Nome = nomeEfetivo(nome, o.Titulo)
 		os = append(os, o)
 	}
 	if err := rows.Close(); err != nil {

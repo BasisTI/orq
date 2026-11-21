@@ -45,9 +45,11 @@ type SessaoHerdr struct {
 // PaneHerdr é o que o orq guarda de um pane. Status é o agent_status do Herdr (unknown num
 // pane sem agente).
 type PaneHerdr struct {
-	Status      string            `json:"status"`
-	Agente      string            `json:"agente,omitempty"`
-	Nome        string            `json:"nome,omitempty"`
+	Status string `json:"status"`
+	Agente string `json:"agente,omitempty"`
+	Nome   string `json:"nome,omitempty"`
+	// Rotulo é o rótulo do pane no Herdr (`herdr pane rename`), distinto do nome do agente.
+	Rotulo      string            `json:"rotulo,omitempty"`
 	WorkspaceID string            `json:"workspace_id"`
 	Tokens      map[string]string `json:"tokens,omitempty"`
 	// Cwd e CwdPrimeiroPlano são os diretórios do pane no Herdr. Só a limpeza lê (na consulta

@@ -96,7 +96,7 @@ func TestCentralAbrirHerdrFora(t *testing.T) {
 	env := ambiente(t)
 	env["ORQ_HERDR_BIN"] = "/nao/existe/herdr"
 	ok(t, env, "coord", "registrar", "a")
-	ok(t, env, "onda", "criar", "o", "--us", "1", "--projeto", "orq")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1", "--projeto", "orq")
 	if r := rodar(t, env, "central", "abrir"); r.code != 1 || !strings.Contains(r.err, `"herdr_falhou"`) {
 		t.Fatalf("exit %d %s", r.code, r.err)
 	}

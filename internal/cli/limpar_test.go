@@ -36,7 +36,7 @@ func TestRecursosGravarELimparRecusaComMRAberta(t *testing.T) {
 	var estadoMR string
 	env["ORQ_GH_BIN"], estadoMR = ghFalso(t, `{"state":"open","merged":false,"draft":false,"mergeable_state":"clean","head":{"sha":"abc1234","ref":"TG-13"},"base":{"ref":"main"}}`)
 	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "13", "--ate", "merge")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "13", "--ate", "merge")
 	ok(t, env, "mr", "add", "13", "https://github.com/BasisTI/orq/pull/9")
 
 	repo, wt := t.TempDir(), filepath.Join(t.TempDir(), "wt")
@@ -113,7 +113,7 @@ func TestRecursosGravarAprovadoSemRepoAvisa(t *testing.T) {
 	env["ORQ_TMP_DIR"] = filepath.Join(t.TempDir(), "tmp")
 	env["HOME"] = t.TempDir()
 	ok(t, env, "coord", "registrar", "c", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "13", "--ate", "merge")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "13", "--ate", "merge")
 	var g RecursosGravados
 	if err := json.Unmarshal([]byte(ok(t, env, "recursos", "gravar", "13", "--aprovado", "https://github.com/BasisTI/orq/pull/9=abc1234")), &g); err != nil {
 		t.Fatal(err)

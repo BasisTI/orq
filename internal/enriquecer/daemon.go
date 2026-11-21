@@ -36,6 +36,9 @@ type Daemon struct {
 	// Pendencias, se não nulo, roda a cada Tick: importa os arquivos de pendência novos e avisa
 	// o coordenador do que a pessoa respondeu. Falha dele vai para o log e não derruba o laço.
 	Pendencias interface{ Ciclo(context.Context) error }
+	// Nomes, se não nulo, roda a cada Tick: confere se o rótulo e o agente do pane de cada
+	// coordenador têm o nome da onda aberta mais recente dele, e corrige. Falha vai para o log.
+	Nomes interface{ Ciclo(context.Context) error }
 
 	mu      sync.Mutex
 	ultimos map[string]string
@@ -77,6 +80,13 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			d.pendencias(ctx, tick)
+		}()
+	}
+	if d.Nomes != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.nomes(ctx, tick)
 		}()
 	}
 	if d.Socket != "" {
@@ -291,6 +301,24 @@ func (d *Daemon) pendencias(ctx context.Context, tick time.Duration) {
 			d.logf("pendencias", "pendências: %v", err)
 		} else if err == nil {
 			d.logf("pendencias", "")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// nomes chama a conferência dos nomes dos panes dos coordenadores a cada tick.
+func (d *Daemon) nomes(ctx context.Context, tick time.Duration) {
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for {
+		if err := d.Nomes.Ciclo(ctx); err != nil && ctx.Err() == nil {
+			d.logf("nomes", "nomes dos panes: %v", err)
+		} else if err == nil {
+			d.logf("nomes", "")
 		}
 		select {
 		case <-ctx.Done():

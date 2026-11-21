@@ -10,7 +10,7 @@ import (
 func TestAvisoPendenciaAbertaEmUSConcluida(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1,2")
 	ok(t, env, "pend", "add", "1", "--tipo", "duvida", "segredo-do-texto")
 	ok(t, env, "pend", "add", "2", "--tipo", "duvida", "outra")
 
@@ -35,7 +35,7 @@ func TestAvisoPendenciaAbertaEmUSConcluida(t *testing.T) {
 	ok(t, env, "pend", "resolver", "p/2#P1", "--resposta", "levada para o Taiga")
 	env2 := ambiente(t)
 	ok(t, env2, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env2, "onda", "criar", "o", "--us", "1")
+	ok(t, env2, "onda", "criar", "o", "--nome", "teste", "--us", "1")
 	if r := rodar(t, env2, "onda", "encerrar", "1"); r.err != "" {
 		t.Fatalf("sem pendência não avisa: %s", r.err)
 	}
@@ -46,7 +46,7 @@ func TestAvisoPendenciaAbertaEmUSConcluida(t *testing.T) {
 func TestAvisoPendenciaRespondida(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "p")
-	ok(t, env, "onda", "criar", "o", "--us", "1,2")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "1,2")
 	ok(t, env, "pend", "add", "1", "--tipo", "duvida", "e agora?")
 	ok(t, env, "pend", "responder", "TG-1#P1", "texto-da-pessoa")
 

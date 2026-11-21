@@ -53,7 +53,7 @@ func pendEnv(t *testing.T) (env map[string]string, pasta string) {
 	env = ambiente(t)
 	env["HERDR_PANE_ID"] = "wA:p1"
 	ok(t, env, "coord", "registrar", "coord", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "15,16")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "15,16")
 	pasta = filepath.Join(env["ORQ_TRABALHO_DIR"], "orq", "TG-15", "implementacao", "r1", "pendencias")
 	if err := os.MkdirAll(pasta, 0o755); err != nil {
 		t.Fatal(err)

@@ -411,6 +411,41 @@ func Main(args []string, dir string) int {
 	case "pane rename":
 		e.Panes[rest[0]].Rotulo = rest[1]
 		return res(map[string]any{})
+	case "agent rename":
+		// Como o herdr: o alvo é o pane (ou o nome) de um agente; sem agente, agent_not_found.
+		for pid, p := range e.Panes {
+			if p.Status != "" && (pid == rest[0] || p.Nome == rest[0]) {
+				p.Nome = rest[1]
+				return res(map[string]any{})
+			}
+		}
+		b, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "agent_not_found", "message": "agent target " + rest[0] + " not found"}})
+		fmt.Fprintln(os.Stderr, string(b))
+		return 1
+	case "api snapshot":
+		// Os panes (com o rótulo) e os agentes (os panes com Status), no formato de session.snapshot.
+		ids := make([]string, 0, len(e.Panes))
+		for id := range e.Panes {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		panes, agentes := []map[string]any{}, []map[string]any{}
+		for _, id := range ids {
+			p := e.Panes[id]
+			ws := ""
+			if aba := e.AbaDe(id); aba != "" {
+				ws = e.AbaWS[aba]
+			}
+			panes = append(panes, map[string]any{"pane_id": id, "workspace_id": ws, "label": p.Rotulo, "agent_status": "unknown"})
+			if p.Status != "" {
+				agentes = append(agentes, map[string]any{"pane_id": id, "workspace_id": ws, "agent": "claude", "name": p.Nome, "agent_status": p.Status})
+			}
+		}
+		wss := []map[string]any{}
+		for id := range e.Workspaces {
+			wss = append(wss, map[string]any{"workspace_id": id})
+		}
+		return res(map[string]any{"snapshot": map[string]any{"panes": panes, "agents": agentes, "workspaces": wss}})
 	case "pane run":
 		if !e.TUINaoSobe {
 			e.Panes[rest[0]].Argv = desaspar(rest[1])

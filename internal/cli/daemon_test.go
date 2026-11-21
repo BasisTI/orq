@@ -21,7 +21,7 @@ func TestAtualizarSemFerramentas(t *testing.T) {
 		env[v] = "/nao/existe/bin"
 	}
 	ok(t, env, "coord", "registrar", "a", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "4")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "4")
 	ok(t, env, "mr", "add", "4", "https://github.com/BasisTI/orq/pull/1")
 	var r enriquecer.Resultado
 	if err := json.Unmarshal([]byte(ok(t, env, "atualizar")), &r); err != nil {
@@ -93,7 +93,7 @@ func TestAtualizarTextoMostraAvisos(t *testing.T) {
 	bin, _ := herdrFalso(t, `{"result":{"snapshot":{"panes":[{"pane_id":"wB:p1","workspace_id":"wB","agent_status":"idle","tokens":{"orq":"de outro"}}],"agents":[],"workspaces":[{"workspace_id":"wB","tokens":{}}]}}}`)
 	env["ORQ_HERDR_BIN"] = bin
 	ok(t, env, "coord", "registrar", "a", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "4")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "4")
 	texto := ok(t, env, "--output", "text", "atualizar", "--fonte", "herdr")
 	if !strings.Contains(texto, `aviso: pane wB:p1: o token orq tem "de outro"`) {
 		t.Fatalf("texto sem o aviso: %q", texto)
@@ -145,7 +145,7 @@ func TestDaemonDetach(t *testing.T) {
 func TestMRPrecondicaoPelaCLI(t *testing.T) {
 	env := ambiente(t)
 	ok(t, env, "coord", "registrar", "a", "--projeto", "orq")
-	ok(t, env, "onda", "criar", "o", "--us", "4")
+	ok(t, env, "onda", "criar", "o", "--nome", "teste", "--us", "4")
 	const url = "https://github.com/BasisTI/orq/pull/1"
 	pre := func(s string) string {
 		var m struct {

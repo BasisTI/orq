@@ -30,6 +30,7 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		Agent       *string           `json:"agent"`
 		AgentStatus string            `json:"agent_status"`
 		Name        *string           `json:"name"`
+		Label       *string           `json:"label"`
 		Tokens      map[string]string `json:"tokens"`
 		Cwd         string            `json:"cwd"`
 		FgCwd       string            `json:"foreground_cwd"`
@@ -65,7 +66,7 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		s.Workspaces[w.WorkspaceID] = central.WorkspaceHerdr{Tokens: w.Tokens}
 	}
 	for _, p := range snap.Panes {
-		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
+		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), Rotulo: deref(p.Label), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
 	}
 	// O registro do agente é o de `herdr agent list`: vale mais que o do pane.
 	for _, a := range snap.Agents {
