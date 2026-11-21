@@ -216,8 +216,8 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 			return err
 		}
 		var atual US
-		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada, modelo, esforco FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
-			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada, &atual.Modelo, &atual.Esforco)
+		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada, modelo, esforco, espera_motivo FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
+			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada, &atual.Modelo, &atual.Esforco, &atual.EsperaMotivo)
 		if err != nil {
 			return err
 		}
@@ -246,7 +246,10 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		if m.Esforco != nil && !iguais(atual.Esforco, m.Esforco) {
 			detalhe["esforco"] = *m.Esforco
 		}
-		if len(detalhe) == 0 {
+		// O motivo vale para a US que espera: sair de wait o limpa, com o evento us.espera na
+		// mesma transação (um motivo esquecido mostraria o oposto do que acontece).
+		limpaEspera := m.Status != "wait" && atual.EsperaMotivo != nil
+		if len(detalhe) == 0 && !limpaEspera {
 			return nil
 		}
 		if atual.Status == "done" && m.Status != "done" {
@@ -254,6 +257,14 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		}
 		detalhe["status"] = m.Status
 		alterada = true
+		if limpaEspera {
+			if _, err = tx.ExecContext(ctx, `UPDATE us SET espera_motivo = NULL WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref); err != nil {
+				return err
+			}
+			if err = s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "us.espera", detalhe: map[string]any{"limpou": true, "motivo_antes": *atual.EsperaMotivo, "motivo_da_limpeza": "a US saiu de wait (" + m.Status + ")"}}); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE us SET status = ?, pane_id = COALESCE(?, pane_id), papel = COALESCE(?, papel), rodada = COALESCE(?, rodada), modelo = COALESCE(?, modelo), esforco = COALESCE(?, esforco), atualizado_em = ?
 			WHERE projeto = ? AND ref = ?`, m.Status, m.Pane, m.Papel, m.Rodada, m.Modelo, m.Esforco, s.agora(), alvo.Projeto, alvo.Ref)
 		if err != nil {

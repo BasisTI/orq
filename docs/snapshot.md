@@ -23,7 +23,7 @@
 
 - Ainda versão 1, US #81: a `US` ganhou `modelo` e `esforco` (nulos até `orq us status --modelo/--esforco`). Aditivo; a migration 0007 só acrescenta colunas nulas e declara leitor 4 e escritor 5.
 
-- Ainda versão 1, US #100: a `US` ganhou `espera_motivo` (texto curto ou nulo, até 200 caracteres; nulo até `orq us espera`). Aditivo, `versao` não sobe; a migration 0010 só acrescenta uma coluna nula e declara leitor 4 e escritor 5. O diário ganhou o evento `us.espera`.
+- Ainda versão 1, US #100: a `US` ganhou `espera_motivo` (texto curto ou nulo, até 200 caracteres; nulo até `orq us espera`). Aditivo, `versao` não sobe; a migration 0010 só acrescenta uma coluna nula e declara leitor 4 e escritor 5. O diário ganhou o evento `us.espera`. Sair de `wait` limpa o motivo.
 
 - Ainda versão 1, US #64: a `Onda` ganhou `mensagens` (`[Mensagem]`, em ordem decrescente de envio). Aditivo; a migration 0008 cria a tabela `mensagem` e declara leitor 4 e escritor 5.
 

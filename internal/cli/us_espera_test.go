@@ -37,6 +37,12 @@ func TestUsEsperaRegistraTrocaELimpa(t *testing.T) {
 			t.Errorf("diário sem %s:\n%s", quer, d)
 		}
 	}
+	// Sair de wait limpa o motivo.
+	ok(t, env, "us", "espera", "1", "outro motivo")
+	out = ok(t, env, "us", "status", "1", "exec")
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.US.EsperaMotivo != nil {
+		t.Fatalf("status exec = %s (%v)", out, err)
+	}
 	// Sem motivo e sem --limpar, ou os dois, é erro de uso.
 	for _, args := range [][]string{{"us", "espera", "1"}, {"us", "espera", "1", "x", "--limpar"}} {
 		if r := rodar(t, env, args...); r.code != 2 || !strings.Contains(r.err, `"uso"`) {

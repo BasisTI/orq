@@ -63,10 +63,6 @@ func TestEsperaNoSnapshotENaMudancaDeStatus(t *testing.T) {
 	if _, _, err := s.DefinirEspera(ctx, &a, us(t, "1"), &m); err != nil {
 		t.Fatal(err)
 	}
-	// Mudar o status não apaga o motivo: quem limpa é o coordenador.
-	if _, _, err := s.AtualizarStatus(ctx, &a, us(t, "1"), MudancaStatus{Status: "exec"}); err != nil {
-		t.Fatal(err)
-	}
 	snap, err := s.Snapshot(ctx, false)
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +70,44 @@ func TestEsperaNoSnapshotENaMudancaDeStatus(t *testing.T) {
 	us := snap.Coordenadores[0].Ondas[0].US
 	if us[0].EsperaMotivo == nil || *us[0].EsperaMotivo != m || us[1].EsperaMotivo != nil {
 		t.Fatalf("snapshot = %v / %v", us[0].EsperaMotivo, us[1].EsperaMotivo)
+	}
+}
+
+// Sair de wait limpa o motivo, com o evento us.espera na mesma transação; mudar de wait para wait
+// (ou de outro status para outro) não mexe (M2 da revisão r1).
+func TestEsperaLimpaAoSairDeWait(t *testing.T) {
+	s := novoStore(t)
+	ctx := context.Background()
+	a := coord(t, s, "a", "w1:p1", "proj")
+	o := onda(t, s, a, NovaOnda{Titulo: "o", US: []refs.US{us(t, "1")}})
+	m := "Espera a carga corrigida"
+	if _, _, err := s.DefinirEspera(ctx, &a, us(t, "1"), &m); err != nil {
+		t.Fatal(err)
+	}
+	// Reafirmar wait não limpa nem gera evento.
+	if _, alterada, err := s.AtualizarStatus(ctx, &a, us(t, "1"), MudancaStatus{Status: "wait"}); err != nil || alterada {
+		t.Fatalf("wait→wait = %v, %v", alterada, err)
+	}
+	u, alterada, err := s.AtualizarStatus(ctx, &a, us(t, "1"), MudancaStatus{Status: "exec"})
+	if err != nil || !alterada || u.EsperaMotivo != nil {
+		t.Fatalf("exec = %+v, %v, %v", u, alterada, err)
+	}
+	es, err := s.Diario(ctx, nil, FiltroDiario{OndaID: o.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range es {
+		if e.Tipo == "us.espera" && strings.Contains(string(e.Detalhe), `"limpou":true`) && strings.Contains(string(e.Detalhe), m) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d eventos de limpeza, queria 1", n)
+	}
+	// US só com status novo e sem motivo: nada de evento us.espera.
+	if _, _, err := s.AtualizarStatus(ctx, &a, us(t, "1"), MudancaStatus{Status: "rev"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

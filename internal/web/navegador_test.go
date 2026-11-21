@@ -104,6 +104,13 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 	if err := st.RegistrarExternos(context.Background(), nil, refsUS("catalogo", 404), es); err != nil {
 		t.Fatal(err)
 	}
+	// Motivo da espera em duas das US com pendência (404 e 78) e não nas outras duas (405 e 513): a
+	// barra da US tem de caber no cartão com e sem a linha do motivo (US #100).
+	for ref, motivo := range map[int][2]string{404: {"catalogo", "Espera o eSocial publicar o arquivo de validação do salário-paternidade, que o time de integração ainda não liberou"}, 78: {"nuvem", "Espera a carga corrigida"}} {
+		if _, _, err := st.DefinirEspera(context.Background(), nil, refsUS(motivo[0], ref), &motivo[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// "=<status>" é a página de erro que o teste provoca de propósito.
 	caminhos := []string{"/", "/p/catalogo/404/2", "/historico", "/onda/1", "/onda/999=404", "/onda/abc=404", "/central", "/pendencias", "/pendencias?projeto=nuvem&coord=cais", "/pendencias?projeto=agenda&coord=bussola&onda=4", "/projeto/catalogo", "/projeto/nuvem", "/projeto/faturamento", "/projeto/agenda", "/projeto/nada=404"}
 
@@ -112,8 +119,8 @@ func TestNavegadorSobAPoliticaDeSeguranca(t *testing.T) {
 		for _, p := range r.Problemas {
 			t.Error(p)
 		}
-		if want := 2 * len(caminhos); len(r.Resumo) != want {
-			t.Errorf("páginas abertas = %d, quer %d (%d caminhos × 2 larguras)", len(r.Resumo), want, len(caminhos))
+		if want := 2*len(caminhos) + 3; len(r.Resumo) != want {
+			t.Errorf("páginas abertas = %d, quer %d (%d caminhos × 2 larguras, mais a Central em 3 larguras de barra)", len(r.Resumo), want, len(caminhos))
 		}
 		for _, p := range r.Resumo {
 			t.Logf("%s: aba ativa %q", p.Aqui, p.Aba)
