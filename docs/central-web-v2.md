@@ -403,3 +403,14 @@ A revisão independente (r1) **provou no Chromium 153 com o htmx 2.0.6** os pont
 - **Caddy:** cabeçalhos de cache e regra por caminho não foram lidos nem testados.
 - **O custo do `/vivo`** não foi medido (§6).
 - **Hospedagem do protótipo no Artifact** não foi testada nas telas; ela não afeta a implementação.
+
+## 14. A spec na Central (US #60)
+
+A página da spec e a spec dentro da pendência de validação (orq #60; desenho em `docs/specs/publicar-e-revisar-especificacoes/`). Esta seção só registra o que toca a web; o resto está no README ("Specs").
+
+- **Fonte.** O servidor desenha a partir do cache do daemon (`Fonte.LerSpecCache`), nunca da forja nem do disco. Falha de leitura vira aviso sobre o último conteúdo guardado, com SHA e hora.
+- **Rotas.** `GET /p/{projeto}/{ref}/spec` (a spec atual; `?aba=<arquivo>` escolhe a aba) e, na página da pendência `validacao`, o mesmo painel pelo SHA da pendência (`?aba=…#spec`). O padrão literal `spec` convive com `/p/{projeto}/{ref}/{n}` (o Go escolhe o mais específico).
+- **Abas por link, sem script.** Cada aba é um `<a href="?aba=…">` e a página inteira é pedida de novo; o botão Voltar funciona sem o htmx. O htmx não entra: o arquivo é grande e a troca de aba é rara.
+- **Links relativos.** `RenderizarSpec(src, LinksSpec{Base, Destino})` (`internal/web/render.go`) é a transformação compartilhada com a TG-61: link relativo normalizado que `Destino` aceita vira o endereço que ele devolver (aba aqui; âncora na página pública na TG-61), o resto vira texto. Esquema `http`, `https` e `mailto` e âncora da própria página ficam; HTML cru, `javascript:` e imagem seguem como no `RenderizarMarkdown`, que não muda.
+- **CSP.** Não muda: nenhum `<script>` nem `style=` novo.
+- **Layout.** A pendência `validacao` usa a largura toda e duas colunas (spec 3/5, opções 2/5) a partir de 1100 px; abaixo disso, empilhadas.

@@ -1,0 +1,26 @@
+{{/* A spec da US (US #60): a faixa de estado, uma aba por arquivo e o arquivo da aba renderizado. As abas são
+links comuns (?aba=…): sem script, e o botão Voltar funciona. O painel é o mesmo da pendência de validação. */}}
+{{define "spec-painel"}}<section class="spec" id="spec" aria-label="Spec da {{.Ref}}">
+<div class="spec-faixa">
+<span class="selo selo-{{.Estado.Cls}}"{{if .Estado.Title}} title="{{.Estado.Title}}"{{end}}>{{.Estado.Texto}}</span>
+<span class="spec-ref"><strong>{{.Ref}}</strong></span>
+{{if .Tem}}<span class="spec-sha" title="SHA {{.SHA}}">SHA <code>{{.SHACurto}}</code> <span class="apagado">({{.Versao}})</span></span>
+<span class="apagado spec-lida">lida em {{.LidaEm}}</span>{{end}}
+{{if .MRURL}}<a class="spec-mr" href="{{.MRURL}}" target="_blank" rel="noopener noreferrer">MR da spec<svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>{{end}}
+</div>
+{{if .Erro}}<p class="aviso erro" role="alert">A última leitura na forja falhou{{if .ErroEm}} ({{.ErroEm}}){{end}}: {{.Erro}}.{{if .Tem}} Abaixo, o último conteúdo guardado, lido em {{.LidaEm}} (SHA {{.SHACurto}}).{{end}}</p>{{end}}
+{{if .Aviso}}<p class="aviso" role="status">{{.Aviso}}{{if .LinkAtual}} <a href="{{.LinkAtual}}">Ver a spec atual</a>.{{end}}</p>{{end}}
+{{if .Tem}}<nav class="spec-abas" aria-label="Arquivos da spec"><ul>
+{{range .Abas}}<li><a href="{{.Href}}"{{if .Atual}} aria-current="page"{{end}}>{{.Rotulo}}{{if .Grande}} <span class="apagado" title="arquivo grande demais para guardar">·&nbsp;grande</span>{{end}}</a></li>
+{{end}}</ul></nav>
+{{if .Grande}}<p class="aviso" role="status">Arquivo grande demais ({{.KiB}} KiB) para guardar na Central. {{if .MRURL}}<a href="{{.MRURL}}" target="_blank" rel="noopener noreferrer">Veja na MR</a>.{{end}}</p>
+{{else}}<article class="detalhe spec-corpo" aria-label="{{.Titulo}}">{{.Conteudo}}</article>{{end}}
+{{end}}
+</section>{{end}}
+
+{{define "spec"}}{{template "topo" .}}
+<p class="voltar"><a href="{{.Voltar}}"><svg class="ic" aria-hidden="true"><use href="#i-voltar"/></svg>Central</a></p>
+<h1 class="t-pagina">Spec da {{.US}}</h1>
+{{if .Painel.Caminho}}<p class="apagado spec-caminho"><code>{{.Painel.Caminho}}</code></p>{{end}}
+{{template "spec-painel" .Painel}}
+{{template "rodape" .}}{{end}}

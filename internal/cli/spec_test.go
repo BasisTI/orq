@@ -131,12 +131,6 @@ func TestSpecConferirPelaCLI(t *testing.T) {
 		t.Fatalf("em validação: %s", out)
 	}
 	ok(t, env, "pend", "responder", "TG-15#P1", "--opcao", "1")
-	// A cabeça é a aprovada: pode mesclar.
-	if out := ok(t, env, "--output", "text", "spec", "conferir", "15"); !strings.HasPrefix(out, "pode mesclar") {
-		t.Fatalf("cabeça igual: %s", out)
-	}
-	// A cabeça andou e só o decisoes.md mudou, com um rebase trazendo arquivos de fora.
-	respGH(t, resp, `{"state":"open","head":{"sha":"`+specHead+`","ref":"tg-15"},"base":{"ref":"main"}}`, "api", "repos/BasisTI/orq/pulls/44")
 	arvore := func(sha, blobDecisoes string) {
 		segs := strings.Split(specPasta, "/")
 		atual := sha
@@ -148,7 +142,13 @@ func TestSpecConferirPelaCLI(t *testing.T) {
 		respGH(t, resp, `{"tree":[{"path":"spec.md","type":"blob","sha":"s1"},{"path":"decisoes.md","type":"blob","sha":"`+blobDecisoes+`"}],"truncated":false}`,
 			"api", "repos/BasisTI/orq/git/trees/"+atual+"?recursive=1")
 	}
-	arvore(specAprov, "d1")
+	arvore(specAprov, "d1") // a pasta precisa existir mesmo com a cabeça igual
+	// A cabeça é a aprovada: pode mesclar.
+	if out := ok(t, env, "--output", "text", "spec", "conferir", "15"); !strings.HasPrefix(out, "pode mesclar") {
+		t.Fatalf("cabeça igual: %s", out)
+	}
+	// A cabeça andou e só o decisoes.md mudou, com um rebase trazendo arquivos de fora.
+	respGH(t, resp, `{"state":"open","head":{"sha":"`+specHead+`","ref":"tg-15"},"base":{"ref":"main"}}`, "api", "repos/BasisTI/orq/pulls/44")
 	arvore(specHead, "d2")
 	respGH(t, resp, `{"files":[{"filename":"internal/x.go"},{"filename":"`+specPasta+`/decisoes.md"}]}`, "api", "repos/BasisTI/orq/compare/"+specAprov+"..."+specHead+"?per_page=100&page=1")
 	out = ok(t, env, "--output", "text", "spec", "conferir", "15")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/hora"
+	"github.com/BasisTI/orq/internal/refs"
 )
 
 // A tela sai do snapshot (spec §2.1): vistaCentral não abre banco, não chama ferramenta e não lê
@@ -109,6 +110,7 @@ type SpecVista struct {
 	SHA             string // SHA curto do estado: o da validação ou da aprovação; vazio no registrada
 	Caminho, MR     string
 	MRURL           string
+	Href            string // a página da spec na Central
 	Conferencia     string // a frase da conferência da pasta; vazia sem conferência
 	ForaDaPasta     int    // arquivos de fora da pasta que a MR altera (outro sinal, não reprova a spec)
 	ConferidaEm     string
@@ -131,7 +133,7 @@ func shaCurto(sha string) string {
 	return sha
 }
 
-func vistaSpec(sp *central.SpecUS, agora time.Time) SpecVista {
+func vistaSpec(sp *central.SpecUS, agora time.Time, href string) SpecVista {
 	if sp == nil {
 		return SpecVista{}
 	}
@@ -139,7 +141,7 @@ func vistaSpec(sp *central.SpecUS, agora time.Time) SpecVista {
 	if !ok {
 		s = Selo{Cls: "neutro", Texto: "spec " + sp.Estado}
 	}
-	v := SpecVista{Tem: true, Selo: s, Caminho: sp.Caminho, MRURL: sp.MRURL}
+	v := SpecVista{Tem: true, Selo: s, Caminho: sp.Caminho, MRURL: sp.MRURL, Href: href}
 	switch sp.Estado {
 	case central.SpecEmValidacao:
 		v.SHA = shaCurto(derefStr(sp.SHAValidacao))
@@ -636,7 +638,7 @@ func esperaDe(u central.US) string {
 func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]string, agora time.Time) USVista {
 	uv := USVista{
 		ID: u.ID, Anchor: "us-" + u.Projeto + "-" + strconv.Itoa(u.Ref), Projeto: ProjetoTag{Slug: u.Projeto, Tom: tons[u.Projeto]},
-		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), Spec: vistaSpec(u.Spec, agora), Espera: esperaDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
+		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), Spec: vistaSpec(u.Spec, agora, refs.RotaSpec(u.Projeto, u.Ref)), Espera: esperaDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
 	}
 	if s, ok := statusUS[u.Status]; ok {
 		uv.Status = s

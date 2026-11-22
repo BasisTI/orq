@@ -12,6 +12,14 @@
 </dl>
 {{if .P.ArquivoAlterado}}<p class="aviso">O arquivo de origem mudou depois do registro. Esta página mostra o que foi registrado.</p>{{end}}
 
+{{if .TemSpec}}<div class="valid-duas">
+<div class="valid-spec">{{template "spec-painel" .Spec}}</div>
+<div class="valid-resp">{{template "detalhe-corpo" .}}</div>
+</div>
+{{else}}{{template "detalhe-corpo" .}}{{end}}
+{{template "rodape" .}}{{end}}
+
+{{define "detalhe-corpo"}}
 {{if .P.TemDetalhe}}<article class="detalhe">{{.Detalhe}}</article>
 {{else}}<p class="aviso">Pendência antiga, aberta só com o título (sem detalhe). Pergunte ao coordenador o contexto.</p>{{end}}
 
@@ -31,4 +39,4 @@
 {{range .Historico}}<li><span class="meta">{{.Quando}} · {{.Por}}</span><br>{{.Texto}}</li>{{end}}
 </ol>
 {{end}}
-{{template "rodape" .}}{{end}}
+{{end}}

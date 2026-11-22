@@ -501,3 +501,25 @@ details[open] > summary .chev { rotate: 90deg; }
 @media (prefers-reduced-motion: reduce) {
   .aviso-flash:not(:empty) { animation: aviso-corte 6s step-end 1 forwards !important; }
 }
+
+/* ---------- a spec na Central (US #60) ---------- */
+.spec { margin: .75rem 0 1.25rem; min-width: 0; }
+.spec-faixa { display: flex; flex-wrap: wrap; gap: .35rem 1rem; align-items: center; padding: .55rem .8rem; background: var(--color-base-100); border: 1px solid var(--linha); border-radius: var(--radius-box); }
+.spec-faixa code, .spec-caminho code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88rem; }
+.spec-mr { margin-left: auto; display: inline-flex; gap: .25rem; align-items: center; }
+.spec-abas { margin: .75rem 0 0; }
+.spec-abas ul { display: flex; flex-wrap: wrap; gap: .25rem; list-style: none; border-bottom: 1px solid var(--linha); }
+.spec-abas a { display: flex; align-items: center; min-height: 2.5rem; padding: 0 .85rem; color: var(--color-base-content); text-decoration: none; font-weight: 700; border-radius: var(--radius-field) var(--radius-field) 0 0; }
+.spec-abas a:hover { background: var(--color-base-200); }
+.spec-abas a[aria-current="page"] { color: var(--navy); box-shadow: inset 0 -3px 0 var(--laranja); }
+.spec-corpo { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+.spec-caminho { margin: 0 0 .25rem; overflow-wrap: anywhere; }
+.spec-abrir { font-weight: 700; }
+
+/* a pendência de validação: a spec ao lado das opções em tela larga, empilhadas no celular */
+.valid-duas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.5rem; align-items: start; }
+.valid-spec, .valid-resp { min-width: 0; }
+@media (min-width: 1100px) {
+  .valid-duas { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .valid-resp { position: sticky; top: 4rem; max-height: calc(100vh - 5rem); overflow-y: auto; }
+}
