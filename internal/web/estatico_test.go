@@ -14,6 +14,7 @@ import (
 var arquivosEstaticos = []string{
 	"app.css",
 	"app.js",
+	"avisos.js",
 	"fontes/LICENSE-carlito.txt",
 	"fontes/LICENSE-inter-tight.txt",
 	"fontes/LICENSE-lobehub-icons.txt",
@@ -80,7 +81,7 @@ func TestHashDaURLMudaComOArquivo(t *testing.T) {
 	}
 }
 
-var reVersao = regexp.MustCompile(`/estatico/(app\.css|htmx\.min\.js|app\.js)\?v=([0-9a-f]{12})`)
+var reVersao = regexp.MustCompile(`/estatico/(app\.css|htmx\.min\.js|app\.js|avisos\.js)\?v=([0-9a-f]{12})`)
 
 func TestPaginaReferenciaOsEstaticosComHashEServeComCacheCerto(t *testing.T) {
 	f := nova(t, false)
@@ -90,8 +91,8 @@ func TestPaginaReferenciaOsEstaticosComHashEServeComCacheCerto(t *testing.T) {
 	for _, m := range reVersao.FindAllStringSubmatch(html, -1) {
 		achados[m[1]] = m[2]
 	}
-	if len(achados) != 3 {
-		t.Fatalf("a página deveria referenciar app.css, htmx.min.js e app.js com ?v=: %v", achados)
+	if len(achados) != 4 {
+		t.Fatalf("a página deveria referenciar app.css, htmx.min.js, app.js e avisos.js com ?v=: %v", achados)
 	}
 	for _, quer := range []string{`<link rel="icon" type="image/png" href="/estatico/orq-icon-64.png">`, `<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false,"attributesToSettle":["class","width","height"],"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>`, `data-theme="basis-interno"`, `aria-current="page"`} {
 		if !strings.Contains(html, quer) {
@@ -116,7 +117,7 @@ func TestPaginaReferenciaOsEstaticosComHashEServeComCacheCerto(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ caminho, tipo string }{
-		{"app.css", "text/css"}, {"htmx.min.js", "text/javascript"}, {"app.js", "text/javascript"},
+		{"app.css", "text/css"}, {"htmx.min.js", "text/javascript"}, {"app.js", "text/javascript"}, {"avisos.js", "text/javascript"},
 		{"fontes/carlito-latin-400-normal.woff2", "font/woff2"}, {"orq-icon-64.png", "image/png"}, {"orq-banner-light.png", "image/png"},
 		{"fontes/LICENSE-carlito.txt", "text/plain"}, {"fontes/LICENSE-lobehub-icons.txt", "text/plain"},
 	} {

@@ -218,6 +218,20 @@ func controle(t *testing.T, st *central.Store) string {
 		_, err := st.ResolverPendencia(ctx, nil, pend(r), "resolvida pelo coordenador")
 		falha(w, err)
 	})
+	// Mensagem da pessoa ao coordenador e a resposta dele (avisos do navegador, orq #110).
+	mux.HandleFunc("/msg", func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.URL.Query().Get("onda"), 10, 64)
+		m, err := st.EnviarMensagem(ctx, id, "pergunta da pessoa, texto livre", "ana")
+		if err == nil {
+			_, _ = fmt.Fprint(w, m.ID)
+		}
+		falha(w, err)
+	})
+	mux.HandleFunc("/resp-msg", func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+		_, err := st.ResponderMensagem(ctx, nil, id, "resposta do coordenador, texto livre")
+		falha(w, err)
+	})
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -329,5 +343,18 @@ func TestNavegadorRede(t *testing.T) {
 				t.Error(p)
 			}
 		})
+	}
+}
+
+// TestNavegadorAvisos (orq #110): permissão só pelo clique, pendência e resposta novas notificam
+// uma vez com duas abas, o clique leva ao destino. O Notification do navegador é simulado.
+func TestNavegadorAvisos(t *testing.T) {
+	pw, chrome := ferramentasDoNavegador(t)
+	st := abrirStore(t)
+	semear(t, context.Background(), st)
+	env := []string{"ORQ_PLAYWRIGHT=" + pw, "ORQ_CHROMIUM=" + chrome}
+	r := rodarNode(t, env, "avisos.mjs", servirNoNavegador(t, st, nil), controle(t, st))
+	for _, p := range r.Problemas {
+		t.Error(p)
 	}
 }
