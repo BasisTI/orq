@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/refs"
 )
 
@@ -183,5 +184,25 @@ func TestOutrosTiposNaoConsultamAForja(t *testing.T) {
 	a.imp.Forja = f
 	if r, err := a.imp.Importar(context.Background(), a.grava("orq/TG-15/pendencias/d.md", duvida)); err != nil || r.Estado != EstadoRegistrada || len(f.chamado) != 0 {
 		t.Fatalf("r = %+v, %v, forja %v", r, err, f.chamado)
+	}
+}
+
+// M3: MR que a forja diz não existir (404) é recusa com .erro.txt; falha passageira segue retida.
+func TestValidacaoComMRInexistenteViraErro(t *testing.T) {
+	a := novoAmbiente(t)
+	registrarSpec(t, a)
+	a.imp.Forja = &forjaFalsa{err: &enriquecer.Falha{Codigo: enriquecer.ErrNaoEncontrado, Mensagem: "HTTP 404"}}
+	r, err := a.imp.Importar(context.Background(), a.grava(arqValidacao, validacao))
+	if err != nil || r.Estado != EstadoErro || !strings.Contains(r.Erro, "não existe na forja") {
+		t.Fatalf("r = %+v, %v", r, err)
+	}
+	if !strings.Contains(a.lê("orq/TG-15/pendencias/validar-spec.erro.txt"), "orq spec registrar") {
+		t.Fatal(".erro.txt sem o caminho de correção")
+	}
+	for _, cod := range []string{enriquecer.ErrAutenticacao, enriquecer.ErrFalhaComando, enriquecer.ErrTempoEsgotado} {
+		a.imp.Forja = &forjaFalsa{err: &enriquecer.Falha{Codigo: cod, Mensagem: "x"}}
+		if r, err := a.imp.Importar(context.Background(), a.grava(arqValidacao, validacao)); err != nil || r.Estado != EstadoRetida {
+			t.Fatalf("%s: %+v, %v", cod, r, err)
+		}
 	}
 }

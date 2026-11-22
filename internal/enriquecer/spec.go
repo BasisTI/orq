@@ -30,19 +30,34 @@ func (f Ferramentas) CabecaMR(ctx context.Context, rawURL string) (string, error
 	return d.Head, nil
 }
 
+// ErrPastaAusente é o código da falha da conferência quando a pasta registrada não existe no
+// commit, não tem nenhum arquivo ou é um arquivo: sem pasta não há o que comparar, e uma pasta
+// digitada errada nunca pode virar "pode mesclar".
+const ErrPastaAusente = "pasta_da_spec_ausente"
+
 // PastaNoSHA lista os arquivos da pasta no commit sha, com o id do conteúdo de cada um (o blob):
-// caminho relativo à pasta → id. Pasta que não existe no commit é uma lista vazia. É o conteúdo
-// da pasta, não a diferença de um compare: um rebase ou o merge da base na branch não mexe nele.
+// caminho relativo à pasta → id. Pasta que não existe no commit, sem nenhum arquivo ou que é um
+// arquivo é a falha ErrPastaAusente. É o conteúdo da pasta, não a diferença de um compare: um
+// rebase ou o merge da base na branch não mexe nele.
 func (f Ferramentas) PastaNoSHA(ctx context.Context, rawURL, pasta, sha string) (map[string]string, error) {
 	fj, err := forjaDe(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	pasta = strings.Trim(pasta, "/")
+	var m map[string]string
 	if fj.ferramenta == "glab" {
-		return f.pastaGitLab(ctx, fj, pasta, sha)
+		m, err = f.pastaGitLab(ctx, fj, pasta, sha)
+	} else {
+		m, err = f.pastaGitHub(ctx, fj, pasta, sha)
 	}
-	return f.pastaGitHub(ctx, fj, pasta, sha)
+	if err != nil {
+		return nil, err
+	}
+	if len(m) == 0 {
+		return nil, &Falha{Codigo: ErrPastaAusente, Mensagem: "a pasta " + pasta + " não existe, não tem arquivos ou é um arquivo em " + sha + ": confira o --caminho da spec"}
+	}
+	return m, nil
 }
 
 func (fj forja) argsAPI(caminho string) []string {

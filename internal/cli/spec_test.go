@@ -175,3 +175,26 @@ func TestSpecConferirPelaCLI(t *testing.T) {
 		t.Fatalf("forja fora: exit %d: %s", r.code, r.err)
 	}
 }
+
+// S1 e M1 pela CLI: pasta digitada errada é erro (nunca "pode mesclar") e o texto do pend ver
+// mostra o SHA da validação.
+func TestSpecConferirPastaAusenteEPendVerComSHA(t *testing.T) {
+	env, _ := pendEnv(t)
+	resp := ghDaSpec(t, env)
+	ok(t, env, "spec", "registrar", "15", "--caminho", "docs/specs/e/tg-15-errada", "--mr", specPR)
+	respGH(t, resp, `{"state":"open","head":{"sha":"`+specAprov+`","ref":"tg-15"},"base":{"ref":"main"}}`, "api", "repos/BasisTI/orq/pulls/44")
+	ok(t, env, "pend", "add", "15", "--tipo", "validacao")
+	if out := ok(t, env, "--output", "text", "pend", "ver", "TG-15#P1"); !strings.Contains(out, specAprov) {
+		t.Fatalf("pend ver em texto sem o SHA: %s", out)
+	}
+	ok(t, env, "pend", "responder", "TG-15#P1", "--opcao", "1")
+	respGH(t, resp, `{"state":"open","head":{"sha":"`+specHead+`","ref":"tg-15"},"base":{"ref":"main"}}`, "api", "repos/BasisTI/orq/pulls/44")
+	for _, sha := range []string{specAprov, specHead} {
+		respGH(t, resp, `{"tree":[{"path":"docs","type":"tree","sha":"d"}]}`, "api", "repos/BasisTI/orq/git/trees/"+sha)
+	}
+	respGH(t, resp, `{"tree":[{"path":"outra","type":"tree","sha":"o"}]}`, "api", "repos/BasisTI/orq/git/trees/d")
+	r := rodar(t, env, "spec", "conferir", "15")
+	if r.code != 4 || !strings.Contains(r.err, "pasta_da_spec_ausente") || !strings.Contains(r.err, "--substituir") {
+		t.Fatalf("exit %d: %s", r.code, r.err)
+	}
+}

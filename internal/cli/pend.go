@@ -299,6 +299,9 @@ func textoPendVer(w io.Writer, v PendVer) error {
 		{Key: "autor", Value: ouStr(p.Autor, "-")},
 		{Key: "página", Value: v.URL},
 	}
+	if p.SHAValidacao != nil {
+		linhas = append(linhas, output.Field{Key: "sha da validação", Value: *p.SHAValidacao})
+	}
 	if v.PaneOrigemRef != "" {
 		linhas = append(linhas, output.Field{Key: "pane de origem", Value: v.PaneOrigemRef})
 	}

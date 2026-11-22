@@ -3,6 +3,7 @@ package enriquecer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -220,9 +221,8 @@ func TestConferirSpecFalhaDaForjaNaPasta(t *testing.T) {
 	f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "outra", "type": "tree", "sha": "x"}}}), false, "api", "repos/BasisTI/orq/git/trees/"+shaAprov)
 	pastaGH(f, shaCabeca, spec3)
 	compareGH(f, shaAprov, shaCabeca)
-	c, err := f.ferramentas().ConferirSpec(context.Background(), prSpec, pastaSpec, shaAprov)
-	if err != nil || c.PodeMesclar || len(c.MudouNaPasta) != 2 {
-		t.Fatalf("c = %+v, %v", c, err)
+	if c, err := f.ferramentas().ConferirSpec(context.Background(), prSpec, pastaSpec, shaAprov); !pastaAusente(err) {
+		t.Fatalf("pasta ausente no SHA aprovado: %+v, %v", c, err)
 	}
 }
 
@@ -252,8 +252,7 @@ func TestConferirSpecGitLab(t *testing.T) {
 	// Pasta ausente no GitLab (404): vazia.
 	f.responder("glab", "404 Not Found", true, "api", "--hostname", "gitlab.basis.com.br",
 		"projects/"+proj+"/repository/tree?path="+url.QueryEscape(pastaSpec)+"&ref="+shaAprov+"&recursive=true&per_page=100&page=1")
-	c, err = f.ferramentas().ConferirSpec(context.Background(), mr, pastaSpec, shaAprov)
-	if err != nil || c.PodeMesclar {
+	if c, err = f.ferramentas().ConferirSpec(context.Background(), mr, pastaSpec, shaAprov); !pastaAusente(err) {
 		t.Fatalf("pasta ausente: %+v, %v", c, err)
 	}
 }
@@ -340,5 +339,97 @@ func TestCicloDaConferenciaDasSpecs(t *testing.T) {
 	}
 	if falhas != 1 {
 		t.Fatalf("falhas no log = %d, queria 1", falhas)
+	}
+}
+
+func pastaAusente(err error) bool {
+	var f *Falha
+	return errors.As(err, &f) && f.Codigo == ErrPastaAusente
+}
+
+// S1 da revisão r1: pasta digitada errada, com a mudança real fora dela, nunca é "pode mesclar".
+func TestConferirSpecPastaDigitadaErradaNaoPodeMesclar(t *testing.T) {
+	ctx := context.Background()
+	errada := "docs/specs/epico/tg-59-errado"
+	f := novosFalsos(t)
+	cabecaGH(f, shaCabeca)
+	// A pasta errada não existe em nenhum dos dois commits (o GitHub lista os níveis, sem a errada).
+	for _, sha := range []string{shaAprov, shaCabeca} {
+		f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "docs", "type": "tree", "sha": "d-" + sha}}}), false, "api", "repos/BasisTI/orq/git/trees/"+sha)
+		f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "specs", "type": "tree", "sha": "s-" + sha}}}), false, "api", "repos/BasisTI/orq/git/trees/d-"+sha)
+		f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "epico", "type": "tree", "sha": "e-" + sha}}}), false, "api", "repos/BasisTI/orq/git/trees/s-"+sha)
+		f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "tg-59-x", "type": "tree", "sha": "x-" + sha}}}), false, "api", "repos/BasisTI/orq/git/trees/e-"+sha)
+	}
+	compareGH(f, shaAprov, shaCabeca, pastaSpec+"/spec.md")
+	c, err := f.ferramentas().ConferirSpec(ctx, prSpec, errada, shaAprov)
+	if !pastaAusente(err) || c.PodeMesclar {
+		t.Fatalf("c = %+v, err = %v; queria pasta_da_spec_ausente", c, err)
+	}
+}
+
+func TestConferirSpecPastaAusenteSoNaCabecaOuApontandoArquivo(t *testing.T) {
+	ctx := context.Background()
+	// Existe no aprovado, sumiu na cabeça (renomeada).
+	f := novosFalsos(t)
+	cabecaGH(f, shaCabeca)
+	pastaGH(f, shaAprov, spec3)
+	f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "outra", "type": "tree", "sha": "x"}}}), false, "api", "repos/BasisTI/orq/git/trees/"+shaCabeca)
+	if _, err := f.ferramentas().ConferirSpec(ctx, prSpec, pastaSpec, shaAprov); !pastaAusente(err) {
+		t.Fatalf("sumiu na cabeça: %v", err)
+	}
+	// O caminho aponta um arquivo: o último segmento é blob, não árvore.
+	f = novosFalsos(t)
+	cabecaGH(f, shaCabeca)
+	for _, sha := range []string{shaAprov, shaCabeca} {
+		f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "docs", "type": "tree", "sha": "d"}}}), false, "api", "repos/BasisTI/orq/git/trees/"+sha)
+	}
+	f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "arq.md", "type": "blob", "sha": "b"}}}), false, "api", "repos/BasisTI/orq/git/trees/d")
+	if _, err := f.ferramentas().ConferirSpec(ctx, prSpec, "docs/arq.md", shaAprov); !pastaAusente(err) {
+		t.Fatalf("arquivo: %v", err)
+	}
+	// Pasta só com subpasta, sem arquivo nenhum.
+	f = novosFalsos(t)
+	cabecaGH(f, shaCabeca)
+	pastaGH(f, shaAprov, map[string]string{})
+	if _, err := f.ferramentas().ConferirSpec(ctx, prSpec, pastaSpec, shaAprov); !pastaAusente(err) {
+		t.Fatalf("sem arquivo: %v", err)
+	}
+}
+
+// M4: a conferência que não viu o que mudou fora da pasta é refeita com a cabeça parada.
+func TestCicloReconfereQuandoOCompareFalhou(t *testing.T) {
+	ctx := context.Background()
+	c := novoCenario(t)
+	co := c.coord("alfa", "wA:p1", "")
+	u := refs.US{Projeto: "orq", Ref: 59}
+	if _, err := c.st.CriarOnda(ctx, co, central.NovaOnda{Titulo: "o", US: []refs.US{u}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.st.RegistrarSpec(ctx, &co, u, pastaSpec, prSpec, false); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := c.st.AbrirValidacao(ctx, &co, u, shaAprov, "")
+	opcao := central.OpcaoAprovar
+	if _, err := c.st.ResponderPendencia(ctx, &co, refs.Pend{US: u, Numero: p.Numero}, central.Resposta{Opcao: &opcao, Por: "ana"}); err != nil {
+		t.Fatal(err)
+	}
+	cabecaGH(c.falsos, shaCabeca)
+	pastaGH(c.falsos, shaAprov, spec3)
+	pastaGH(c.falsos, shaCabeca, com(spec3, "decisoes.md", "n"))
+	c.responder("gh", "HTTP 500", true, "api", "repos/BasisTI/orq/compare/"+shaAprov+"..."+shaCabeca+"?per_page=100&page=1")
+	svc := &ConferenciaSpecs{E: c.e}
+	if err := svc.Ciclo(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if sp, _ := c.st.LerSpec(ctx, &co, u); sp.Conferencia == nil || sp.Conferencia.ForaDaPastaErro == "" {
+		t.Fatalf("sp = %+v", sp)
+	}
+	compareGH(c.falsos, shaAprov, shaCabeca, "go.mod")
+	if err := svc.Ciclo(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sp, _ := c.st.LerSpec(ctx, &co, u)
+	if sp.Conferencia.ForaDaPastaErro != "" || len(sp.Conferencia.ForaDaPasta) != 1 {
+		t.Fatalf("não reconferiu: %+v", sp.Conferencia)
 	}
 }

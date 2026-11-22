@@ -44,7 +44,8 @@ func (c *ConferenciaSpecs) Ciclo(ctx context.Context) error {
 		cabeca, err := c.E.F.CabecaMR(ctx, s.MRURL)
 		var conf central.ConferenciaSpec
 		if err == nil {
-			if s.Conferencia != nil && s.Conferencia.SHACabeca == cabeca && s.Erro == nil {
+			// A conferência que não viu o que mudou fora da pasta é refeita, mesmo com a cabeça parada.
+			if s.Conferencia != nil && s.Conferencia.SHACabeca == cabeca && s.Erro == nil && s.Conferencia.ForaDaPastaErro == "" {
 				continue // a cabeça não andou desde a última conferência
 			}
 			conf, err = c.E.F.ConferirSpecCabeca(ctx, s.MRURL, s.Caminho, s.SHAAprovado, cabeca)

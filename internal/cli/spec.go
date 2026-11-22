@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
+	"github.com/BasisTI/orq/internal/refs"
 	"github.com/spf13/cobra"
 )
 
@@ -87,6 +89,10 @@ reprova a spec. Sai com erro se a spec não foi aprovada ou se a forja falha.`,
 			f := enriquecer.Ferramentas{Env: a.Env}
 			c, err := f.ConferirSpec(ctx, sp.MRURL, sp.Caminho, *sp.SHAAprovado)
 			if err != nil {
+				var fa *enriquecer.Falha
+				if errors.As(err, &fa) && fa.Codigo == enriquecer.ErrPastaAusente {
+					return &output.Error{Code: enriquecer.ErrPastaAusente, Cause: fa.Mensagem, Recovery: "confira o --caminho registrado; com o sim da pessoa, orq spec registrar " + refs.Exibir(ref.Ref) + " --caminho <pasta certa> --mr <url> --substituir", Exit: output.ExitConflict}
+				}
 				return &output.Error{Code: "forja_indisponivel", Cause: "não consegui conferir a MR da spec na forja: " + err.Error(), Recovery: "tente de novo quando a forja responder", Exit: output.ExitUnexpected}
 			}
 			res.Conferencia, res.PodeMesclar = &c, c.PodeMesclar

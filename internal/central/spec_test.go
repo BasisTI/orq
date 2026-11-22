@@ -301,3 +301,34 @@ func TestMigracaoDaTabelaPendenciaPreservaOsDados(t *testing.T) {
 		t.Fatalf("índices = %d, %v", idx, err)
 	}
 }
+
+// M2: depois de --substituir, a validação da spec anterior não vale.
+func TestSubstituirInvalidaAValidacaoAnterior(t *testing.T) {
+	ctx := context.Background()
+	s, co := ambienteSpec(t)
+	if _, err := s.RegistrarSpec(ctx, &co, us(t, "59"), "docs/a", mrSpec, false); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.AbrirValidacao(ctx, &co, us(t, "59"), "sha-velho", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	responderValidacao(t, s, co, p.Numero, OpcaoAprovar)
+	if sp, _ := s.LerSpec(ctx, &co, us(t, "59")); sp.Estado != SpecAprovada {
+		t.Fatalf("antes: %+v", sp)
+	}
+	if _, err := s.RegistrarSpec(ctx, &co, us(t, "59"), "docs/b", mrSpec, true); err != nil {
+		t.Fatal(err)
+	}
+	sp, _ := s.LerSpec(ctx, &co, us(t, "59"))
+	if sp.Estado != SpecRegistrada || sp.SHAAprovado != nil || sp.SHAValidacao != nil {
+		t.Fatalf("depois de substituir: %+v", sp)
+	}
+	// Uma validação nova, depois do registro, vale.
+	if _, err := s.AbrirValidacao(ctx, &co, us(t, "59"), "sha-novo", ""); err != nil {
+		t.Fatal(err)
+	}
+	if sp, _ := s.LerSpec(ctx, &co, us(t, "59")); sp.Estado != SpecEmValidacao || *sp.SHAValidacao != "sha-novo" {
+		t.Fatalf("validação nova: %+v", sp)
+	}
+}

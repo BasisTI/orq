@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/output"
 	"github.com/BasisTI/orq/internal/refs"
 )
@@ -298,6 +299,11 @@ func (i *Importador) shaDaValidacao(ctx context.Context, l local) (sha string, r
 		falha = errors.New("sem acesso à forja")
 	} else if sha, falha = i.Forja.CabecaMR(ctx, sp.MRURL); falha == nil && sha == "" {
 		falha = errors.New("a forja não disse o SHA da cabeça da MR")
+	}
+	var fe *enriquecer.Falha
+	if errors.As(falha, &fe) && fe.Codigo == enriquecer.ErrNaoEncontrado {
+		// A forja respondeu que a MR não existe: URL errada no registro, não falha passageira.
+		return "", false, &ErroArquivo{Problemas: []Problema{{Motivo: "a MR da spec " + sp.MRURL + " não existe na forja (404): confira o registro (orq spec registrar " + refs.Exibir(l.us.Ref) + " --caminho <pasta> --mr <url> --substituir)"}}}
 	}
 	if falha != nil {
 		if msg := falha.Error(); i.retidas[l.path] != msg {

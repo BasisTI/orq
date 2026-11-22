@@ -213,7 +213,8 @@ func lerLinhaSpec(ctx context.Context, q querier, projeto string, ref int) (*Spe
 }
 
 // carregarSpec lê a spec da US com o estado derivado; nil se não há spec. O estado vem, nesta
-// ordem, de: MR mesclada; a última pendência de validação (aberta: em validação; respondida com
+// ordem, de: MR mesclada; (só vale validação aberta a partir do último registro: depois de
+// --substituir, a anterior era da spec velha); a última pendência de validação (aberta: em validação; respondida com
 // Aprovar: aprovada; qualquer outra: registrada); e, sobre a aprovada, da conferência do daemon
 // quando ela é do SHA aprovado e achou mudança além do decisoes.md.
 func carregarSpec(ctx context.Context, q querier, projeto string, ref int) (*SpecUS, error) {
@@ -228,7 +229,7 @@ func carregarSpec(ctx context.Context, q querier, projeto string, ref int) (*Spe
 	var opcao *int
 	var sha *string
 	err = q.QueryRowContext(ctx, `SELECT numero, aberta, respondida_em, resposta_opcao, sha_validacao FROM pendencia
-		WHERE projeto = ? AND ref = ? AND tipo = 'validacao' ORDER BY numero DESC LIMIT 1`, projeto, ref).Scan(&numero, &aberta, &respondida, &opcao, &sha)
+		WHERE projeto = ? AND ref = ? AND tipo = 'validacao' AND aberta_em >= ? ORDER BY numero DESC LIMIT 1`, projeto, ref, sp.AtualizadaEm).Scan(&numero, &aberta, &respondida, &opcao, &sha)
 	switch {
 	case semLinha(err):
 	case err != nil:
