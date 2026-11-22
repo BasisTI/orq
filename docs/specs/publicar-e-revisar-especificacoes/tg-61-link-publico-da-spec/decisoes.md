@@ -113,3 +113,9 @@
 - **Origem:** TG-61#P3, respondida em 2026-11-22
 - **Decisão:** spec, plano e decisões aprovados no SHA `8586a39aeaaa63625ec9e69e510fa42d0a722d3e`.
 - **Fala:** "Aprovar"
+
+## D20 — "Entregue" e achados da revisão, na implementação
+- **Data:** 2026-11-22
+- **Origem:** TG-61#P4, respondida em 2026-11-22 (achados da revisão independente da spec, rodada r2)
+- **Decisão:** a spec entra como aprovada e a implementação corrige: na faixa pública, "entregue" quer dizer MR do código ligada à US mesclada (não o `done` da US nem a onda encerrada), e a onda "até plano" encerrada mostra "aprovada", com critério de aceite para esse caso. Vão junto: o critério do `href` vale só para links relativos ou de mesma origem fora de âncora e `/estatico/`, conferindo as rotas `/p/`, `/onda/` e `/projeto/`; as âncoras ficam únicas quando há `.md` extra na pasta da US (por exemplo, prefixo `us-` ou `epico-`); o `escritor-minimo` da migration da coluna `versao` é o número dela.
+- **Fala:** "Mesclar a spec aprovada e levar o Sério à implementação"
