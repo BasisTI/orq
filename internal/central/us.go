@@ -31,8 +31,9 @@ type US struct {
 	PaneID       *string     `json:"pane_id"`
 	Papel        *string     `json:"papel"`
 	Rodada       *int        `json:"rodada"`
-	Modelo       *string     `json:"modelo"`  // id do modelo do pane, ex. "claude-fable-5-2"
-	Esforco      *string     `json:"esforco"` // nível de esforço do pane, ex. "medium"
+	Modelo       *string     `json:"modelo"`        // id do modelo do pane, ex. "claude-fable-5-2"
+	Esforco      *string     `json:"esforco"`       // nível de esforço do pane, ex. "medium"
+	EsperaMotivo *string     `json:"espera_motivo"` // por que a US espera (bloqueio externo); nulo sem motivo
 	AtualizadoEm string      `json:"atualizado_em"`
 	MRs          []MR        `json:"mrs"`
 	Pendencias   []Pendencia `json:"pendencias"`
@@ -41,14 +42,14 @@ type US struct {
 }
 
 func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]US, error) {
-	rows, err := q.QueryContext(ctx, `SELECT projeto, ref, onda_id, posicao, status, pane_id, papel, rodada, modelo, esforco, atualizado_em FROM us `+clause+` ORDER BY onda_id, posicao`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT projeto, ref, onda_id, posicao, status, pane_id, papel, rodada, modelo, esforco, espera_motivo, atualizado_em FROM us `+clause+` ORDER BY onda_id, posicao`, args...)
 	if err != nil {
 		return nil, err
 	}
 	us := []US{}
 	for rows.Next() {
 		var u US
-		if err := rows.Scan(&u.Projeto, &u.Ref, &u.OndaID, &u.Posicao, &u.Status, &u.PaneID, &u.Papel, &u.Rodada, &u.Modelo, &u.Esforco, &u.AtualizadoEm); err != nil {
+		if err := rows.Scan(&u.Projeto, &u.Ref, &u.OndaID, &u.Posicao, &u.Status, &u.PaneID, &u.Papel, &u.Rodada, &u.Modelo, &u.Esforco, &u.EsperaMotivo, &u.AtualizadoEm); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -215,8 +216,8 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 			return err
 		}
 		var atual US
-		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada, modelo, esforco FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
-			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada, &atual.Modelo, &atual.Esforco)
+		err = tx.QueryRowContext(ctx, `SELECT status, pane_id, papel, rodada, modelo, esforco, espera_motivo FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).
+			Scan(&atual.Status, &atual.PaneID, &atual.Papel, &atual.Rodada, &atual.Modelo, &atual.Esforco, &atual.EsperaMotivo)
 		if err != nil {
 			return err
 		}
@@ -245,7 +246,10 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		if m.Esforco != nil && !iguais(atual.Esforco, m.Esforco) {
 			detalhe["esforco"] = *m.Esforco
 		}
-		if len(detalhe) == 0 {
+		// O motivo vale para a US que espera: sair de wait o limpa, com o evento us.espera na
+		// mesma transação (um motivo esquecido mostraria o oposto do que acontece).
+		limpaEspera := m.Status != "wait" && atual.EsperaMotivo != nil
+		if len(detalhe) == 0 && !limpaEspera {
 			return nil
 		}
 		if atual.Status == "done" && m.Status != "done" {
@@ -253,6 +257,14 @@ func (s *Store) AtualizarStatus(ctx context.Context, coord *Coordenador, ref ref
 		}
 		detalhe["status"] = m.Status
 		alterada = true
+		if limpaEspera {
+			if _, err = tx.ExecContext(ctx, `UPDATE us SET espera_motivo = NULL WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref); err != nil {
+				return err
+			}
+			if err = s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "us.espera", detalhe: map[string]any{"limpou": true, "motivo_antes": *atual.EsperaMotivo, "motivo_da_limpeza": "a US saiu de wait (" + m.Status + ")"}}); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE us SET status = ?, pane_id = COALESCE(?, pane_id), papel = COALESCE(?, papel), rodada = COALESCE(?, rodada), modelo = COALESCE(?, modelo), esforco = COALESCE(?, esforco), atualizado_em = ?
 			WHERE projeto = ? AND ref = ?`, m.Status, m.Pane, m.Papel, m.Rodada, m.Modelo, m.Esforco, s.agora(), alvo.Projeto, alvo.Ref)
 		if err != nil {
@@ -296,4 +308,68 @@ func iguais(a, b *string) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+// LimiteEspera é o tamanho máximo, em runas, do motivo da espera: um texto curto de lista.
+const LimiteEspera = 200
+
+// NormalizarEspera apara o motivo e recusa o vazio, o de caractere de controle e o longo demais.
+func NormalizarEspera(motivo string) (string, error) {
+	m := strings.TrimSpace(motivo)
+	switch {
+	case m == "":
+		return "", uso("motivo da espera vazio", "escreva o motivo ou use --limpar")
+	case temControle(m):
+		return "", uso("motivo da espera com caractere de controle", "use texto simples, numa linha")
+	case utf8.RuneCountInString(m) > LimiteEspera:
+		return "", uso(fmt.Sprintf("motivo da espera com mais de %d caracteres", LimiteEspera), "resuma: é um texto curto para a lista de US")
+	}
+	return m, nil
+}
+
+// DefinirEspera registra, troca (motivo != nil) ou limpa (nil) o motivo da espera da US e grava
+// o evento us.espera na mesma transação. Motivo igual ao gravado, ou limpar sem motivo, não
+// grava nem gera evento (alterada = false). O status da US não muda.
+func (s *Store) DefinirEspera(ctx context.Context, coord *Coordenador, ref refs.US, motivo *string) (US, bool, error) {
+	if motivo != nil {
+		m, err := NormalizarEspera(*motivo)
+		if err != nil {
+			return US{}, false, err
+		}
+		motivo = &m
+	}
+	var alvo usAlvo
+	alterada := false
+	err := s.escrever(ctx, func(tx *sql.Tx) error {
+		var err error
+		if alvo, err = resolverUS(ctx, tx, ref, coord); err != nil {
+			return err
+		}
+		var atual *string
+		if err = tx.QueryRowContext(ctx, `SELECT espera_motivo FROM us WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref).Scan(&atual); err != nil {
+			return err
+		}
+		if iguais(atual, motivo) {
+			return nil
+		}
+		detalhe := map[string]any{}
+		if motivo != nil {
+			detalhe["motivo"] = *motivo
+		} else {
+			detalhe["limpou"] = true
+		}
+		if atual != nil {
+			detalhe["motivo_antes"] = *atual
+		}
+		alterada = true
+		if _, err = tx.ExecContext(ctx, `UPDATE us SET espera_motivo = ?, atualizado_em = ? WHERE projeto = ? AND ref = ?`, motivo, s.agora(), alvo.Projeto, alvo.Ref); err != nil {
+			return err
+		}
+		return s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "us.espera", detalhe: detalhe})
+	})
+	if err != nil {
+		return US{}, false, err
+	}
+	u, err := s.verUS(ctx, alvo.US)
+	return u, alterada, err
 }

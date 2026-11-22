@@ -98,7 +98,7 @@ func textoCentral(w io.Writer, r ResultadoCentral) error {
 		return err
 	}
 	for _, p := range r.Panes {
-		if _, err := fmt.Fprintf(w, "  %-9s %s  %s\n", p.Acao, p.PaneID, q(p.Coordenador)); err != nil {
+		if _, err := fmt.Fprintf(w, "  %-9s %s  %s\n", p.Acao, q(refCentral(r.Workspace, p)), q(p.Coordenador)); err != nil {
 			return err
 		}
 		if p.Detalhe != nil {
@@ -482,4 +482,13 @@ func esperarTUI(ctx context.Context, f enriquecer.Ferramentas, pane, coord strin
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// refCentral cita o pane do TUI de um coordenador pelo workspace e pelo rótulo que o orq lhe dá,
+// com o id entre parênteses.
+func refCentral(workspace string, p PaneCentral) string {
+	if p.PaneID == "" {
+		return "-"
+	}
+	return workspace + "/" + RotuloPaneCentral + p.Coordenador + " (" + p.PaneID + ")"
 }

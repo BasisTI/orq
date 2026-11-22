@@ -115,3 +115,28 @@ func TestSnapshotEnriquecido(t *testing.T) {
 		t.Fatalf("fontes = %+v", f)
 	}
 }
+
+func TestSessaoHerdrReferencia(t *testing.T) {
+	s := SessaoHerdr{
+		Workspaces: map[string]WorkspaceHerdr{"w12": {Rotulo: "colaboradados"}, "w3": {}},
+		Tabs:       map[string]TabHerdr{"w12:t2": {Rotulo: "ci"}},
+		Panes: map[string]PaneHerdr{
+			"w12:p4": {WorkspaceID: "w12", TabID: "w12:t2", Rotulo: "ci-templates-v1231"},
+			"w12:p5": {WorkspaceID: "w12", TabID: "w12:t2", Nome: "agente"},
+			"w12:p6": {WorkspaceID: "w12", TabID: "w12:t2"},
+			"w3:p1":  {WorkspaceID: "w3"},
+		},
+	}
+	casos := map[string]string{
+		"w12:p4": "colaboradados/ci-templates-v1231 (w12:p4)",
+		"w12:p5": "colaboradados/agente (w12:p5)",
+		"w12:p6": "colaboradados/ci (w12:p6)", // sem nome no pane: workspace/tab
+		"w3:p1":  "w3:p1",                     // o Herdr não deu nome nenhum: só o id
+		"w9:p9":  "w9:p9",                     // pane fora da sessão
+	}
+	for id, esperado := range casos {
+		if got := s.Referencia(id); got != esperado {
+			t.Errorf("Referencia(%s) = %q, quer %q", id, got, esperado)
+		}
+	}
+}

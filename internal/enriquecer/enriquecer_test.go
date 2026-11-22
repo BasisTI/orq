@@ -629,3 +629,20 @@ func TestConsultarMRGitLabPipelineEAprovacao(t *testing.T) {
 		t.Fatalf("glab antigo = %+v, %v", v, err)
 	}
 }
+
+func TestParseSessaoHerdrTrazOsNomesDeWorkspaceETab(t *testing.T) {
+	s, err := ParseSessaoHerdr([]byte(`{"result":{"snapshot":{
+	  "workspaces":[{"workspace_id":"w12","label":"colaboradados"}],
+	  "tabs":[{"tab_id":"w12:t2","workspace_id":"w12","label":"ci"}],
+	  "panes":[{"pane_id":"w12:p4","workspace_id":"w12","tab_id":"w12:t2","label":"ci-templates-v1231"},{"pane_id":"w12:p5","workspace_id":"w12","tab_id":"w12:t2"}],
+	  "agents":[]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := s.Referencia("w12:p4"); g != "colaboradados/ci-templates-v1231 (w12:p4)" {
+		t.Errorf("com nome: %q", g)
+	}
+	if g := s.Referencia("w12:p5"); g != "colaboradados/ci (w12:p5)" {
+		t.Errorf("sem nome do pane: %q", g)
+	}
+}

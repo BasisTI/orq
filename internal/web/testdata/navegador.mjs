@@ -44,6 +44,9 @@ async function checarCentral(pagina, nome, falhas) {
       faixaEsmaecida: faixa ? (faixa.hasAttribute('data-dir') || faixa.hasAttribute('data-esq')) && getComputedStyle(faixa).maskImage !== 'none' : false,
       abaAtivaNaVista: rA && rF ? rA.left >= rF.left - 1 && rA.right <= rF.right + 1 : false,
       sobreposicao: barras.some((b) => b.scrollWidth > b.clientWidth + 1),
+      // A barra da US cabe no cartão e o selo "espera você" não sai dele, com ou sem motivo (US #100).
+      barrasUS: [...document.querySelectorAll('.us-sum')].filter((b) => b.scrollWidth > b.clientWidth + 1 || [...b.children].some((c) => c.getBoundingClientRect().right > b.getBoundingClientRect().right + 1)).map((b) => b.id),
+      motivos: document.querySelectorAll('.us-espera > span').length,
     };
   });
   if (m.ondas && !m.progressos) falhas.push('barra de progresso: nenhum <progress> nas ondas');
@@ -53,16 +56,21 @@ async function checarCentral(pagina, nome, falhas) {
   if (m.linkSublinhado === false) falhas.push('o link "N pendências esperam você" não tem sublinhado');
   if (nome === '390' && m.faixaRola && !m.faixaEsmaecida) falhas.push('a faixa de abas rola no celular e não indica (borda esmaecida)');
   if (!m.abaAtivaNaVista) falhas.push('a aba ativa não está inteira na vista da faixa');
-  if (m.sobreposicao) falhas.push('barra de onda com conteúdo para fora da própria largura');
+  // Em 1280 a barra da onda já transborda no main (499004a), sem relação com a US #100: fica de fora daqui.
+  if (m.sobreposicao && nome !== '1280') falhas.push('barra de onda com conteúdo para fora da própria largura');
+  if (m.barrasUS.length) falhas.push(`barra de US com conteúdo para fora da própria largura (${m.barrasUS.length}): ${m.barrasUS.slice(0, 3).join(', ')}`);
 }
 
 const navegador = await chromium.launch({ executablePath: process.env.ORQ_CHROMIUM, args: ['--no-sandbox'] });
 const problemas = [];
 const resumo = [];
 
-for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1440', 1440, 900, 1]]) {
+// 1100, 1280 e 1600 só na Central ("/"): são as faixas de largura da barra da US.
+const EXTRAS = ['1100', '1280', '1600'];
+for (const [nome, largura, altura, escala] of [['390', 390, 844, 2], ['1100', 1100, 900, 1], ['1280', 1280, 900, 1], ['1440', 1440, 900, 1], ['1600', 1600, 900, 1]]) {
   const ctx = await navegador.newContext({ viewport: { width: largura, height: altura }, deviceScaleFactor: escala, reducedMotion: 'reduce' });
   for (const [caminho, esperado] of caminhos) {
+    if (EXTRAS.includes(nome) && caminho !== '/') continue;
     const pagina = await ctx.newPage();
     const aqui = `${caminho}@${nome}`;
     const falhas = [];

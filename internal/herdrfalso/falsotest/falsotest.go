@@ -168,3 +168,29 @@ func (f *Falso) RotuloENome(pane string) (rotulo, nome string) {
 	}
 	return "", ""
 }
+
+// Local põe o pane (criando-o se não existe) numa tab própria de um workspace, com os rótulos
+// dados: é o que `herdr api snapshot` devolve para o nome do workspace e da tab. Rótulo de tab
+// vazio deixa a tab sem nome.
+func (f *Falso) Local(pane, ws, wsRotulo, aba, abaRotulo string) {
+	f.t.Helper()
+	e, err := herdrfalso.Ler(f.Dir)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if e.Panes[pane] == nil {
+		e.Panes[pane] = &herdrfalso.Pane{}
+	}
+	e.Workspaces[ws] = wsRotulo
+	e.Abas[aba] = &herdrfalso.No{Pane: pane}
+	e.AbaWS[aba] = ws
+	if abaRotulo != "" {
+		if e.AbaRotulo == nil {
+			e.AbaRotulo = map[string]string{}
+		}
+		e.AbaRotulo[aba] = abaRotulo
+	}
+	if err := e.Salvar(f.Dir); err != nil {
+		f.t.Fatal(err)
+	}
+}

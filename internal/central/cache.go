@@ -40,6 +40,7 @@ type Cache struct {
 type SessaoHerdr struct {
 	Panes      map[string]PaneHerdr      `json:"panes"`
 	Workspaces map[string]WorkspaceHerdr `json:"workspaces"`
+	Tabs       map[string]TabHerdr       `json:"tabs,omitempty"`
 }
 
 // PaneHerdr é o que o orq guarda de um pane. Status é o agent_status do Herdr (unknown num
@@ -51,6 +52,7 @@ type PaneHerdr struct {
 	// Rotulo é o rótulo do pane no Herdr (`herdr pane rename`), distinto do nome do agente.
 	Rotulo      string            `json:"rotulo,omitempty"`
 	WorkspaceID string            `json:"workspace_id"`
+	TabID       string            `json:"tab_id,omitempty"`
 	Tokens      map[string]string `json:"tokens,omitempty"`
 	// Cwd e CwdPrimeiroPlano são os diretórios do pane no Herdr. Só a limpeza lê (na consulta
 	// ao vivo); ficam fora do JSON do cache e do snapshot.
@@ -60,7 +62,43 @@ type PaneHerdr struct {
 
 // WorkspaceHerdr é o que o orq guarda de um workspace.
 type WorkspaceHerdr struct {
+	Rotulo string            `json:"rotulo,omitempty"`
 	Tokens map[string]string `json:"tokens,omitempty"`
+}
+
+// TabHerdr é o que o orq guarda de uma tab.
+type TabHerdr struct {
+	Rotulo string `json:"rotulo,omitempty"`
+}
+
+// Referencia diz onde achar o pane, do jeito que a pessoa lê: `<workspace>/<pane>`, ou
+// `<workspace>/<tab>` quando o pane não tem nome, com o id entre parênteses, nunca sozinho. O
+// nome do pane é o rótulo (herdr pane rename) ou, sem ele, o nome do agente. Falta de nome em
+// algum nível não inventa nada: sai o que o Herdr sabe e, no fim, o id.
+func (s SessaoHerdr) Referencia(id string) string {
+	p, ok := s.Panes[id]
+	if !ok {
+		return id
+	}
+	ws := s.Workspaces[p.WorkspaceID].Rotulo
+	nome := p.Rotulo
+	if nome == "" {
+		nome = p.Nome
+	}
+	if nome == "" {
+		nome = s.Tabs[p.TabID].Rotulo
+	}
+	var partes []string
+	if ws != "" {
+		partes = append(partes, ws)
+	}
+	if nome != "" {
+		partes = append(partes, nome)
+	}
+	if len(partes) == 0 {
+		return id
+	}
+	return strings.Join(partes, "/") + " (" + id + ")"
 }
 
 // ValorMR é o valor em cache de uma MR.
@@ -348,10 +386,12 @@ func (s *Store) DesmarcarToken(ctx context.Context, t Token) error {
 
 // Herdr é o estado vivo de um pane no snapshot.
 type Herdr struct {
-	Status       *string `json:"status"`
-	Agente       *string `json:"agente"`
-	Nome         *string `json:"nome"`
-	WorkspaceID  *string `json:"workspace_id"`
+	Status      *string `json:"status"`
+	Agente      *string `json:"agente"`
+	Nome        *string `json:"nome"`
+	WorkspaceID *string `json:"workspace_id"`
+	// Referencia é o pane como a pessoa o acha: `workspace/pane (id)`; nulo sem sessão do Herdr.
+	Referencia   *string `json:"referencia"`
 	AtualizadoEm *string `json:"atualizado_em"`
 	Erro         *Erro   `json:"erro"`
 }
@@ -419,6 +459,7 @@ func (h herdrCache) pane(id *string) *Herdr {
 		return out
 	}
 	out.Status, out.WorkspaceID = ptr(p.Status), ptr(p.WorkspaceID)
+	out.Referencia = ptr(h.sessao.Referencia(*id))
 	if p.Agente != "" {
 		out.Agente = ptr(p.Agente)
 	}
@@ -529,4 +570,18 @@ func (s *Store) LerSessaoHerdr(ctx context.Context) (*SessaoHerdr, *Erro, error)
 		return nil, nil, err
 	}
 	return h.sessao, h.linha.Erro, nil
+}
+
+// ReferenciaPane é o pane como a pessoa o acha (SessaoHerdr.Referencia), lido do último valor
+// do Herdr em cache. Sem sessão em cache, ou com o pane fora dela, sai o id, que é tudo o que o
+// orq sabe; só leitura.
+func (s *Store) ReferenciaPane(ctx context.Context, id string) string {
+	if id == "" {
+		return ""
+	}
+	h, err := lerHerdr(ctx, s.db)
+	if err != nil || h.sessao == nil {
+		return id
+	}
+	return h.sessao.Referencia(id)
 }
