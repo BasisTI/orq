@@ -312,6 +312,10 @@ func TestLeituraDaValidacaoPeloSHADelaEPreservada(t *testing.T) {
 	if _, err := c.st.ResponderPendencia(ctx, &co, refs.Pend{US: u, Numero: p.Numero}, central.Resposta{Opcao: &opcao, Por: "ana"}); err != nil {
 		t.Fatal(err)
 	}
+	// Respondida mas aberta, a versão fica (aberta = 1 até o coordenador resolver).
+	if _, err := c.st.ResolverPendencia(ctx, &co, refs.Pend{US: u, Numero: p.Numero}, ""); err != nil {
+		t.Fatal(err)
+	}
 	c.rel.passar(time.Hour)
 	if err := svc.Ciclo(ctx); err != nil {
 		t.Fatal(err)
