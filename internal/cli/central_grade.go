@@ -135,7 +135,7 @@ func (g *grade) acrescentar(ctx context.Context, existente string) (string, erro
 		// O parceiro volta mesmo que a criação tenha falhado: não deve ficar na aba temporária.
 		if _, errV := g.mover(ctx, parceiro, acima, "right"); errV != nil {
 			return "", gradeErro(
-				fmt.Sprintf("o pane %s ficou numa aba temporária: %v", parceiro, errV),
+				fmt.Sprintf("o pane %s ficou numa aba temporária: %v", g.f.ReferenciaViva(ctx, parceiro), errV),
 				fmt.Sprintf("traga de volta com herdr pane move %s --tab %s --target-pane %s --split right e rode orq central abrir", parceiro, g.tab, acima))
 		}
 	}
