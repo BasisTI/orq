@@ -101,12 +101,82 @@ type MRVista struct {
 	Erro string
 }
 
+// SpecVista é o indicador da spec da US: o estado e o SHA a que ele se refere. Tem é falso sem spec
+// registrada (nada é mostrado).
+type SpecVista struct {
+	Tem             bool
+	Selo            Selo
+	SHA             string // SHA curto do estado: o da validação ou da aprovação; vazio no registrada
+	Caminho, MR     string
+	MRURL           string
+	Conferencia     string // a frase da conferência da pasta; vazia sem conferência
+	ForaDaPasta     int    // arquivos de fora da pasta que a MR altera (outro sinal, não reprova a spec)
+	ConferidaEm     string
+	ConferenciaErro string
+}
+
+// selosSpec traduz o estado da spec do snapshot. Os textos são os cinco do épico.
+var selosSpec = map[string]Selo{
+	central.SpecRegistrada:  {Cls: "neutro", Texto: "spec registrada", Icone: "arquivo"},
+	central.SpecEmValidacao: {Cls: "aviso", Texto: "spec em validação", Icone: "relogio"},
+	central.SpecAprovada:    {Cls: "ok", Texto: "spec aprovada", Icone: "check"},
+	central.SpecMudou:       {Cls: "erro", Texto: "spec mudou além do decisoes.md", Icone: "alerta"},
+	central.SpecMesclada:    {Cls: "ok", Texto: "spec mesclada", Icone: "merge"},
+}
+
+func shaCurto(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+func vistaSpec(sp *central.SpecUS, agora time.Time) SpecVista {
+	if sp == nil {
+		return SpecVista{}
+	}
+	s, ok := selosSpec[sp.Estado]
+	if !ok {
+		s = Selo{Cls: "neutro", Texto: "spec " + sp.Estado}
+	}
+	v := SpecVista{Tem: true, Selo: s, Caminho: sp.Caminho, MRURL: sp.MRURL}
+	switch sp.Estado {
+	case central.SpecEmValidacao:
+		v.SHA = shaCurto(derefStr(sp.SHAValidacao))
+	case central.SpecAprovada, central.SpecMudou, central.SpecMesclada:
+		v.SHA = shaCurto(derefStr(sp.SHAAprovado))
+	}
+	if v.SHA != "" {
+		v.Selo.Texto += " " + v.SHA
+	}
+	if sp.Estado == central.SpecMudou {
+		v.Selo.Title = "a pasta da spec mudou além do decisoes.md desde a aprovação (" + v.SHA + ")"
+	}
+	if c := sp.Conferencia; c != nil {
+		switch {
+		case c.PodeMesclar:
+			v.Conferencia = "pode mesclar: só o decisoes.md mudou desde a aprovação"
+		default:
+			v.Conferencia = "mudou além do decisoes.md: " + strings.Join(c.MudouNaPasta, ", ")
+		}
+		v.ForaDaPasta = len(c.ForaDaPasta)
+	}
+	if sp.ConferidaEm != nil {
+		v.ConferidaEm = central.Idade(*sp.ConferidaEm, agora)
+	}
+	if sp.ConferenciaErro != nil {
+		v.ConferenciaErro = sp.ConferenciaErro.Codigo
+	}
+	return v
+}
+
 // USVista é uma linha de US.
 type USVista struct {
 	ID, Anchor, Titulo string
 	Status             Selo
 	Agente             AgenteVista
 	Modelo             ModeloVista
+	Spec               SpecVista
 	Espera             string // motivo da espera da US; vazio sem motivo
 	TaigaStatus        string
 	TaigaURL           string
@@ -566,7 +636,7 @@ func esperaDe(u central.US) string {
 func vistaUS(u central.US, merge bool, tons map[string]int, nomes map[string]string, agora time.Time) USVista {
 	uv := USVista{
 		ID: u.ID, Anchor: "us-" + u.Projeto + "-" + strconv.Itoa(u.Ref), Projeto: ProjetoTag{Slug: u.Projeto, Tom: tons[u.Projeto]},
-		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), Espera: esperaDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
+		Agente: agenteDe(u.Herdr, agora), Modelo: modeloDe(u), Spec: vistaSpec(u.Spec, agora), Espera: esperaDe(u), SemMRs: len(u.MRs) == 0, MRsQtd: len(u.MRs),
 	}
 	if s, ok := statusUS[u.Status]; ok {
 		uv.Status = s

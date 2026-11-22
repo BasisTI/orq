@@ -89,17 +89,8 @@ func (s *Store) AdicionarMR(ctx context.Context, coord *Coordenador, ref refs.US
 		if alvo, err = resolverUS(ctx, tx, ref, coord); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO mr (projeto, ref, url, projeto_path, iid, iac, adicionada_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-			alvo.Projeto, alvo.Ref, m.URL, m.ProjetoPath, m.IID, m.IaC, s.agora())
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			return err
-		}
-		criada = true
-		return s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "mr.add",
-			detalhe: map[string]any{"url": m.URL, "projeto_path": m.ProjetoPath, "iid": m.IID, "iac": m.IaC}})
+		criada, err = s.ligarMR(ctx, tx, coord, alvo, m)
+		return err
 	})
 	if err != nil {
 		return MR{}, false, err
@@ -111,6 +102,21 @@ func (s *Store) AdicionarMR(ctx context.Context, coord *Coordenador, ref refs.US
 		return err
 	})
 	return out, criada, err
+}
+
+// ligarMR grava a MR da US dentro da transação; a mesma URL de novo não muda nada (devolve false,
+// sem evento). AdicionarMR e RegistrarSpec usam a mesma lógica.
+func (s *Store) ligarMR(ctx context.Context, tx *sql.Tx, coord *Coordenador, alvo usAlvo, m refs.MR) (bool, error) {
+	res, err := tx.ExecContext(ctx, `INSERT INTO mr (projeto, ref, url, projeto_path, iid, iac, adicionada_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		alvo.Projeto, alvo.Ref, m.URL, m.ProjetoPath, m.IID, m.IaC, s.agora())
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
+	}
+	return true, s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "mr.add",
+		detalhe: map[string]any{"url": m.URL, "projeto_path": m.ProjetoPath, "iid": m.IID, "iac": m.IaC}})
 }
 
 // RemoverMR desliga a MR da US; a URL passa pela mesma normalização do add.

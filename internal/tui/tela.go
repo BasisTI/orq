@@ -330,7 +330,7 @@ var rotuloStatus = map[string]string{"wait": "Wait", "plan": "Plan", "exec": "Ex
 
 var rotuloAte = map[string]string{"plano": "plano", "mr-pronta": "MR pronta", "merge": "merge"}
 
-var rotuloTipo = map[string]string{"duvida": "dúvida", "autorizacao": "autorização", "decisao": "decisão"}
+var rotuloTipo = map[string]string{"duvida": "dúvida", "autorizacao": "autorização", "decisao": "decisão", "validacao": "validação"}
 
 func rotulo(m map[string]string, k string) string {
 	if v, ok := m[k]; ok {
@@ -364,7 +364,7 @@ func (e Estilos) corTipo(tipo string) color.Color {
 		return p.azul
 	case "autorizacao":
 		return p.amarelo
-	case "decisao":
+	case "decisao", "validacao":
 		return p.roxo
 	default:
 		return p.cinza

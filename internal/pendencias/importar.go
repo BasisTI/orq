@@ -26,6 +26,9 @@ const (
 	EstadoRegistrada   = "registrada"    // pendência nova
 	EstadoJaRegistrada = "ja_registrada" // o slug já tinha pendência; nada novo
 	EstadoErro         = "erro"          // o arquivo não vira pendência; o motivo está no .erro.txt
+	// EstadoRetida: a validação espera a forja (o SHA da MR da spec não pôde ser lido); sem
+	// .erro.txt, nova tentativa no ciclo seguinte.
+	EstadoRetida = "retida"
 )
 
 // Resultado é o desfecho de um arquivo.
@@ -47,6 +50,11 @@ type Registrada struct {
 	URL   string `json:"url"`
 }
 
+// LeitorForja lê, na forja, a cabeça da MR da spec: o SHA que a pendência de validação guarda.
+type LeitorForja interface {
+	CabecaMR(ctx context.Context, url string) (string, error)
+}
+
 // Importador transforma os arquivos de pendência da pasta de trabalho em pendências da Central.
 // O daemon (Varrer) e orq pend importar (Importar) usam o mesmo caminho.
 type Importador struct {
@@ -55,7 +63,12 @@ type Importador struct {
 	Raiz string
 	// BaseURL é a URL pública da web (ORQ_WEB_URL); vazia, o registro traz só o caminho.
 	BaseURL string
-	Log     func(format string, args ...any)
+	// Forja lê o SHA da cabeça da MR da spec para a pendência de validação. Nula, a validação fica
+	// retida.
+	Forja LeitorForja
+	Log   func(format string, args ...any)
+
+	retidas map[string]string // última mensagem logada por arquivo retido
 }
 
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -239,8 +252,22 @@ func (i *Importador) processar(ctx context.Context, raiz *os.Root, l local, conh
 		}
 		return r, err
 	}
+	sha := ""
+	if a.Tipo == "validacao" {
+		var retida bool
+		if sha, retida, err = i.shaDaValidacao(ctx, l); err != nil {
+			var ea *ErroArquivo
+			if errors.As(err, &ea) {
+				return i.recusar(raiz, l, r, ea), nil
+			}
+			return r, err
+		} else if retida {
+			r.Estado = EstadoRetida
+			return r, nil
+		}
+	}
 	res, err := i.St.RegistrarPendencia(ctx, central.NovaPendencia{US: l.us, Tipo: a.Tipo, Titulo: a.Titulo, Autor: a.Autor, Detalhe: a.Detalhe,
-		Opcoes: a.Opcoes, Slug: l.slug, Arquivo: l.path, Hash: hash})
+		Opcoes: a.Opcoes, Slug: l.slug, Arquivo: l.path, Hash: hash, SHA: sha})
 	if err != nil {
 		if e := output.AsError(err); problemaDoArquivo(e) {
 			return i.recusar(raiz, l, r, &ErroArquivo{Problemas: []Problema{{Motivo: e.Cause + recoveryDe(e)}}}), nil
@@ -253,6 +280,37 @@ func (i *Importador) processar(ctx context.Context, raiz *os.Root, l local, conh
 	}
 	r.Alterado = res.Alterada
 	return i.concluir(raiz, l, r, l.us, res.Pendencia.Numero, estado)
+}
+
+// shaDaValidacao lê o SHA da cabeça da MR da spec registrada da US. Sem spec, o arquivo é recusado
+// (ErroArquivo). Com a forja falhando, a validação fica retida (retida = true, sem erro): não
+// aparece na Central e o ciclo seguinte tenta de novo.
+func (i *Importador) shaDaValidacao(ctx context.Context, l local) (sha string, retida bool, err error) {
+	sp, err := i.St.SpecDaUS(ctx, l.us)
+	if err != nil {
+		return "", false, err
+	}
+	if sp == nil {
+		return "", false, &ErroArquivo{Problemas: []Problema{{Motivo: l.us.Chave() + " não tem spec registrada: a validação precisa dela (orq spec registrar " + refs.Exibir(l.us.Ref) + " --caminho <pasta> --mr <url>)"}}}
+	}
+	var falha error
+	if i.Forja == nil {
+		falha = errors.New("sem acesso à forja")
+	} else if sha, falha = i.Forja.CabecaMR(ctx, sp.MRURL); falha == nil && sha == "" {
+		falha = errors.New("a forja não disse o SHA da cabeça da MR")
+	}
+	if falha != nil {
+		if msg := falha.Error(); i.retidas[l.path] != msg {
+			if i.retidas == nil {
+				i.retidas = map[string]string{}
+			}
+			i.retidas[l.path] = msg
+			i.logf("validação %s retida: não li o SHA da MR da spec (%s); tento de novo no próximo ciclo", l.path, msg)
+		}
+		return "", true, nil
+	}
+	delete(i.retidas, l.path)
+	return sha, false, nil
 }
 
 // problemaDoArquivo separa o que é culpa do arquivo (US que não existe, onda encerrada, opção

@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
+	"github.com/BasisTI/orq/internal/enriquecer"
 	"github.com/BasisTI/orq/internal/hora"
 	"github.com/BasisTI/orq/internal/limpeza"
 	"github.com/BasisTI/orq/internal/output"
@@ -28,17 +30,29 @@ func (a *App) pendCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "pend", Short: "Abre, responde, resolve e lista pendências (P1, P2… por US)"}
 	var tipo, pane string
 	add := &cobra.Command{
-		Use:   `add <ref> --tipo <duvida|autorizacao|decisao> "<texto>"`,
+		Use:   `add <ref> --tipo <duvida|autorizacao|decisao|validacao> ["<texto>"]`,
 		Short: "Abre uma pendência só com o título e imprime o id (TG-312#P2); o caminho normal é o arquivo (orq pend importar)",
-		Args:  cobra.ExactArgs(2),
+		Long: `Abre uma pendência só com o título. A validação (--tipo validacao) não leva texto: o título e as opções
+(Aprovar, Pedir ajustes) são do orq, e o orq lê na forja o SHA da cabeça da MR da spec registrada e o grava.
+Sem spec registrada é erro de uso; com a forja fora do ar, erro na hora.`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, st, coord, ref, err := a.preparar(cmd, args[0])
 			if err != nil {
 				return err
 			}
-			p, err := st.AbrirPendencia(ctx, coord, ref, tipo, args[1], pane)
-			if err != nil {
-				return err
+			var p central.Pendencia
+			if tipo == "validacao" {
+				if p, err = a.abrirValidacao(cmd, st, coord, ref, pane); err != nil {
+					return err
+				}
+			} else {
+				if len(args) != 2 {
+					return &output.Error{Code: "uso", Cause: "pendência sem texto", Recovery: `passe o texto entre aspas: orq pend add TG-312 --tipo duvida "…"`, Exit: output.ExitUsage}
+				}
+				if p, err = st.AbrirPendencia(ctx, coord, ref, tipo, args[1], pane); err != nil {
+					return err
+				}
 			}
 			return a.emit(p, func(w io.Writer) error {
 				_, err := fmt.Fprintln(w, p.ID)
@@ -46,7 +60,7 @@ func (a *App) pendCmd() *cobra.Command {
 			})
 		},
 	}
-	add.Flags().StringVar(&tipo, "tipo", "", "duvida, autorizacao ou decisao")
+	add.Flags().StringVar(&tipo, "tipo", "", "duvida, autorizacao, decisao ou validacao")
 	add.Flags().StringVar(&pane, "pane", "", "pane do Herdr que abriu a pendência")
 
 	var resposta string
@@ -223,6 +237,10 @@ erro. É idempotente por slug + US. Usa o mesmo código do daemon.`,
 				if r.Estado == pendencias.EstadoErro {
 					return nil
 				}
+				if r.Estado == pendencias.EstadoRetida {
+					_, err := fmt.Fprintf(w, "retida: a forja não deu o SHA da MR da spec; o daemon tenta de novo no ciclo seguinte (%s)\n", arquivo)
+					return err
+				}
 				_, err := fmt.Fprintf(w, "%s  %s  %s\n", r.ID, r.Estado, q(r.URL))
 				return err
 			}); err != nil {
@@ -244,7 +262,26 @@ func (a *App) importador(st *central.Store) (*pendencias.Importador, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &pendencias.Importador{St: st, Raiz: raizes.Trabalho, BaseURL: a.Env("ORQ_WEB_URL")}, nil
+	return &pendencias.Importador{St: st, Raiz: raizes.Trabalho, BaseURL: a.Env("ORQ_WEB_URL"), Forja: enriquecer.Ferramentas{Env: a.Env}}, nil
+}
+
+// abrirValidacao lê o SHA da cabeça da MR da spec na forja e abre a pendência de validação. Sem
+// spec, erro de uso (antes de qualquer chamada à forja); com a forja falhando, erro na hora.
+func (a *App) abrirValidacao(cmd *cobra.Command, st *central.Store, coord *central.Coordenador, ref refs.US, pane string) (central.Pendencia, error) {
+	ctx := cmd.Context()
+	sp, err := st.LerSpec(ctx, coord, ref)
+	if err != nil {
+		var oe *output.Error
+		if errors.As(err, &oe) && oe.Code == "nao_encontrado" && strings.Contains(oe.Cause, "não tem spec registrada") {
+			return central.Pendencia{}, &output.Error{Code: "uso", Cause: oe.Cause + ": a validação precisa dela", Recovery: oe.Recovery, Exit: output.ExitUsage}
+		}
+		return central.Pendencia{}, err
+	}
+	sha, err := enriquecer.Ferramentas{Env: a.Env}.CabecaMR(ctx, sp.MRURL)
+	if err != nil {
+		return central.Pendencia{}, &output.Error{Code: "forja_indisponivel", Cause: "não consegui ler o SHA da cabeça da MR da spec: " + err.Error(), Recovery: "tente de novo quando a forja responder", Exit: output.ExitUnexpected}
+	}
+	return st.AbrirValidacao(ctx, coord, ref, sha, pane)
 }
 
 func textoPendVer(w io.Writer, v PendVer) error {

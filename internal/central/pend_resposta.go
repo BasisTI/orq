@@ -38,6 +38,10 @@ func OpcoesAutorizacao() []Opcao {
 // menos 2 e no máximo uma recomendada; autorização não traz opções (a Central cria "Autorizo" e
 // "Não autorizo"); dúvida aceita opções ou nenhuma, e com opções valem as mesmas regras.
 func ValidarOpcoes(tipo string, os []Opcao) ([]Opcao, error) {
+	if tipo == "validacao" {
+		// Título e opções são do orq; o que o arquivo trouxer é ignorado.
+		return OpcoesValidacao(), nil
+	}
 	if tipo == "autorizacao" {
 		if len(os) > 0 {
 			return nil, uso("autorização não tem opções no arquivo", "tire `opcoes`: a Central cria Autorizo e Não autorizo")

@@ -12,7 +12,7 @@ import (
 )
 
 // Tipos de pendência.
-var TiposPendencia = []string{"duvida", "autorizacao", "decisao"}
+var TiposPendencia = []string{"duvida", "autorizacao", "decisao", "validacao"}
 
 // Pendencia é uma dúvida, autorização ou decisão que espera resposta. O número é sequencial
 // por US e nunca é reaproveitado; o id exibido é TG-312#P2.
@@ -50,6 +50,8 @@ type Pendencia struct {
 	RespostaVersao int `json:"resposta_versao"`
 	// ArquivoAlterado: o arquivo mudou depois do registro; a pendência não muda com ele.
 	ArquivoAlterado bool `json:"arquivo_alterado"`
+	// SHAValidacao é a cabeça da MR da spec que o orq gravou ao abrir uma pendência de validação.
+	SHAValidacao *string `json:"sha_validacao,omitempty"`
 	// SemCoordenador: respondida e o aviso ao coordenador falhou porque ele não existe mais.
 	SemCoordenador bool `json:"sem_coordenador"`
 }
@@ -80,6 +82,9 @@ const (
 func (s *Store) AbrirPendencia(ctx context.Context, coord *Coordenador, ref refs.US, tipo, texto, pane string) (Pendencia, error) {
 	if !contem(TiposPendencia, tipo) {
 		return Pendencia{}, uso(fmt.Sprintf("tipo %q inválido", tipo), "use "+strings.Join(TiposPendencia, ", "))
+	}
+	if tipo == "validacao" {
+		return Pendencia{}, uso("a validação tem título e SHA do orq", "abra com orq pend add <ref> --tipo validacao (a CLI lê o SHA na forja)")
 	}
 	if strings.TrimSpace(texto) == "" {
 		return Pendencia{}, uso("pendência sem texto", `passe o texto entre aspas: orq pend add TG-312 --tipo duvida "…"`)
@@ -305,7 +310,7 @@ func carregarPendenciasSQL(ctx context.Context, q querier, comDetalhe bool, clau
 		detalhe = "p.detalhe"
 	}
 	rows, err := q.QueryContext(ctx, `SELECT p.projeto, p.ref, p.numero, p.tipo, p.texto, p.pane_origem, p.aberta, p.resposta, p.aberta_em, p.resolvida_em, us.onda_id, onda.coordenador,
-		p.detalhe IS NOT NULL, `+detalhe+`, p.opcoes, p.slug, p.arquivo, p.autor, p.resposta_opcao, p.respondida_em, p.respondida_por, p.avisada_em, p.resposta_versao, p.arquivo_alterado IS NOT NULL, p.aviso_falhou_em IS NOT NULL
+		p.detalhe IS NOT NULL, `+detalhe+`, p.opcoes, p.slug, p.arquivo, p.autor, p.resposta_opcao, p.respondida_em, p.respondida_por, p.avisada_em, p.resposta_versao, p.arquivo_alterado IS NOT NULL, p.aviso_falhou_em IS NOT NULL, p.sha_validacao
 		FROM pendencia p JOIN us ON us.projeto = p.projeto AND us.ref = p.ref JOIN onda ON onda.id = us.onda_id `+clause, args...)
 	if err != nil {
 		return nil, err
@@ -318,7 +323,7 @@ func carregarPendenciasSQL(ctx context.Context, q querier, comDetalhe bool, clau
 		var opcoes *string
 		var falhou bool
 		if err := rows.Scan(&u.Projeto, &u.Ref, &p.Numero, &p.Tipo, &p.Texto, &p.PaneOrigem, &p.Aberta, &p.Resposta, &p.AbertaEm, &p.ResolvidaEm, &p.OndaID, &p.Coordenador,
-			&p.TemDetalhe, &p.Detalhe, &opcoes, &p.Slug, &p.Arquivo, &p.Autor, &p.RespostaOpcao, &p.RespondidaEm, &p.RespondidaPor, &p.AvisadaEm, &p.RespostaVersao, &p.ArquivoAlterado, &falhou); err != nil {
+			&p.TemDetalhe, &p.Detalhe, &opcoes, &p.Slug, &p.Arquivo, &p.Autor, &p.RespostaOpcao, &p.RespondidaEm, &p.RespondidaPor, &p.AvisadaEm, &p.RespostaVersao, &p.ArquivoAlterado, &falhou, &p.SHAValidacao); err != nil {
 			return nil, err
 		}
 		p.ID, p.US = refs.PendID(u.Ref, p.Numero), u.Chave()

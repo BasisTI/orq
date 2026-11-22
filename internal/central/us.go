@@ -39,6 +39,8 @@ type US struct {
 	Pendencias   []Pendencia `json:"pendencias"`
 	Herdr        *Herdr      `json:"herdr"` // nulo sem pane
 	Taiga        Taiga       `json:"taiga"`
+	// Spec é a spec registrada da US com o estado; nula sem registro.
+	Spec *SpecUS `json:"spec"`
 }
 
 func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]US, error) {
@@ -76,6 +78,9 @@ func carregarUS(ctx context.Context, q querier, clause string, args ...any) ([]U
 			return nil, err
 		}
 		if u.MRs, err = carregarMRs(ctx, q, u.Projeto, u.Ref); err != nil {
+			return nil, err
+		}
+		if u.Spec, err = carregarSpec(ctx, q, u.Projeto, u.Ref); err != nil {
 			return nil, err
 		}
 		if u.Pendencias, err = carregarPendencias(ctx, q, `WHERE p.projeto = ? AND p.ref = ?`, u.Projeto, u.Ref); err != nil {

@@ -130,9 +130,10 @@ func Ler(conteudo []byte) (*Arquivo, error) {
 		return 1
 	}
 	if !contem(central.TiposPendencia, fm.Tipo) {
-		add(achar("tipo:"), "tipo %q inválido: use duvida, autorizacao ou decisao", fm.Tipo)
+		add(achar("tipo:"), "tipo %q inválido: use duvida, autorizacao, decisao ou validacao", fm.Tipo)
 	}
-	if p := linhaUnica("titulo", fm.Titulo, 200); p != "" {
+	// O título da validação é do orq: o arquivo pode nem trazê-lo.
+	if p := linhaUnica("titulo", fm.Titulo, 200); p != "" && !(fm.Tipo == "validacao" && strings.TrimSpace(fm.Titulo) == "") {
 		add(achar("titulo:"), "%s", p)
 	}
 	if p := linhaUnica("autor", fm.Autor, 100); p != "" {

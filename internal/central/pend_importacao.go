@@ -21,6 +21,8 @@ type NovaPendencia struct {
 	Slug    string
 	Arquivo string
 	Hash    string // sha256 do arquivo, para notar que mudou depois do registro
+	// SHA é a cabeça da MR da spec que o importador leu na forja; só a validação o usa (e o exige).
+	SHA string
 }
 
 // ResultadoRegistro diz o que RegistrarPendencia fez.
@@ -70,6 +72,15 @@ func (s *Store) RegistrarPendencia(ctx context.Context, n NovaPendencia) (Result
 		if !aberta {
 			return conflito("onda_encerrada", fmt.Sprintf("%s está numa onda encerrada", alvo.Chave()), "ponha a US numa onda aberta: orq onda adicionar <id> <ref> (ou orq onda criar)")
 		}
+		if n.Tipo == "validacao" {
+			if err := exigirSpec(ctx, tx, alvo); err != nil {
+				return err
+			}
+			if n.SHA == "" {
+				return uso("validação sem o SHA da cabeça da MR da spec", "")
+			}
+			n.Titulo = TituloValidacao(alvo.Ref)
+		}
 		opcoes, err := ValidarOpcoes(n.Tipo, n.Opcoes)
 		if err != nil {
 			return err
@@ -90,13 +101,16 @@ func (s *Store) RegistrarPendencia(ctx context.Context, n NovaPendencia) (Result
 		if err := tx.QueryRowContext(ctx, `UPDATE us SET proxima_pendencia = proxima_pendencia + 1 WHERE projeto = ? AND ref = ? RETURNING proxima_pendencia - 1`, alvo.Projeto, alvo.Ref).Scan(&numero); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO pendencia (projeto, ref, numero, tipo, texto, aberta, aberta_em, detalhe, opcoes, slug, arquivo, arquivo_hash, autor)
-			VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
-			alvo.Projeto, alvo.Ref, numero, n.Tipo, n.Titulo, s.agora(), n.Detalhe, string(oj), n.Slug, n.Arquivo, n.Hash, n.Autor); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO pendencia (projeto, ref, numero, tipo, texto, aberta, aberta_em, detalhe, opcoes, slug, arquivo, arquivo_hash, autor, sha_validacao)
+			VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			alvo.Projeto, alvo.Ref, numero, n.Tipo, n.Titulo, s.agora(), n.Detalhe, string(oj), n.Slug, n.Arquivo, n.Hash, n.Autor, nulo(n.SHA)); err != nil {
 			return err
 		}
-		return s.registrar(ctx, tx, evento{coordenador: alvo.coordenador, ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "pend.add",
-			detalhe: map[string]any{"id": refs.PendID(alvo.Ref, numero), "tipo": n.Tipo, "texto": n.Titulo, "origem": "arquivo", "slug": n.Slug, "arquivo": n.Arquivo, "autor": n.Autor, "opcoes": len(opcoes)}})
+		detalhe := map[string]any{"id": refs.PendID(alvo.Ref, numero), "tipo": n.Tipo, "texto": n.Titulo, "origem": "arquivo", "slug": n.Slug, "arquivo": n.Arquivo, "autor": n.Autor, "opcoes": len(opcoes)}
+		if n.SHA != "" {
+			detalhe["sha"] = n.SHA
+		}
+		return s.registrar(ctx, tx, evento{coordenador: alvo.coordenador, ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "pend.add", detalhe: detalhe})
 	})
 	if err != nil {
 		return ResultadoRegistro{}, err

@@ -286,7 +286,7 @@ func TestMigracaoConcorrenteRespeitaATrava(t *testing.T) {
 // da MR da 0006, o modelo da US da 0007 nem a tabela mensagem da 0008), para simular um banco anterior à 0005.
 func desfazer0005(t *testing.T, s *Store) {
 	t.Helper()
-	for _, q := range []string{"DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
+	for _, q := range []string{"DROP TABLE spec", "DROP TABLE spec_conferencia", "ALTER TABLE pendencia DROP COLUMN sha_validacao", "DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
