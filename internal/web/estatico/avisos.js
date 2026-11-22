@@ -178,7 +178,9 @@
           };
           var ao = function (e) {
             if (e && e.target && e.target !== vivo) return;
-            depois(!!(e && e.detail && e.detail.failed));
+            // Só 2xx é sucesso (detail.successful === true), como o app.js faz: erro de rede, aborto e
+            // timeout do htmx disparam afterRequest sem failed nem successful.
+            depois(!(e && e.detail && e.detail.successful === true));
           };
           vivo.addEventListener('htmx:afterRequest', ao);
           win.setTimeout(function () { depois(true); }, 8000);
@@ -229,10 +231,14 @@
       baseMem = ids;
       gravar(win.sessionStorage, BASE, ids);
     }
+    // geracao sobe a cada desativar/ativar: um ciclo iniciado antes (consulta ainda em voo) não pode
+    // gravar a base nem notificar depois, ou repovoaria a base que a desativação apagou.
+    var geracao = 0;
     function ciclo() {
       if (N.permission !== 'granted') { desativar(); estado(); return Promise.resolve(); }
+      var g = geracao;
       return buscar().then(function (itens) {
-        if (!itens) return;
+        if (!itens || g !== geracao) return;
         var base = lerBase();
         var ids = itens.map(function (i) { return i.id; });
         gravarBase(ids);
@@ -240,7 +246,7 @@
         if (base === null) return;
         var novos = selecionar(itens, base, []);
         if (!novos.length) return;
-        return reivindicar(novos).then(function (meus) { meus.forEach(exibir); });
+        return reivindicar(novos).then(function (meus) { if (g === geracao) meus.forEach(exibir); });
       });
     }
 
@@ -257,6 +263,7 @@
     // nesse meio-tempo como passado, em vez de notificar o acumulado.
     function desativar() {
       ativo = false;
+      geracao++;
       if (timer !== null) { try { win.clearInterval(timer); } catch (e) { /* sem clearInterval */ } timer = null; }
       baseMem = null;
       try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
@@ -264,6 +271,7 @@
     function ativar() {
       if (ativo || N.permission !== 'granted') return;
       ativo = true;
+      geracao++;
       baseMem = null;
       try { win.sessionStorage.removeItem(BASE); } catch (e) { /* sem armazenamento */ }
       ultima = ciclo().then(agendar);

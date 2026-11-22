@@ -31,7 +31,7 @@ const abas = [];
 const tudo = async () => { for (const t of abas) await t.ctl.aguardar(); };
 const espera = tudo;
 const armazem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
-const servidor = { itens: [], consultas: 0, fora: false };
+const servidor = { itens: [], consultas: 0, fora: false, segurar: false, segurados: [] };
 const notificacoes = [];
 const lockFila = { cadeia: Promise.resolve() };
 const locks = { request: (_nome, fn) => (lockFila.cadeia = lockFila.cadeia.then(() => fn())) };
@@ -77,7 +77,13 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
     clearInterval: (id) => { timers[id - 1] = () => Promise.resolve(); w.limpos = (w.limpos || 0) + 1; },
     setTimeout: (f, ms) => { const t = setTimeout(f, ms); t.unref(); return t; },
     htmx: vivo ? { trigger: (el, ev) => { w.disparos.push(ev); vivo.aoDisparar(); } } : undefined, disparos: [],
-    fetch: async () => { servidor.consultas++; if (servidor.fora) return { ok: false }; return { ok: true, json: async () => ({ itens: servidor.itens.map((i) => ({ ...i })) }) }; },
+    fetch: async () => {
+      servidor.consultas++;
+      if (servidor.fora) return { ok: false };
+      const itens = servidor.itens.map((i) => ({ ...i })); // a resposta vale o estado do momento do pedido
+      if (servidor.segurar) await new Promise((r) => servidor.segurados.push(r));
+      return { ok: true, json: async () => ({ itens }) };
+    },
   };
   const doc = { getElementById: (id) => (id === 'avisos-btn' ? btn : id === 'vivo' ? vivo : dom[id] || null) };
   const ctl = iniciar(doc, w);
@@ -327,30 +333,34 @@ function aba({ permissao, local, sessao, concede = 'granted', idb = false, idbEr
 }
 
 // 6b) Clique com #vivo e htmx (r3): pede o /vivo, não recarrega, e abre o destino depois da atualização.
-function vivoFalso({ aoTrocar, falhou = false }) {
+// O detail é o do htmx embutido: 2xx traz successful:true; 4xx/5xx trazem failed:true e successful:false;
+// erro de rede, aborto e timeout disparam afterRequest SEM failed nem successful (e-detail pode faltar).
+function vivoFalso({ aoTrocar, detalhe }) {
   const ouvintes = [];
   const v = {
     addEventListener: (e, f) => { if (e === 'htmx:afterRequest') ouvintes.push(f); },
     removeEventListener: (e, f) => { const i = ouvintes.indexOf(f); if (i >= 0) ouvintes.splice(i, 1); },
     ouvintes,
     aoDisparar: () => {
-      v.fim = new Promise((r) => setTimeout(() => { aoTrocar && aoTrocar(); ouvintes.slice().forEach((f) => f({ target: v, detail: { failed: falhou } })); r(); }, 0));
+      v.fim = new Promise((r) => setTimeout(() => { aoTrocar && aoTrocar(); ouvintes.slice().forEach((f) => f({ target: v, detail: detalhe })); r(); }, 0));
     },
   };
   return v;
 }
 {
   const casos = [
-    ['/vivo traz a resposta', { traz: true }, 0, 1, true],
-    ['/vivo não traz a resposta: último recurso', { traz: false }, 1, 1, false],
-    ['/vivo falha: só abre o destino, sem recarregar', { traz: false, falhou: true }, 0, 1, true],
+    ['/vivo traz a resposta', { traz: true, detalhe: { successful: true } }, 0, true],
+    ['/vivo 2xx sem a resposta: último recurso', { traz: false, detalhe: { successful: true } }, 1, false],
+    ['/vivo 503: só abre o destino, sem recarregar', { traz: false, detalhe: { failed: true, successful: false } }, 0, true],
+    ['erro de rede (sem failed nem successful)', { traz: false, detalhe: {} }, 0, true],
+    ['aborto/timeout (sem detail)', { traz: false, detalhe: undefined }, 0, true],
   ];
-  for (const [nome, { traz, falhou }, recargas, disparos, abre] of casos) {
+  for (const [nome, { traz, detalhe }, recargas, abre] of casos) {
     notificacoes.length = 0;
     servidor.itens = [A];
     const item = { querySelector: () => null };
     const dom = { 'msg-7': item };
-    const vivo = vivoFalso({ falhou, aoTrocar: () => { if (traz) item.querySelector = (q) => (q === '.msg-resposta' ? {} : null); } });
+    const vivo = vivoFalso({ detalhe, aoTrocar: () => { if (traz) item.querySelector = (q) => (q === '.msg-resposta' ? {} : null); } });
     const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), dom, vivo });
     await a.ctl.aguardar();
     servidor.itens = [A, R];
@@ -359,7 +369,7 @@ function vivoFalso({ aoTrocar, falhou = false }) {
     notificacoes[0].onclick();
     assert.equal(a.w.location.href, '/', `${nome}: o hash só muda depois da atualização`);
     await vivo.fim;
-    assert.deepEqual(a.w.disparos, ['vivo-agora'].slice(0, disparos), nome);
+    assert.deepEqual(a.w.disparos, ['vivo-agora'], nome);
     assert.equal(a.w.location.recargas, recargas, `${nome}: recargas`);
     if (abre) assert.equal(a.w.location.href, '/#msg-7', `${nome}: abre o destino`);
     assert.equal(vivo.ouvintes.length, 0, `${nome}: o ouvinte sai`);
@@ -408,5 +418,27 @@ function vivoFalso({ aoTrocar, falhou = false }) {
   await a.ciclo();
   await a.ciclo();
   assert.equal(notificacoes.length, 1, 'B notifica uma vez, não a cada ciclo');
+}
+
+// 13) Ciclo em voo quando a permissão é revogada e reconcedida (r4): o resultado velho é descartado.
+{
+  notificacoes.length = 0;
+  idbCompartilhado.clear();
+  servidor.itens = [A];
+  const a = aba({ permissao: 'granted', local: armazem(), sessao: armazem(), idb: true });
+  await a.ctl.aguardar();
+  servidor.segurar = true; // o ciclo 1 sai com [A] e fica preso na rede
+  const c1 = Promise.all(a.timers.map((f) => f()));
+  a.Notificacao.permission = 'denied';
+  ouvintesPerm[ouvintesPerm.length - 1].onchange(); // desativar()
+  servidor.itens = [A, B];
+  servidor.segurar = false;
+  a.Notificacao.permission = 'granted';
+  await a.btn.ouvintes.click(); // ativar(): ciclo 2 com [A, B] cria a base
+  assert.equal(notificacoes.length, 0);
+  servidor.segurados.splice(0).forEach((r) => r()); // agora o ciclo 1 volta, com [A]
+  await c1;
+  await a.ciclo();
+  assert.equal(notificacoes.length, 0, 'o ciclo velho não repovoa a base nem faz B notificar na reativação');
 }
 console.log('avisos_logica: ok');
