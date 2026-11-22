@@ -36,6 +36,10 @@ type Daemon struct {
 	// Pendencias, se não nulo, roda a cada Tick: importa os arquivos de pendência novos e avisa
 	// o coordenador do que a pessoa respondeu. Falha dele vai para o log e não derruba o laço.
 	Pendencias interface{ Ciclo(context.Context) error }
+	// Specs, se não nulo, roda a cada IntervaloRemoto: confere as specs aprovadas e ainda não
+	// mescladas contra a MR (só o decisoes.md pode mudar) e guarda o resultado no cache. Falha vai
+	// para o log.
+	Specs interface{ Ciclo(context.Context) error }
 	// Nomes, se não nulo, roda a cada Tick: confere se o rótulo e o agente do pane de cada
 	// coordenador têm o nome da onda aberta mais recente dele, e corrige. Falha vai para o log.
 	Nomes interface{ Ciclo(context.Context) error }
@@ -73,6 +77,13 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			d.limpeza(ctx)
+		}()
+	}
+	if d.Specs != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.specs(ctx)
 		}()
 	}
 	if d.Pendencias != nil {
@@ -282,6 +293,25 @@ func (d *Daemon) limpeza(ctx context.Context) {
 			d.logf("limpeza", "limpeza automática: %v", err)
 		} else if err == nil {
 			d.logf("limpeza", "")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// specs chama a conferência das specs aprovadas a cada IntervaloRemoto. Fica fora do laço das MRs:
+// a leitura das árvores na forja não atrasa a consulta do estado das MRs.
+func (d *Daemon) specs(ctx context.Context) {
+	t := time.NewTicker(valorDur(d.IntervaloRemoto, 15*time.Second))
+	defer t.Stop()
+	for {
+		if err := d.Specs.Ciclo(ctx); err != nil && ctx.Err() == nil {
+			d.logf("specs", "specs: %v", err)
+		} else if err == nil {
+			d.logf("specs", "")
 		}
 		select {
 		case <-ctx.Done():

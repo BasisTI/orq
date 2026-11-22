@@ -38,7 +38,7 @@ type PendMuda struct {
 	Item       PendItem
 }
 
-var iconesTipo = map[string]string{"decisao": "decisao", "autorizacao": "autoriza", "duvida": "duvida"}
+var iconesTipo = map[string]string{"decisao": "decisao", "autorizacao": "autoriza", "duvida": "duvida", "validacao": "autoriza"}
 
 // pendItemDe monta o item do resumo de uma pendência do snapshot. Não lê relógio: recebe agora.
 func pendItemDe(p central.Pendencia, agora time.Time) PendItem {

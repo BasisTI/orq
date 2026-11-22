@@ -25,6 +25,8 @@
 
 - Ainda versão 1, US #100: a `US` ganhou `espera_motivo` (texto curto ou nulo, até 200 caracteres; nulo até `orq us espera`). Aditivo, `versao` não sobe; a migration 0010 só acrescenta uma coluna nula e declara leitor 4 e escritor 5. O diário ganhou o evento `us.espera`. Sair de `wait` limpa o motivo.
 
+- Ainda versão 1, US #59: a `US` ganhou `spec` (objeto ou nulo, nulo até `orq spec registrar`) e a `Pendencia` ganhou `sha_validacao` (omitido fora da `validacao`). Aditivo, `versao` não sobe; a migration 0011 cria as tabelas `spec` e `spec_conferencia`, acrescenta `sha_validacao` em `pendencia` e refaz `pendencia` para o `tipo` aceitar `validacao`; declara leitor 4 e escritor 5. O diário ganhou o evento `spec.registrar` (com o registro anterior quando `--substituir`), e `pend.add` traz `sha` na validação.
+
 - Ainda versão 1, US #64: a `Onda` ganhou `mensagens` (`[Mensagem]`, em ordem decrescente de envio). Aditivo; a migration 0008 cria a tabela `mensagem` e declara leitor 4 e escritor 5.
 
 - Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
@@ -142,6 +144,7 @@ US {
   "modelo": string|null,                   # id do modelo do pane ("claude-fable-5-2"); nulo até o status vir com --modelo
   "esforco": string|null,                  # esforço do pane ("medium"); nulo se não informado
   "espera_motivo": string|null,            # por que a US espera (bloqueio externo), registrado por `orq us espera`; nulo sem motivo
+  "spec": Spec|null,                       # a spec registrada (`orq spec registrar`); nulo sem registro
   "atualizado_em": data,
   "mrs": [MR],
   "pendencias": [Pendencia],               # abertas e resolvidas
@@ -154,6 +157,30 @@ US {
     "atualizado_em": data|null,
     "erro": Erro|null
   }
+}
+
+Spec {
+  "caminho": string,                       # pasta da spec, relativa à raiz do repositório da MR
+  "mr_url": string,                        # a MR da spec (ligada à US pelo mesmo comando)
+  "estado": "registrada"|"em_validacao"|"aprovada"|"mudou"|"mesclada",
+  # mesclada: a MR da spec está mesclada. Senão, vale a última pendência `validacao`: aberta e sem resposta é
+  # em_validacao; respondida com Aprovar é aprovada (ou mudou, se a conferência do daemon achou mudança além do
+  # decisoes.md); qualquer outra (nenhuma, Pedir ajustes) é registrada.
+  "registrada_em": data,
+  "atualizada_em": data,
+  "validacao": string|null,                # id da última `validacao` ("TG-59#P1")
+  "sha_validacao": string|null,            # cabeça da MR da spec que o orq gravou ao importá-la
+  "sha_aprovado": string|null,             # o mesmo SHA, quando essa validação foi aprovada
+  "sha_cabeca": string|null,               # cabeça da MR na última conferência do daemon (do mesmo sha_aprovado)
+  "conferencia": {                         # nulo até o daemon conferir
+    "sha_aprovado": string, "sha_cabeca": string,
+    "pode_mesclar": bool,                  # nada mudou na pasta da spec além de decisoes.md
+    "mudou_na_pasta": [string],            # arquivos da pasta (relativos a ela) que mudaram, sem o decisoes.md
+    "fora_da_pasta": [string],             # sinal à parte: a forja aponta estes arquivos fora da pasta ("a MR não é só da spec"); não reprova a spec
+    "fora_da_pasta_erro": string           # ausente; a falha de ler esse sinal
+  }|null,
+  "conferida_em": data|null,
+  "conferencia_erro": Erro|null            # a última conferência falhou (forja fora do ar); a conferência acima é a última boa
 }
 
 MR {

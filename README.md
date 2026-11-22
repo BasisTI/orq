@@ -108,7 +108,9 @@ Em `onda list` e `pend list`, `--coord` filtra pelo coordenador dono da onda; em
 | `orq pend responder <ref>#P<n> [--opcao N] ["texto"]` | A resposta da pessoa pelo chat, igual à da web, com `respondida_por = chat`. Só o coordenador usa. |
 | `orq pend resolver <ref>#P<n> [--resposta "…"]` | Resolve a pendência. Sem `--resposta`, vale a que a pessoa registrou (o texto dela ou `opção N (título)`). |
 | `orq pend list [--abertas\|--respondidas\|--resolvidas] [--coord X] [--onda N] [--projeto P]` | Lista as pendências. `--abertas` inclui as respondidas que ainda não foram resolvidas. |
-| `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre uma pendência só com o título, sem detalhe (o caminho antigo; o normal é o arquivo) e imprime o id (`TG-312#P2`). |
+| `orq pend add <ref> --tipo duvida\|autorizacao\|decisao "<texto>" [--pane <id>]` | Abre uma pendência só com o título, sem detalhe (o caminho antigo; o normal é o arquivo) e imprime o id (`TG-312#P2`). Com `--tipo validacao` não leva texto: abre a validação da spec (veja [Specs](#specs-registro-validação-e-conferência)). |
+| `orq spec registrar <ref> --caminho <pasta> --mr <url> [--substituir]` | Registra a pasta e a MR da spec da US e liga a MR à US, numa transação (veja [Specs](#specs-registro-validação-e-conferência)). |
+| `orq spec conferir <ref>` | Só leitura: diz se a MR da spec pode ser mesclada (só o `decisoes.md` mudou na pasta desde a aprovação). |
 | `orq msg ver <id>` | Mostra a mensagem enviada pela web ao coordenador e a resposta (se houver). |
 | `orq msg responder <id> ["texto"] [--arquivo <caminho>]` | Registra a resposta única do coordenador (até 64 KiB, aceita markdown; `--arquivo -` lê de `stdin`). |
 | `orq msg list [--onda <id>] [--abertas]` | Lista as mensagens em ordem decrescente de envio. |
@@ -155,6 +157,25 @@ Os nomes `orq` e `orq_mrs` são do orq; `mrs_prontas`, `story` e `fase` são da 
 
 Só pane e workspace que existem recebem token. No Herdr o token é por nome, não por fonte, então a propriedade vem do próprio orq: ele registra um token só depois de publicá-lo com sucesso, e o token continua sendo dele enquanto o Herdr mostrar o último valor que ele publicou. Um token ausente é (re)publicado. Um valor de outro produtor no mesmo nome não é adotado, sobrescrito nem limpo; vira aviso (`avisos` em `orq atualizar`, uma linha no log do daemon). O que deixou de valer só é limpo (`--clear-token`) se ainda tem o valor do orq; na saída, o daemon relê o Herdr antes de limpar.
 
+### Specs: registro, validação e conferência
+
+A spec de uma US é uma pasta `docs/specs/<épico>/tg-<ref>-<nome-curto>/` (`spec.md`, `plano.md`, `decisoes.md`) numa MR só dela. O orq guarda a pasta e a MR e acompanha o estado.
+
+```bash
+orq spec registrar TG-59 --caminho docs/specs/epico/tg-59-nome --mr https://github.com/BasisTI/orq/pull/44
+```
+
+- O repositório sai da URL da MR (não há `--repo`); o mesmo comando liga a MR à US, como `orq mr add`, na mesma transação. O orq usa a pasta registrada e nunca a deduz pelo nome. `--substituir` também invalida a validação anterior: só vale validação aberta depois do último registro.
+- Uma spec por US. Com spec já registrada o comando recusa (`spec_ja_registrada`, exit 4) e mostra o registro atual: quem chama avisa o responsável e pergunta se substitui, e só com o sim repete com `--substituir`. O evento `spec.registrar` guarda os valores anteriores e os novos.
+
+**Validação.** Pendência de tipo `validacao`, pelo arquivo (`tipo: validacao`, que não exige `titulo` nem `opcoes`) ou por `orq pend add TG-59 --tipo validacao`. O orq impõe o título "Spec da TG-59 pronta para validar" e as opções **Aprovar** e **Pedir ajustes** (nenhuma recomendada), seja qual for o conteúdo do arquivo, e grava na importação o **SHA da cabeça da MR da spec**; o coordenador não escreve o SHA, e a pendência segue presa a ele mesmo que a cabeça ande. Sem spec registrada, o arquivo é recusado (`.erro.txt`) e a CLI devolve erro de uso. Com a forja fora do ar (ou sem `gh`/`glab`), a pendência de arquivo fica **retida**, sem aparecer na Central e sem `.erro.txt`, e o daemon tenta de novo a cada ciclo; a CLI devolve `forja_indisponivel` na hora. MR que a forja diz não existir (404) é recusa com `.erro.txt`, não retenção.
+
+**Conferência.** `orq spec conferir TG-59` compara o **conteúdo da pasta registrada** entre o SHA da validação aprovada e a cabeça atual da MR (árvores lidas pela API da forja, só leitura) e responde "pode mesclar" quando só `<pasta>/decisoes.md` mudou; senão lista os arquivos da pasta que mudaram. Arquivo alterado fora da pasta (o compare da forja) é outro sinal, "a MR não é só da spec", e não reprova a spec: um rebase ou o merge da base na branch traz arquivos de fora sem mudar o conteúdo da pasta. Pasta que não existe, não tem arquivos ou é um arquivo, no SHA aprovado ou na cabeça, é erro (`pasta_da_spec_ausente`, exit 4), nunca "pode mesclar": confira o `--caminho` e, com o sim da pessoa, `orq spec registrar --substituir`. Sem validação aprovada, diz isso. O daemon repete a conferência a cada ciclo (só relê as árvores quando a cabeça da MR anda) e guarda o resultado em `spec_conferencia`, que é cache: não gera evento.
+
+**Estado.** O snapshot traz `spec` por US (`docs/snapshot.md`) e o card da US na Central mostra o selo com um de cinco estados: *registrada*, *em validação* (com o SHA), *aprovada* (com o SHA aprovado), *mudou além do decisoes.md* e *mesclada*. O TUI não mostra a spec.
+
+**Migration 0011** (US #59): tabelas `spec` e `spec_conferencia`, coluna `sha_validacao` em `pendencia` e `pendencia` refeita com o mesmo conteúdo (o `CHECK` do tipo passa a aceitar `validacao`). Declara `leitor-minimo 4` e `escritor-minimo 5`: o `orq` 5 em diante segue escrevendo, sem conhecer a spec; um binário anterior à 0011 não mostra a spec nem importa `validacao`. Rode `orq upgrade` depois do merge.
+
 ### Pendências com contexto e resposta pela web
 
 Uma pendência é uma pergunta à pessoa: dúvida, autorização ou decisão. O worker (ou o coordenador) não a registra com um resumo de uma linha: ele grava um **arquivo**, e o daemon o importa.
@@ -165,7 +186,7 @@ Uma pendência é uma pergunta à pessoa: dúvida, autorização ou decisão. O 
 
 ```markdown
 ---
-tipo: decisao            # duvida | autorizacao | decisao
+tipo: decisao            # duvida | autorizacao | decisao | validacao
 titulo: Qual biblioteca de YAML?     # uma linha
 autor: tg-15_executor
 opcoes:
