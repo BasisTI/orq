@@ -53,3 +53,9 @@
 - **Origem:** conversa de planejamento (r1), fechamento
 - **Decisão:** o TUI não ganha indicador nem spec.
 - **Fala:** "Aprovado"
+
+## D10 — Spec aprovada
+- **Data:** 2026-11-22
+- **Origem:** TG-60#P1, respondida em 2026-11-22
+- **Decisão:** spec, plano e decisões aprovados no SHA `5bb639a5c72d47396bc0cd70fd30753c33574b6d`.
+- **Fala:** "Aprovar"
