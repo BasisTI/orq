@@ -89,3 +89,15 @@
 - **Origem:** conversa de planejamento (r1), fechamento
 - **Decisão:** o TUI não ganha indicador nem spec.
 - **Fala:** "Aprovado"
+
+## D16 — Spec aprovada
+- **Data:** 2026-11-22
+- **Origem:** TG-59#P1, respondida em 2026-11-22
+- **Decisão:** spec, plano e decisões aprovados no SHA `8c9d43de5bdf2e1f74cf0913319aff780fcceb88`.
+- **Fala:** "Aprovar"
+
+## D17 — Conferência pela pasta da spec, na implementação
+- **Data:** 2026-11-22
+- **Origem:** TG-59#P2, respondida em 2026-11-22 (achado da revisão independente da spec)
+- **Decisão:** a spec entra como aprovada e a implementação corrige a conferência: compara só o conteúdo da pasta registrada nos dois SHAs e exige que mude apenas `<pasta>/decisoes.md`; arquivo fora da pasta é outro sinal ("a MR não é só da spec"). O caso de rebase ou merge da base na branch da spec entra nos testes.
+- **Fala:** "Mesclar a spec aprovada e levar o Sério à implementação"
