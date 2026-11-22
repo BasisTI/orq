@@ -250,6 +250,9 @@ func TestPublicoServeOsEstaticosDaPagina(t *testing.T) {
 	if r := p.pede("GET", "/estatico/orq-icon-64.png"); r.code != 200 {
 		t.Fatalf("ícone: %d", r.code)
 	}
+	if r := p.pede("GET", "/estatico/fontes/carlito-latin-400-normal.woff2"); r.code != 200 {
+		t.Fatalf("fonte do CSS: %d", r.code)
+	}
 	if r := p.pede("GET", "/estatico/../publico.go"); r.code != 404 {
 		t.Fatalf("fora do embed: %d", r.code)
 	}
@@ -284,6 +287,11 @@ func TestPublico404IdenticoParaInexistenteRevogadoExpiradoERotaDesconhecida(t *t
 		"projeto":       "/projeto/proj",
 		"sem código":    "/s/",
 		"estático novo": "/estatico/nao-existe.css",
+		"htmx":          "/estatico/htmx.min.js",
+		"app.js":        "/estatico/app.js",
+		"banner":        "/estatico/orq-banner-light.png",
+		"licença":       "/estatico/fontes/LICENSE-carlito.txt",
+		"diretório":     "/estatico/fontes/",
 	} {
 		casos[nome] = p.pede("GET", caminho)
 	}
@@ -294,9 +302,6 @@ func TestPublico404IdenticoParaInexistenteRevogadoExpiradoERotaDesconhecida(t *t
 		t.Fatalf("inexistente: %d", ref.code)
 	}
 	for nome, r := range casos {
-		if nome == "estático novo" {
-			continue // 404 do http.NotFound dos estáticos: é outra rota, mas não revela nada do link
-		}
 		if r.code != 404 || r.corpo != ref.corpo {
 			t.Errorf("%s: %d %q (queria o 404 de %q)", nome, r.code, r.corpo, ref.corpo)
 		}
@@ -476,5 +481,22 @@ func TestPublicoSoUsaAInterfaceMinima(t *testing.T) {
 	f.hash = ""
 	if r, _ = http.Get(srv.URL + "/s/curto"); r.StatusCode != 404 || f.hash != "" {
 		t.Fatalf("malformado: %d hash=%q", r.StatusCode, f.hash)
+	}
+}
+
+func TestPublicoHEADNaoContaComoAcesso(t *testing.T) {
+	p := publica(t)
+	if r := p.pede("HEAD", "/s/"+p.codigo); r.code != 200 {
+		t.Fatalf("HEAD: %d", r.code)
+	}
+	ls, err := p.st.ListarLinks(p.ctx, &p.co, p.u)
+	p.ok(err)
+	if ls[0].Acessos != 0 || ls[0].UltimoAcesso != nil {
+		t.Fatalf("HEAD contou: %+v", ls[0])
+	}
+	p.pede("GET", "/s/"+p.codigo)
+	ls, _ = p.st.ListarLinks(p.ctx, &p.co, p.u)
+	if ls[0].Acessos != 1 {
+		t.Fatalf("GET: %+v", ls[0])
 	}
 }

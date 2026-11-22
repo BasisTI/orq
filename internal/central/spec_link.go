@@ -287,7 +287,8 @@ type SpecPublica struct {
 // EstadoPublico traduz o estado da spec (e se o código foi entregue) no da faixa pública: "em
 // validação" para registrada, em validação e mudança além do decisoes.md; "aprovada" para aprovada
 // e para a MR da spec mesclada; "entregue" só com MR do código ligada à US mesclada, que não é o
-// done da US nem a onda encerrada.
+// done da US nem a onda encerrada. Toda MR que já foi MR de spec da US (a atual e as anteriores a
+// um --substituir) fica de fora da conta.
 func EstadoPublico(estadoSpec string, codigoEntregue bool) string {
 	switch {
 	case codigoEntregue:
@@ -322,7 +323,10 @@ func (s *Store) SpecPorHash(ctx context.Context, hash string) (SpecPublica, erro
 			return naoEncontrado("link indisponível", "")
 		}
 		var entregue bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM mr WHERE projeto = ? AND ref = ? AND estado = 'mesclada' AND url <> ?)`, projeto, ref, sp.MRURL).Scan(&entregue); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM mr WHERE projeto = ? AND ref = ? AND estado = 'mesclada' AND url <> ?
+			AND url NOT IN (SELECT json_extract(detalhe, '$.mr_url') FROM evento WHERE tipo = 'spec.registrar' AND projeto = ? AND ref = ? AND json_extract(detalhe, '$.mr_url') IS NOT NULL)
+			AND url NOT IN (SELECT json_extract(detalhe, '$.anterior.mr_url') FROM evento WHERE tipo = 'spec.registrar' AND projeto = ? AND ref = ? AND json_extract(detalhe, '$.anterior.mr_url') IS NOT NULL))`,
+			projeto, ref, sp.MRURL, projeto, ref, projeto, ref).Scan(&entregue); err != nil {
 			return err
 		}
 		out.Estado, out.Versao = EstadoPublico(sp.Estado, entregue), sp.Versao

@@ -482,3 +482,48 @@ func TestListarLinksSemSpec(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// MR que já foi MR de spec da US nunca vale como código: spec na MR A, A mesclada, --substituir com a MR B.
+func TestEntregueNaoContaMRDeSpecAnterior(t *testing.T) {
+	ctx := context.Background()
+	s, co, u := ambienteLink(t)
+	a := gerar(t, s, co, "a", 0)
+	h := HashCodigoLink(a.Codigo)
+	if err := s.GravarMR(ctx, mrSpec, ValorMR{Estado: "mesclada"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	mrB := "https://github.com/BasisTI/orq/pull/50"
+	if _, err := s.RegistrarSpec(ctx, &co, u, "docs/specs/x/tg-59-y", mrB, true); err != nil {
+		t.Fatal(err)
+	}
+	estado := func() string {
+		sp, err := s.SpecPorHash(ctx, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sp.Estado
+	}
+	if e := estado(); e != PublicoEmValidacao {
+		t.Fatalf("depois do --substituir com MR nova: %s", e)
+	}
+	// A MR B mesclada também é de spec: aprovada, não entregue. Uma terceira troca não ressuscita a A.
+	if err := s.GravarMR(ctx, mrB, ValorMR{Estado: "mesclada"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegistrarSpec(ctx, &co, u, "docs/specs/x/tg-59-y", "https://github.com/BasisTI/orq/pull/51", true); err != nil {
+		t.Fatal(err)
+	}
+	if e := estado(); e != PublicoEmValidacao {
+		t.Fatalf("depois de duas trocas: %s", e)
+	}
+	// Uma MR de código de verdade, mesclada, entrega.
+	if _, _, err := s.AdicionarMR(ctx, &co, u, mrCodigo); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.GravarMR(ctx, mrCodigo, ValorMR{Estado: "mesclada"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := estado(); e != PublicoEntregue {
+		t.Fatalf("código mesclado: %s", e)
+	}
+}

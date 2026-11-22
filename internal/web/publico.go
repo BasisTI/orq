@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/BasisTI/orq/internal/central"
 	"github.com/BasisTI/orq/internal/hora"
@@ -142,7 +143,13 @@ func (p *Publico) Handler() http.Handler {
 	p.preparar()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /s/{codigo}", p.rota("/s/{codigo}", p.spec))
-	mux.HandleFunc("GET /estatico/{caminho...}", p.rota("/estatico/{caminho...}", func(w http.ResponseWriter, r *http.Request) { servirEstaticoDe(p.estatico, w, r) }))
+	mux.HandleFunc("GET /estatico/{caminho...}", p.rota("/estatico/{caminho...}", func(w http.ResponseWriter, r *http.Request) {
+		if !estaticoPublico(r.PathValue("caminho")) {
+			p.naoEncontrado(w)
+			return
+		}
+		servirEstaticoDe(p.estatico, w, r)
+	}))
 	// Todo o resto, de qualquer método, dá o mesmo 404 do código que não abre.
 	mux.HandleFunc("/", p.rota("/", func(w http.ResponseWriter, _ *http.Request) { p.naoEncontrado(w) }))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +161,17 @@ func (p *Publico) Handler() http.Handler {
 		h.Set("X-Robots-Tag", "noindex")
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// estaticoPublico diz se o arquivo é um dos que a página pública usa: o CSS, o ícone e as fontes
+// que o CSS referencia. O resto de estatico/ (htmx, js da Central, banner) não sai por este socket.
+func estaticoPublico(nome string) bool {
+	switch nome {
+	case "app.css", "orq-icon-64.png":
+		return true
+	}
+	rest, ok := strings.CutPrefix(nome, "fontes/")
+	return ok && strings.HasSuffix(rest, ".woff2") && !strings.Contains(rest, "/")
 }
 
 // rota registra o status da resposta no log pelo nome da rota, nunca pelo caminho pedido.
@@ -193,6 +211,10 @@ func (p *Publico) spec(w http.ResponseWriter, r *http.Request) {
 		if p.Log != nil {
 			p.Log("web público: modelo: %v", err)
 		}
+		return
+	}
+	// HEAD (monitor, pré-visualização de link) não é leitura da pessoa: não conta como acesso.
+	if r.Method != http.MethodGet {
 		return
 	}
 	if err := p.Fonte.MarcarAcesso(r.Context(), hash); err != nil && p.Log != nil {
