@@ -131,7 +131,7 @@ func (l *LeituraSpecs) lerUma(ctx context.Context, s central.SpecParaLer) error 
 		if err != nil {
 			return err
 		}
-		if err := l.E.St.GravarVersaoSpec(ctx, s.US, sha, true, arquivos); err != nil {
+		if err := l.E.St.GravarVersaoSpec(ctx, s.US, s.Caminho, s.MRURL, sha, true, arquivos); err != nil {
 			return err
 		}
 		mudou = true
@@ -150,7 +150,7 @@ func (l *LeituraSpecs) lerUma(ctx context.Context, s central.SpecParaLer) error 
 		if err != nil {
 			return &Falha{Codigo: comoFalha(err).Codigo, Mensagem: "validação em " + shaCurto(v) + ": " + comoFalha(err).Mensagem}
 		}
-		if err := l.E.St.GravarVersaoSpec(ctx, s.US, v, false, arquivos); err != nil {
+		if err := l.E.St.GravarVersaoSpec(ctx, s.US, s.Caminho, s.MRURL, v, false, arquivos); err != nil {
 			return err
 		}
 		mudou = true

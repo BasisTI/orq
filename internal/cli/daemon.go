@@ -124,6 +124,7 @@ type opcoesWeb struct {
 	Escuta    string // --web: unix:<caminho>, unix: (padrão) ou 127.0.0.1:<porta>; vazio desliga
 	URL       string // --web-url: a URL pública, que entra nos avisos e no registrada.json
 	Cabecalho string // --web-cabecalho: o cabeçalho com o usuário que o proxy autenticou
+	Publico   string // --web-publico: o socket da página pública da spec (US #61); vazio desliga
 }
 
 func (a *App) daemonCmd() *cobra.Command {
@@ -160,7 +161,13 @@ $XDG_RUNTIME_DIR/orq/web.sock, 0600), atrás de um proxy que autentica e manda o
 --web-cabecalho; ou --web 127.0.0.1:<porta>, para uso local, em que o cabeçalho é ignorado. Sem --web,
 o daemon não abre servidor. Falha ao abrir o socket é falha de partida (web_nao_abriu, saída 4), e o
 --detach só termina com a web aberta. ORQ_WEB, ORQ_WEB_URL e ORQ_WEB_CABECALHO (também no orq.env do
-plugin) valem como padrão das três flags.`,
+plugin) valem como padrão das três flags.
+
+Com --web-publico, abre um segundo socket, só para os links públicos das specs (orq spec link gerar): --web-publico
+unix:<caminho> (ou só o caminho absoluto, 0600) ou 127.0.0.1:<porta>, para uso local. Esse socket só responde a
+GET /s/<código> e aos estáticos da página; código inexistente, revogado e expirado dão o mesmo 404, e nada da
+Central sai por ele. O proxy reverso libera esse socket sem login e põe o limite de taxa por origem (o orq não
+limita) e um log de acesso sem o caminho. Tem de ser outro socket que o de --web. ORQ_WEB_PUBLICO é o padrão da flag.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := central.DirPadrao(a.Env)
@@ -229,6 +236,11 @@ plugin) valem como padrão das três flags.`,
 				return err
 			}
 			defer parada()
+			paradaPublica, err := a.abrirWebPublico(ctx, e.St, web, logw)
+			if err != nil {
+				return err
+			}
+			defer paradaPublica()
 			if pronto != nil {
 				_, _ = pronto.Write([]byte{1})
 				_ = pronto.Close()
@@ -241,6 +253,7 @@ plugin) valem como padrão das três flags.`,
 	cmd.Flags().StringVar(&web.Escuta, "web", a.Env("ORQ_WEB"), "serve as pendências na web: unix:<caminho> (unix: usa $XDG_RUNTIME_DIR/orq/web.sock) ou 127.0.0.1:<porta>; vazio desliga")
 	cmd.Flags().StringVar(&web.URL, "web-url", a.Env("ORQ_WEB_URL"), "URL pública da web, que entra nos avisos e no registrada.json (padrão: só o caminho)")
 	cmd.Flags().StringVar(&web.Cabecalho, "web-cabecalho", a.Env("ORQ_WEB_CABECALHO"), "cabeçalho com o usuário que o proxy autenticou, aceito só no socket Unix (padrão X-Orq-User)")
+	cmd.Flags().StringVar(&web.Publico, "web-publico", a.Env("ORQ_WEB_PUBLICO"), "serve a página pública das specs (só GET /s/<código>) em outro socket: unix:<caminho>, caminho absoluto ou 127.0.0.1:<porta>; vazio desliga")
 	cmd.Flags().BoolVar(&detach, "detach", false, "sobe o daemon em segundo plano, com o log em daemon.log, e sai")
 	cmd.Flags().IntVar(&prontoFD, "pronto-fd", 0, "uso interno do --detach: descritor em que avisar que o banco abriu")
 	_ = cmd.Flags().MarkHidden("pronto-fd")
@@ -296,7 +309,7 @@ func (a *App) desacoplarDaemon(ctx context.Context, dir string, tick, remoto tim
 		tamanhoLog = st.Size()
 	}
 	args := []string{"daemon", "--tick", tick.String(), "--intervalo-remoto", remoto.String(), "--pronto-fd", "3"}
-	for _, f := range []struct{ nome, valor string }{{"--web", web.Escuta}, {"--web-url", web.URL}, {"--web-cabecalho", web.Cabecalho}} {
+	for _, f := range []struct{ nome, valor string }{{"--web", web.Escuta}, {"--web-url", web.URL}, {"--web-cabecalho", web.Cabecalho}, {"--web-publico", web.Publico}} {
 		if f.valor != "" {
 			args = append(args, f.nome+"="+f.valor)
 		}
@@ -306,7 +319,7 @@ func (a *App) desacoplarDaemon(ctx context.Context, dir string, tick, remoto tim
 	// O filho recebe o ambiente do processo e, por cima, o ORQ_* que esta execução resolveu
 	// (inclusive o do orq.env do plugin), com o diretório de estado fixado.
 	cmd.Env = append(os.Environ(), "ORQ_STATE_DIR="+dir)
-	for _, k := range []string{"ORQ_HERDR_BIN", "ORQ_GLAB_BIN", "ORQ_GH_BIN", "ORQ_TAIGA_BIN", "ORQ_GIT_BIN", "ORQ_DOCKER_BIN", "ORQ_TRABALHO_DIR", "ORQ_TMP_DIR", "ORQ_LIMPEZA_AUTOMATICA", "ORQ_WEB", "ORQ_WEB_URL", "ORQ_WEB_CABECALHO"} {
+	for _, k := range []string{"ORQ_HERDR_BIN", "ORQ_GLAB_BIN", "ORQ_GH_BIN", "ORQ_TAIGA_BIN", "ORQ_GIT_BIN", "ORQ_DOCKER_BIN", "ORQ_TRABALHO_DIR", "ORQ_TMP_DIR", "ORQ_LIMPEZA_AUTOMATICA", "ORQ_WEB", "ORQ_WEB_URL", "ORQ_WEB_CABECALHO", "ORQ_WEB_PUBLICO"} {
 		if v := a.Env(k); v != "" {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
@@ -394,4 +407,60 @@ func (a *App) abrirWeb(ctx context.Context, st *central.Store, o opcoesWeb, logw
 		<-fim
 		_ = esc.Close()
 	}, nil
+}
+
+// abrirWebPublico abre o socket da página pública das specs, se pedido, e serve em segundo plano. O
+// handler só recebe a interface mínima de leitura (web.FontePublica). A função devolvida para o
+// servidor e fecha o socket.
+func (a *App) abrirWebPublico(ctx context.Context, st *central.Store, o opcoesWeb, logw func(string, ...any)) (func(), error) {
+	if o.Publico == "" {
+		return func() {}, nil
+	}
+	spec := o.Publico
+	if strings.HasPrefix(spec, "/") {
+		spec = "unix:" + spec
+	}
+	if c, ok := strings.CutPrefix(spec, "unix:"); ok && c == "" {
+		return nil, &output.Error{Code: "uso", Cause: "--web-publico unix: sem caminho: o socket público não tem padrão", Recovery: "passe o caminho do socket, ex. --web-publico unix:/run/user/1000/orq/publico.sock", Exit: output.ExitUsage}
+	}
+	escuta := o.Escuta
+	if escuta == "unix:" {
+		if p, err := web.SocketPadrao(a.Env); err == nil {
+			escuta = "unix:" + p
+		}
+	}
+	if escuta != "" && sameSocket(escuta, spec) {
+		return nil, &output.Error{Code: "uso", Cause: "--web-publico e --web apontam o mesmo endereço", Recovery: "o socket público é separado do da Central, de propósito: use outro caminho", Exit: output.ExitUsage}
+	}
+	esc, err := web.Abrir(spec, a.Env)
+	if err != nil {
+		return nil, err
+	}
+	srv := &web.Publico{Fonte: st, Log: logw}
+	ctxWeb, parar := context.WithCancel(ctx)
+	fim := make(chan struct{})
+	go func() {
+		defer close(fim)
+		if err := srv.Servir(ctxWeb, esc.Listener); err != nil {
+			logw("web público: o servidor parou: %v", err)
+		}
+	}()
+	logw("web público: escutando em %s", esc.Descricao)
+	return func() {
+		parar()
+		<-fim
+		_ = esc.Close()
+	}, nil
+}
+
+// sameSocket diz se dois endereços de --web e --web-publico são o mesmo (o "unix:" sem caminho da
+// Central é o padrão dela, que o público nunca usa).
+func sameSocket(a, b string) bool {
+	if c, ok := strings.CutPrefix(a, "unix:"); ok && c != "" {
+		a = "unix:" + filepath.Clean(c)
+	}
+	if c, ok := strings.CutPrefix(b, "unix:"); ok && c != "" {
+		b = "unix:" + filepath.Clean(c)
+	}
+	return a == b
 }

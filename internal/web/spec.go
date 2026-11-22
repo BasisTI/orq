@@ -46,6 +46,8 @@ type SpecPainel struct {
 	Estado                     Selo
 	Ref, SHA, SHACurto, LidaEm string
 	Versao                     string // "atual" ou "da validação"
+	// AvisoVersao é "Versão N — substituída em DD/MM/AAAA HH:MM", a partir da versão 2 do registro.
+	AvisoVersao string
 	// Aviso explica o que falta (leitura ainda não feita, versão não guardada); Erro, a última falha
 	// da leitura, com a hora (o conteúdo mostrado é o último bom).
 	Aviso, Erro, ErroEm string
@@ -89,6 +91,9 @@ func (s *Servidor) painelSpec(sc central.SpecCache, sha, aba string, href func(c
 		p.Estado = e
 	} else {
 		p.Estado = Selo{Cls: "neutro", Texto: "spec " + sc.Spec.Estado}
+	}
+	if sc.Spec.Versao >= 2 {
+		p.AvisoVersao = "Versão " + strconv.Itoa(sc.Spec.Versao) + " — substituída em " + s.quando(sc.Spec.AtualizadaEm)
 	}
 	if l := sc.Leitura; l != nil && l.Erro != nil {
 		p.Erro = l.Erro.Codigo + ": " + l.Erro.Mensagem

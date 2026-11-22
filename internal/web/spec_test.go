@@ -44,7 +44,7 @@ func comSpecLida(t *testing.T) (*cena, central.Coordenador, refs.US) {
 
 func TestPaginaDaSpecTemAbasFaixaELinkDaMR(t *testing.T) {
 	c, _, u := comSpecLida(t)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec(specComLinks)))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec(specComLinks)))
 	code, html := c.get("/p/proj/7/spec")
 	if code != 200 {
 		t.Fatalf("status %d\n%s", code, html)
@@ -72,7 +72,7 @@ func TestPaginaDaSpecTemAbasFaixaELinkDaMR(t *testing.T) {
 
 func TestPaginaDaSpecTrocaDeAbaEAbaDesconhecidaVoltaParaASpec(t *testing.T) {
 	c, _, u := comSpecLida(t)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec("# Spec\n\nconteúdo da spec")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec("# Spec\n\nconteúdo da spec")))
 	_, html := c.get("/p/proj/7/spec?aba=plano.md")
 	contem(t, html, "<h1>Plano</h1>", `href="/p/proj/7/spec?aba=plano.md" aria-current="page"`)
 	naoContem(t, html, "conteúdo da spec")
@@ -86,7 +86,7 @@ func TestPaginaDaSpecArquivoGrandeDemaisMostraAvisoComLinkDaMR(t *testing.T) {
 	c, _, u := comSpecLida(t)
 	as := arqsDaSpec("x")
 	as[1] = central.ArquivoSpec{Caminho: pastaDaSpec + "/plano.md", Papel: central.PapelPasta, Ordem: 1, GrandeDemais: true, Tamanho: 3 << 20}
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, as))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, as))
 	_, html := c.get("/p/proj/7/spec?aba=plano.md")
 	contem(t, html, "Arquivo grande demais (3072 KiB)", "Veja na MR", `href="`+mrDaSpec+`"`)
 	naoContem(t, html, `class="detalhe spec-corpo"`)
@@ -94,7 +94,7 @@ func TestPaginaDaSpecArquivoGrandeDemaisMostraAvisoComLinkDaMR(t *testing.T) {
 
 func TestPaginaDaSpecComFalhaMostraOUltimoConteudoComSHAEHora(t *testing.T) {
 	c, _, u := comSpecLida(t)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec("# Spec\n\núltimo conteúdo bom")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec("# Spec\n\núltimo conteúdo bom")))
 	c.ok(c.st.GravarErroLeituraSpec(c.ctx, u, central.Erro{Codigo: "falha_comando", Mensagem: "gh saiu com 1: HTTP 500"}))
 	_, html := c.get("/p/proj/7/spec")
 	contem(t, html, "A última leitura na forja falhou", "falha_comando: gh saiu com 1: HTTP 500", "último conteúdo guardado", "SHA cabcabca", "último conteúdo bom", `role="alert"`)
@@ -132,8 +132,8 @@ func TestPendenciaDeValidacaoMostraASpecNoSHADela(t *testing.T) {
 	c, co, u := comSpecLida(t)
 	p, err := c.st.AbrirValidacao(c.ctx, &co, u, shaVal, "")
 	c.ok(err)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec("# Spec\n\nda CABEÇA")))
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaVal, false, arqsDaSpec("# Spec\n\nda VALIDAÇÃO")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec("# Spec\n\nda CABEÇA")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaVal, false, arqsDaSpec("# Spec\n\nda VALIDAÇÃO")))
 	rota := refs.RotaPendencia("proj", 7, p.Numero)
 	code, html := c.get(rota)
 	if code != 200 {
@@ -144,7 +144,7 @@ func TestPendenciaDeValidacaoMostraASpecNoSHADela(t *testing.T) {
 		`href="`+rota+`?aba=plano.md#spec"`, "Aprovar", "Pedir ajustes", `href="`+mrDaSpec+`"`)
 	naoContem(t, html, "da CABEÇA")
 	// A aba escolhida vale na pendência e os links entre arquivos apontam para a própria pendência.
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaVal, false, arqsDaSpec(specComLinks)))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaVal, false, arqsDaSpec(specComLinks)))
 	_, html = c.get(rota + "?aba=decisoes.md")
 	contem(t, html, "<h1>Decisões</h1>")
 	_, html = c.get(rota)
@@ -155,7 +155,7 @@ func TestPendenciaDeValidacaoSemAVersaoGuardada(t *testing.T) {
 	c, co, u := comSpecLida(t)
 	p, err := c.st.AbrirValidacao(c.ctx, &co, u, shaVal, "")
 	c.ok(err)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec("# Spec\n\nda cabeça")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec("# Spec\n\nda cabeça")))
 	_, html := c.get(refs.RotaPendencia("proj", 7, p.Numero))
 	contem(t, html, "A versão da validação (SHA 12345678) não está guardada", `href="/p/proj/7/spec"`, "Aprovar")
 	naoContem(t, html, "da cabeça")
@@ -165,7 +165,7 @@ func TestPendenciaQueNaoEValidacaoNaoTemPainelDeSpec(t *testing.T) {
 	c, co, u := comSpecLida(t)
 	p, err := c.st.AbrirPendencia(c.ctx, &co, u, "duvida", "uma dúvida", "")
 	c.ok(err)
-	c.ok(c.st.GravarVersaoSpec(c.ctx, u, shaCab, true, arqsDaSpec("x")))
+	c.ok(c.st.GravarVersaoSpec(c.ctx, u, pastaDaSpec, mrDaSpec, shaCab, true, arqsDaSpec("x")))
 	_, html := c.get(refs.RotaPendencia("proj", 7, p.Numero))
 	naoContem(t, html, "valid-duas", `id="spec"`)
 }

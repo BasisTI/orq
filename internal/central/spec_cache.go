@@ -103,7 +103,9 @@ func lerLeituraSpec(ctx context.Context, q querier, projeto string, ref int) (*L
 
 func lerVersaoSpec(ctx context.Context, q querier, projeto string, ref int, sha string) (*VersaoSpec, error) {
 	v := VersaoSpec{SHA: sha}
-	err := q.QueryRowContext(ctx, `SELECT lida_em FROM spec_versao WHERE projeto = ? AND ref = ? AND sha = ?`, projeto, ref, sha).Scan(&v.LidaEm)
+	// Só vale a versão lida do registro atual (mesma pasta e mesma MR).
+	err := q.QueryRowContext(ctx, `SELECT v.lida_em FROM spec_versao v JOIN spec s ON s.projeto = v.projeto AND s.ref = v.ref AND s.caminho = v.caminho AND s.mr_url = v.mr_url
+		WHERE v.projeto = ? AND v.ref = ? AND v.sha = ?`, projeto, ref, sha).Scan(&v.LidaEm)
 	if semLinha(err) {
 		return nil, nil
 	}
@@ -184,7 +186,8 @@ func (s *Store) SpecsParaLer(ctx context.Context) ([]SpecParaLer, error) {
 					item.SHAAtual = *l.SHA
 				}
 			}
-			vs, err := tx.QueryContext(ctx, `SELECT sha FROM spec_versao WHERE projeto = ? AND ref = ?`, u.Projeto, u.Ref)
+			vs, err := tx.QueryContext(ctx, `SELECT v.sha FROM spec_versao v JOIN spec s ON s.projeto = v.projeto AND s.ref = v.ref AND s.caminho = v.caminho AND s.mr_url = v.mr_url
+				WHERE v.projeto = ? AND v.ref = ?`, u.Projeto, u.Ref)
 			if err != nil {
 				return err
 			}
@@ -206,9 +209,13 @@ func (s *Store) SpecsParaLer(ctx context.Context) ([]SpecParaLer, error) {
 	return out, err
 }
 
-// validacoesAbertas são os SHAs das pendências de validação ainda sem resposta.
+// validacoesAbertas são os SHAs das pendências de validação ainda abertas (aberta = 1), respondidas
+// ou não: a pendência respondida segue aberta até o coordenador resolvê-la, e a página dela ainda
+// mostra a spec na versão da validação. Só as abertas depois do último registro da spec: as
+// anteriores eram da spec velha.
 func validacoesAbertas(ctx context.Context, q querier, projeto string, ref int) ([]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT DISTINCT sha_validacao FROM pendencia WHERE projeto = ? AND ref = ? AND tipo = 'validacao' AND aberta = 1 AND respondida_em IS NULL AND sha_validacao IS NOT NULL ORDER BY numero`, projeto, ref)
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT p.sha_validacao FROM pendencia p JOIN spec s ON s.projeto = p.projeto AND s.ref = p.ref
+		WHERE p.projeto = ? AND p.ref = ? AND p.tipo = 'validacao' AND p.aberta = 1 AND p.sha_validacao IS NOT NULL AND p.aberta_em >= s.atualizada_em ORDER BY p.numero`, projeto, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -224,21 +231,22 @@ func validacoesAbertas(ctx context.Context, q querier, projeto string, ref int) 
 	return out, rows.Err()
 }
 
-// GravarVersaoSpec guarda o conteúdo da spec no sha. Com atual, ele passa a ser a versão da ref
-// atual e a falha da leitura anterior some. Depois de gravar, descarta as versões que nem são a
-// atual nem de uma validação aberta. É cache: não é estado da Central e não gera evento. Spec que
-// deixou de existir (o registro foi trocado enquanto o daemon lia) não grava nada.
-func (s *Store) GravarVersaoSpec(ctx context.Context, u refs.US, sha string, atual bool, arquivos []ArquivoSpec) error {
+// GravarVersaoSpec guarda o conteúdo da spec no sha, lido da pasta e da MR que o chamador viu no
+// registro (caminho e mrURL). Com atual, ele passa a ser a versão da ref atual e a falha da leitura
+// anterior some. Depois de gravar, descarta as versões que nem são a atual nem de uma validação
+// aberta. É cache: não é estado da Central e não gera evento. Spec que deixou de existir ou cujo
+// registro mudou enquanto o daemon lia (--substituir) não grava nada: o conteúdo era da spec velha.
+func (s *Store) GravarVersaoSpec(ctx context.Context, u refs.US, caminho, mrURL, sha string, atual bool, arquivos []ArquivoSpec) error {
 	return s.escrever(ctx, func(tx *sql.Tx) error {
-		if sp, err := lerLinhaSpec(ctx, tx, u.Projeto, u.Ref); err != nil || sp == nil {
+		if sp, err := lerLinhaSpec(ctx, tx, u.Projeto, u.Ref); err != nil || sp == nil || sp.Caminho != caminho || sp.MRURL != mrURL {
 			return err
 		}
 		agora := s.agora()
 		if _, err := tx.ExecContext(ctx, `DELETE FROM spec_arquivo WHERE projeto = ? AND ref = ? AND sha = ?`, u.Projeto, u.Ref, sha); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO spec_versao (projeto, ref, sha, lida_em) VALUES (?, ?, ?, ?)
-			ON CONFLICT (projeto, ref, sha) DO UPDATE SET lida_em = excluded.lida_em`, u.Projeto, u.Ref, sha, agora); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO spec_versao (projeto, ref, sha, lida_em, caminho, mr_url) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (projeto, ref, sha) DO UPDATE SET lida_em = excluded.lida_em, caminho = excluded.caminho, mr_url = excluded.mr_url`, u.Projeto, u.Ref, sha, agora, caminho, mrURL); err != nil {
 			return err
 		}
 		for _, a := range arquivos {
@@ -314,18 +322,20 @@ func podarSpec(ctx context.Context, tx *sql.Tx, projeto string, ref int) error {
 	for _, v := range vals {
 		manter[v] = true
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT sha FROM spec_versao WHERE projeto = ? AND ref = ?`, projeto, ref)
+	// Versão de outro registro (pasta ou MR diferentes da atual) não serve a ninguém.
+	rows, err := tx.QueryContext(ctx, `SELECT v.sha, s.caminho IS v.caminho AND s.mr_url IS v.mr_url FROM spec_versao v JOIN spec s ON s.projeto = v.projeto AND s.ref = v.ref WHERE v.projeto = ? AND v.ref = ?`, projeto, ref)
 	if err != nil {
 		return err
 	}
 	var apagar []string
 	for rows.Next() {
 		var sha string
-		if err := rows.Scan(&sha); err != nil {
+		var doRegistro bool
+		if err := rows.Scan(&sha, &doRegistro); err != nil {
 			rows.Close()
 			return err
 		}
-		if !manter[sha] {
+		if !doRegistro || !manter[sha] {
 			apagar = append(apagar, sha)
 		}
 	}

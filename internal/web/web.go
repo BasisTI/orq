@@ -540,8 +540,12 @@ func (s *Servidor) responder(w http.ResponseWriter, r *http.Request) {
 // Servir atende l até ctx acabar e então encerra com prazo. Devolve o erro do servidor, se
 // houve um antes do cancelamento.
 func (s *Servidor) Servir(ctx context.Context, l net.Listener) error {
+	return servirHandler(ctx, s.Handler(), l)
+}
+
+func servirHandler(ctx context.Context, h http.Handler, l net.Listener) error {
 	srv := &http.Server{
-		Handler:           s.Handler(),
+		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

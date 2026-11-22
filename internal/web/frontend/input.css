@@ -515,6 +515,12 @@ details[open] > summary .chev { rotate: 90deg; }
 .spec-corpo { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
 .spec-caminho { margin: 0 0 .25rem; overflow-wrap: anywhere; }
 .spec-abrir { font-weight: 700; }
+.spec-versao { font-weight: 700; color: var(--navy); }
+/* A página pública da spec (US #61): o índice de âncoras e uma seção por arquivo. */
+.pub-indice { margin-top: .75rem; }
+.pub-secao { margin-top: 1.5rem; scroll-margin-top: 1rem; }
+.pub-titulo { font-size: 1.15rem; font-weight: 700; margin: 0 0 .25rem; }
+.pub-secao .spec-corpo { margin-top: .25rem; border-radius: var(--radius-box); border-top: 1px solid var(--linha); }
 
 /* a pendência de validação: a spec ao lado das opções em tela larga, empilhadas no celular */
 .valid-duas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.5rem; align-items: start; }

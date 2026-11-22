@@ -59,7 +59,11 @@ type SpecUS struct {
 	MRURL        string `json:"mr_url"`
 	Estado       string `json:"estado"`
 	RegistradaEm string `json:"registrada_em"`
+	// AtualizadaEm é o último registro ou --substituir; com Versao a partir de 2, é quando a spec
+	// foi substituída pela última vez.
 	AtualizadaEm string `json:"atualizada_em"`
+	// Versao é 1 no registro inicial e sobe 1 a cada --substituir.
+	Versao int `json:"versao"`
 	// Validacao é a última pendência de validação (TG-59#P1); SHAValidacao, o SHA da cabeça da MR
 	// que o orq gravou ao importá-la. SHAAprovado só existe quando essa pendência foi aprovada.
 	Validacao    *string `json:"validacao"`
@@ -105,6 +109,9 @@ type ResultadoSpec struct {
 	// Substituiu: havia outra spec registrada e --substituir a trocou; Anterior traz o registro velho.
 	Substituiu bool    `json:"substituiu"`
 	Anterior   *SpecUS `json:"anterior,omitempty"`
+	// LinksAtivos é quantos links públicos ativos a spec tem; com Substituiu, são os que passam a
+	// mostrar a spec nova.
+	LinksAtivos int `json:"links_ativos"`
 }
 
 // RegistrarSpec registra a pasta e a MR da spec da US e liga a MR à US (como orq mr add), na
@@ -142,10 +149,10 @@ func (s *Store) RegistrarSpec(ctx context.Context, coord *Coordenador, ref refs.
 		}
 		agora := s.agora()
 		if antes == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO spec (projeto, ref, caminho, mr_url, registrada_em, atualizada_em) VALUES (?, ?, ?, ?, ?, ?)`,
+			_, err = tx.ExecContext(ctx, `INSERT INTO spec (projeto, ref, caminho, mr_url, registrada_em, atualizada_em, versao) VALUES (?, ?, ?, ?, ?, ?, 1)`,
 				alvo.Projeto, alvo.Ref, caminho, m.URL, agora, agora)
 		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE spec SET caminho = ?, mr_url = ?, atualizada_em = ? WHERE projeto = ? AND ref = ?`, caminho, m.URL, agora, alvo.Projeto, alvo.Ref)
+			_, err = tx.ExecContext(ctx, `UPDATE spec SET caminho = ?, mr_url = ?, atualizada_em = ?, versao = versao + 1 WHERE projeto = ? AND ref = ?`, caminho, m.URL, agora, alvo.Projeto, alvo.Ref)
 			if err == nil {
 				// A conferência era da spec velha.
 				_, err = tx.ExecContext(ctx, `DELETE FROM spec_conferencia WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref)
@@ -158,9 +165,14 @@ func (s *Store) RegistrarSpec(ctx context.Context, coord *Coordenador, ref refs.
 		if err != nil {
 			return err
 		}
+		if res.LinksAtivos, err = contarLinksAtivos(ctx, tx, alvo.Projeto, alvo.Ref, agora); err != nil {
+			return err
+		}
 		detalhe := map[string]any{"caminho": caminho, "mr_url": m.URL, "mr_ligada": res.MRLigada, "substituiu": res.Substituiu}
 		if antes != nil {
 			detalhe["anterior"] = map[string]any{"caminho": antes.Caminho, "mr_url": antes.MRURL}
+			detalhe["versao"] = antes.Versao + 1
+			detalhe["links_ativos"] = res.LinksAtivos
 		}
 		return s.registrar(ctx, tx, evento{coordenador: autor(coord, alvo), ondaID: alvo.ondaID, projeto: alvo.Projeto, ref: alvo.Ref, tipo: "spec.registrar", detalhe: detalhe})
 	})
@@ -208,8 +220,8 @@ func (s *Store) SpecDaUS(ctx context.Context, u refs.US) (*SpecUS, error) {
 // lerLinhaSpec lê só a linha do registro (sem estado); nil se a US não tem spec.
 func lerLinhaSpec(ctx context.Context, q querier, projeto string, ref int) (*SpecUS, error) {
 	var sp SpecUS
-	err := q.QueryRowContext(ctx, `SELECT caminho, mr_url, registrada_em, atualizada_em FROM spec WHERE projeto = ? AND ref = ?`, projeto, ref).
-		Scan(&sp.Caminho, &sp.MRURL, &sp.RegistradaEm, &sp.AtualizadaEm)
+	err := q.QueryRowContext(ctx, `SELECT caminho, mr_url, registrada_em, atualizada_em, versao FROM spec WHERE projeto = ? AND ref = ?`, projeto, ref).
+		Scan(&sp.Caminho, &sp.MRURL, &sp.RegistradaEm, &sp.AtualizadaEm, &sp.Versao)
 	if semLinha(err) {
 		return nil, nil
 	}

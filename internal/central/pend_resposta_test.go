@@ -73,7 +73,7 @@ func TestMigracaoV3ComPendencias(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if m.De != 3 || m.Para != Schema() || m.LeitorMinimo != 4 || m.EscritorMinimo != 5 {
+	if m.De != 3 || m.Para != Schema() || m.LeitorMinimo != 4 || m.EscritorMinimo != 13 {
 		t.Fatalf("migração = %+v", m)
 	}
 	ps, err := s.ListarPendencias(ctx, FiltroPendencias{})
