@@ -150,6 +150,11 @@ func RotaPendencia(projeto string, ref, numero int) string {
 	return "/p/" + url.PathEscape(projeto) + "/" + strconv.Itoa(ref) + "/" + strconv.Itoa(numero)
 }
 
+// RotaSpec é o caminho da página da spec da US no servidor web do daemon.
+func RotaSpec(projeto string, ref int) string {
+	return "/p/" + url.PathEscape(projeto) + "/" + strconv.Itoa(ref) + "/spec"
+}
+
 // URLPendencia é a URL da página da pendência; sem base (ORQ_WEB_URL), só o caminho.
 func URLPendencia(base, projeto string, ref, numero int) string {
 	return strings.TrimRight(base, "/") + RotaPendencia(projeto, ref, numero)

@@ -150,6 +150,10 @@ func (s *Store) RegistrarSpec(ctx context.Context, coord *Coordenador, ref refs.
 				// A conferência era da spec velha.
 				_, err = tx.ExecContext(ctx, `DELETE FROM spec_conferencia WHERE projeto = ? AND ref = ?`, alvo.Projeto, alvo.Ref)
 			}
+			if err == nil {
+				// O conteúdo lido também era da spec velha.
+				err = apagarCacheSpec(ctx, tx, alvo.Projeto, alvo.Ref)
+			}
 		}
 		if err != nil {
 			return err

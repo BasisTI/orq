@@ -184,15 +184,32 @@ func TestConferirSpecArquivoNovoERemovidoNaPasta(t *testing.T) {
 	}
 }
 
-func TestConferirSpecCabecaIgualNaoLeArvores(t *testing.T) {
+func TestConferirSpecCabecaIgualSoConfereAExistenciaDaPasta(t *testing.T) {
 	f := novosFalsos(t)
 	cabecaGH(f, shaAprov)
+	pastaGH(f, shaAprov, spec3)
 	c, err := f.ferramentas().ConferirSpec(context.Background(), prSpec, pastaSpec, shaAprov)
 	if err != nil || !c.PodeMesclar {
 		t.Fatalf("c = %+v, %v", c, err)
 	}
-	if n := len(f.chamadas("gh")); n != 1 {
-		t.Fatalf("gh chamado %d vezes, queria só a leitura da MR", n)
+	for _, ch := range f.chamadas("gh") {
+		if strings.Contains(strings.Join(ch, " "), "compare") {
+			t.Fatalf("a cabeça igual não precisa do compare: %v", ch)
+		}
+	}
+}
+
+// M-r2-1 da revisão da #59: com a cabeça igual ao SHA aprovado, um --caminho errado também não
+// pode mesclar.
+func TestConferirSpecCabecaIgualComCaminhoErradoNaoPodeMesclar(t *testing.T) {
+	errada := "docs/specs/epico/tg-59-errado"
+	f := novosFalsos(t)
+	cabecaGH(f, shaAprov)
+	f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "docs", "type": "tree", "sha": "d"}}}), false, "api", "repos/BasisTI/orq/git/trees/"+shaAprov)
+	f.responder("gh", js(map[string]any{"tree": []map[string]any{{"path": "outra", "type": "tree", "sha": "o"}}}), false, "api", "repos/BasisTI/orq/git/trees/d")
+	c, err := f.ferramentas().ConferirSpec(context.Background(), prSpec, errada, shaAprov)
+	if !pastaAusente(err) || c.PodeMesclar {
+		t.Fatalf("c = %+v, err = %v; queria pasta_da_spec_ausente", c, err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/BasisTI/orq/internal/central"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -21,7 +22,7 @@ import (
 // escapado, para a pessoa ver o que o agente escreveu) e javascript:/data: não viram link.
 var md = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
-	goldmark.WithParserOptions(parser.WithASTTransformers(util.Prioritized(linksSeguros{}, 100))),
+	goldmark.WithParserOptions(parser.WithASTTransformers(util.Prioritized(linksSeguros{}, 100), util.Prioritized(linksDaSpec{}, 200))),
 	goldmark.WithRendererOptions(
 		renderer.WithNodeRenderers(util.Prioritized(htmlEscapado{}, 50)),
 		gohtml.WithHardWraps(),
@@ -35,6 +36,87 @@ func RenderizarMarkdown(src string) template.HTML {
 		return template.HTML("<pre>" + html.EscapeString(src) + "</pre>")
 	}
 	return template.HTML(b.String())
+}
+
+// LinksSpec diz o que fazer com os links relativos de um arquivo da spec (a transformação
+// compartilhada da Central e da página pública da TG-61). Base é a pasta do arquivo no repositório.
+// Destino recebe o caminho do arquivo apontado, relativo à raiz do repositório, e devolve o
+// endereço para onde o link passa a apontar; false quando o arquivo está fora do que a página
+// mostra, e o link vira texto. A Central aponta para a aba do arquivo; a página pública, para a
+// âncora dele na mesma página.
+type LinksSpec struct {
+	Base    string
+	Destino func(caminho string) (string, bool)
+}
+
+var chaveLinksSpec = parser.NewContextKey()
+
+// RenderizarSpec é o RenderizarMarkdown de um arquivo da spec: a mesma segurança (sem HTML cru,
+// sem javascript:, sem imagem) mais a transformação dos links relativos de links. Link com
+// esquema (http, https, mailto) e âncora da própria página ficam como estão; link relativo vira
+// o que Destino disser, ou texto.
+func RenderizarSpec(src string, links LinksSpec) template.HTML {
+	var b bytes.Buffer
+	ctx := parser.NewContext()
+	ctx.Set(chaveLinksSpec, links)
+	if err := md.Convert([]byte(src), &b, parser.WithContext(ctx)); err != nil {
+		return template.HTML("<pre>" + html.EscapeString(src) + "</pre>")
+	}
+	return template.HTML(b.String())
+}
+
+// linksDaSpec só age quando o contexto traz LinksSpec (RenderizarSpec); sem ele, é inerte e o
+// markdown do detalhe da pendência fica como está.
+type linksDaSpec struct{}
+
+func (linksDaSpec) Transform(doc *ast.Document, _ text.Reader, pc parser.Context) {
+	links, ok := pc.Get(chaveLinksSpec).(LinksSpec)
+	if !ok {
+		return
+	}
+	var relativos []*ast.Link
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if l, ok := n.(*ast.Link); ok && entering {
+			if d := strings.TrimSpace(string(l.Destination)); d != "" && !strings.HasPrefix(d, "#") && !externoSeguro(d) {
+				relativos = append(relativos, l)
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	for _, l := range relativos {
+		if p, ok := central.ResolverLinkSpec(links.Base, string(l.Destination)); ok && links.Destino != nil {
+			if href, ok := links.Destino(p); ok {
+				l.Destination = []byte(href)
+				continue
+			}
+		}
+		// Fora do que a página mostra: o link vira o texto dele.
+		pai := l.Parent()
+		for c := l.FirstChild(); c != nil; {
+			prox := c.NextSibling()
+			pai.InsertBefore(pai, l, c)
+			c = prox
+		}
+		pai.RemoveChild(pai, l)
+	}
+}
+
+// externoSeguro diz se o destino tem esquema http, https ou mailto.
+func externoSeguro(d string) bool {
+	u, err := url.Parse(strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, d))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "mailto":
+		return true
+	}
+	return false
 }
 
 // linksSeguros deixa passar só http, https, mailto, âncora e caminho relativo; o resto vira

@@ -40,6 +40,9 @@ type Daemon struct {
 	// mescladas contra a MR (só o decisoes.md pode mudar) e guarda o resultado no cache. Falha vai
 	// para o log.
 	Specs interface{ Ciclo(context.Context) error }
+	// LeituraSpecs, se não nulo, roda a cada IntervaloRemoto: lê a spec registrada pela forja e
+	// guarda o conteúdo no cache da Central (só relê quando o SHA da ref muda). Falha vai para o log.
+	LeituraSpecs interface{ Ciclo(context.Context) error }
 	// Nomes, se não nulo, roda a cada Tick: confere se o rótulo e o agente do pane de cada
 	// coordenador têm o nome da onda aberta mais recente dele, e corrige. Falha vai para o log.
 	Nomes interface{ Ciclo(context.Context) error }
@@ -83,7 +86,14 @@ func (d *Daemon) Rodar(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d.specs(ctx)
+			d.specs(ctx, "specs", d.Specs)
+		}()
+	}
+	if d.LeituraSpecs != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.specs(ctx, "leitura-specs", d.LeituraSpecs)
 		}()
 	}
 	if d.Pendencias != nil {
@@ -302,16 +312,16 @@ func (d *Daemon) limpeza(ctx context.Context) {
 	}
 }
 
-// specs chama a conferência das specs aprovadas a cada IntervaloRemoto. Fica fora do laço das MRs:
+// specs chama um ciclo de spec (a conferência das aprovadas ou a leitura pela forja) a cada IntervaloRemoto. Fica fora do laço das MRs:
 // a leitura das árvores na forja não atrasa a consulta do estado das MRs.
-func (d *Daemon) specs(ctx context.Context) {
+func (d *Daemon) specs(ctx context.Context, nome string, c interface{ Ciclo(context.Context) error }) {
 	t := time.NewTicker(valorDur(d.IntervaloRemoto, 15*time.Second))
 	defer t.Stop()
 	for {
-		if err := d.Specs.Ciclo(ctx); err != nil && ctx.Err() == nil {
-			d.logf("specs", "specs: %v", err)
+		if err := c.Ciclo(ctx); err != nil && ctx.Err() == nil {
+			d.logf(nome, "%s: %v", nome, err)
 		} else if err == nil {
-			d.logf("specs", "")
+			d.logf(nome, "")
 		}
 		select {
 		case <-ctx.Done():

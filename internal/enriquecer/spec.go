@@ -68,74 +68,104 @@ func (fj forja) argsAPI(caminho string) []string {
 	return append(args, caminho)
 }
 
-func (f Ferramentas) pastaGitHub(ctx context.Context, fj forja, pasta, sha string) (map[string]string, error) {
-	tree := func(ref string, recursivo bool) ([]struct{ Path, Type, SHA string }, error) {
-		caminho := "repos/" + fj.projeto + "/git/trees/" + url.PathEscape(ref)
-		if recursivo {
-			caminho += "?recursive=1"
-		}
-		out, err := f.Rodar(ctx, "gh", fj.argsAPI(caminho)...)
-		if err != nil {
-			return nil, classificarForja(err)
-		}
-		var r struct {
-			Tree *[]struct {
-				Path string `json:"path"`
-				Type string `json:"type"`
-				SHA  string `json:"sha"`
-			} `json:"tree"`
-			Truncated bool `json:"truncated"`
-		}
-		if err := json.Unmarshal(out, &r); err != nil || r.Tree == nil {
-			return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "gh api devolveu algo que não é uma árvore: " + resumir(out)}
-		}
-		if r.Truncated {
-			return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "a árvore de " + ref + " veio truncada pela forja"}
-		}
-		es := make([]struct{ Path, Type, SHA string }, len(*r.Tree))
-		for i, e := range *r.Tree {
-			es[i] = struct{ Path, Type, SHA string }{e.Path, e.Type, e.SHA}
-		}
-		return es, nil
+// entradaDir é uma entrada de uma árvore da forja: o nome (caminho relativo à pasta listada), o
+// tipo (blob ou tree), o modo (120000 é symlink), o id do conteúdo e, quando a forja diz, o tamanho.
+type entradaDir struct {
+	Nome, Tipo, Modo, ID string
+	Tamanho              int64
+}
+
+// regular diz se a entrada é arquivo regular (não symlink nem submódulo).
+func (e entradaDir) regular() bool {
+	return e.Tipo == "blob" && (e.Modo == "" || e.Modo == "100644" || e.Modo == "100755")
+}
+
+func (f Ferramentas) arvoreGitHub(ctx context.Context, fj forja, ref string, recursivo bool) ([]entradaDir, error) {
+	caminho := "repos/" + fj.projeto + "/git/trees/" + url.PathEscape(ref)
+	if recursivo {
+		caminho += "?recursive=1"
 	}
+	out, err := f.Rodar(ctx, "gh", fj.argsAPI(caminho)...)
+	if err != nil {
+		return nil, classificarForja(err)
+	}
+	var r struct {
+		Tree *[]struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+			Mode string `json:"mode"`
+			SHA  string `json:"sha"`
+			Size int64  `json:"size"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil || r.Tree == nil {
+		return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "gh api devolveu algo que não é uma árvore: " + resumir(out)}
+	}
+	if r.Truncated {
+		return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "a árvore de " + ref + " veio truncada pela forja"}
+	}
+	es := make([]entradaDir, len(*r.Tree))
+	for i, e := range *r.Tree {
+		es[i] = entradaDir{Nome: e.Path, Tipo: e.Type, Modo: e.Mode, ID: e.SHA, Tamanho: e.Size}
+	}
+	return es, nil
+}
+
+// descerGitHub desce a pasta um nível por vez (a árvore do repositório inteiro pode vir truncada)
+// e devolve o id da árvore dela; false se a pasta não existe no commit.
+func (f Ferramentas) descerGitHub(ctx context.Context, fj forja, sha, pasta string) (string, bool, error) {
 	atual := sha
-	if pasta != "" {
-		// Desce a pasta um nível por vez (a árvore do repositório inteiro pode vir truncada).
-		for _, seg := range strings.Split(pasta, "/") {
-			es, err := tree(atual, false)
-			if err != nil {
-				return nil, err
-			}
-			prox := ""
-			for _, e := range es {
-				if e.Path == seg && e.Type == "tree" {
-					prox = e.SHA
-				}
-			}
-			if prox == "" {
-				return map[string]string{}, nil
-			}
-			atual = prox
-		}
+	if pasta == "" {
+		return atual, true, nil
 	}
-	es, err := tree(atual, true)
+	for _, seg := range strings.Split(pasta, "/") {
+		es, err := f.arvoreGitHub(ctx, fj, atual, false)
+		if err != nil {
+			return "", false, err
+		}
+		prox := ""
+		for _, e := range es {
+			if e.Nome == seg && e.Tipo == "tree" {
+				prox = e.ID
+			}
+		}
+		if prox == "" {
+			return "", false, nil
+		}
+		atual = prox
+	}
+	return atual, true, nil
+}
+
+func (f Ferramentas) pastaGitHub(ctx context.Context, fj forja, pasta, sha string) (map[string]string, error) {
+	atual, ok, err := f.descerGitHub(ctx, fj, sha, pasta)
+	if err != nil || !ok {
+		return map[string]string{}, err
+	}
+	es, err := f.arvoreGitHub(ctx, fj, atual, true)
 	if err != nil {
 		return nil, err
 	}
 	m := map[string]string{}
 	for _, e := range es {
-		if e.Type == "blob" {
-			m[e.Path] = e.SHA
+		if e.Tipo == "blob" {
+			m[e.Nome] = e.ID
 		}
 	}
 	return m, nil
 }
 
-func (f Ferramentas) pastaGitLab(ctx context.Context, fj forja, pasta, sha string) (map[string]string, error) {
-	m := map[string]string{}
+// arvoreGitLab lista a pasta no commit (recursiva ou só o primeiro nível), com os nomes relativos
+// a ela. Pasta que não existe no commit devolve lista vazia (o GitLab responde 404).
+func (f Ferramentas) arvoreGitLab(ctx context.Context, fj forja, pasta, sha string, recursivo bool) ([]entradaDir, error) {
+	var m []entradaDir
 	for pagina := 1; pagina <= limitePagina; pagina++ {
-		caminho := "projects/" + url.QueryEscape(fj.projeto) + "/repository/tree?path=" + url.QueryEscape(pasta) + "&ref=" + url.QueryEscape(sha) +
-			"&recursive=true&per_page=" + strconv.Itoa(porPagina) + "&page=" + strconv.Itoa(pagina)
+		caminho := "projects/" + url.QueryEscape(fj.projeto) + "/repository/tree?path=" + url.QueryEscape(pasta) + "&ref=" + url.QueryEscape(sha)
+		if recursivo {
+			caminho += "&recursive=true"
+		}
+		caminho += "&per_page=" + strconv.Itoa(porPagina) + "&page=" + strconv.Itoa(pagina)
 		out, err := f.Rodar(ctx, "glab", fj.argsAPI(caminho)...)
 		if err != nil {
 			err = classificarForja(err)
@@ -148,20 +178,33 @@ func (f Ferramentas) pastaGitLab(ctx context.Context, fj forja, pasta, sha strin
 			ID   string `json:"id"`
 			Path string `json:"path"`
 			Type string `json:"type"`
+			Mode string `json:"mode"`
 		}
 		if err := json.Unmarshal(out, &es); err != nil {
 			return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "glab api devolveu algo que não é uma árvore: " + resumir(out)}
 		}
 		for _, e := range es {
-			if e.Type == "blob" {
-				m[strings.TrimPrefix(strings.TrimPrefix(e.Path, pasta), "/")] = e.ID
-			}
+			m = append(m, entradaDir{Nome: strings.TrimPrefix(strings.TrimPrefix(e.Path, pasta), "/"), Tipo: e.Type, Modo: e.Mode, ID: e.ID})
 		}
 		if len(es) < porPagina {
 			return m, nil
 		}
 	}
 	return nil, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "a pasta da spec tem arquivos demais para conferir"}
+}
+
+func (f Ferramentas) pastaGitLab(ctx context.Context, fj forja, pasta, sha string) (map[string]string, error) {
+	es, err := f.arvoreGitLab(ctx, fj, pasta, sha, true)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	for _, e := range es {
+		if e.Tipo == "blob" {
+			m[e.Nome] = e.ID
+		}
+	}
+	return m, nil
 }
 
 // ArquivosAlterados lista os arquivos que a forja diz alterados entre os dois SHAs (o compare
@@ -273,6 +316,10 @@ func (f Ferramentas) ConferirSpec(ctx context.Context, rawURL, pasta, shaAprovad
 func (f Ferramentas) ConferirSpecCabeca(ctx context.Context, rawURL, pasta, shaAprovado, cabeca string) (central.ConferenciaSpec, error) {
 	c := central.ConferenciaSpec{SHAAprovado: shaAprovado, SHACabeca: cabeca, MudouNaPasta: []string{}, ForaDaPasta: []string{}}
 	if cabeca == shaAprovado {
+		// Nada mudou, mas a pasta precisa existir: um --caminho errado nunca vira "pode mesclar".
+		if _, err := f.PastaNoSHA(ctx, rawURL, pasta, cabeca); err != nil {
+			return central.ConferenciaSpec{}, err
+		}
 		c.PodeMesclar = true
 		return c, nil
 	}

@@ -84,6 +84,7 @@ func (s *Servidor) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.inicio)
 	mux.HandleFunc("GET /central", s.centralAntiga)
 	mux.HandleFunc("GET /pendencias", s.pendencias)
+	mux.HandleFunc("GET /p/{projeto}/{ref}/spec", s.spec)
 	mux.HandleFunc("GET /p/{projeto}/{ref}/{n}", s.detalhe)
 	mux.HandleFunc("GET /p/{projeto}/{ref}/{n}/corpo", s.corpo)
 	mux.HandleFunc("POST /p/{projeto}/{ref}/{n}/responder", s.responder)
@@ -392,10 +393,13 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 		TaigaURL, TaigaTitulo       string
 		MRs                         []linkMR
 		Historico                   []respostaVista
-		Acao                        string
-		Registrada                  bool
-		Erro                        string
-		LimiteTexto                 int
+		// Spec é a spec da US na versão da validação, ao lado das opções; só nas pendências de validação.
+		Spec        SpecPainel
+		TemSpec     bool
+		Acao        string
+		Registrada  bool
+		Erro        string
+		LimiteTexto int
 		// Os campos do formulário compartilhado com o corpo da pendência (modelo "form-resp").
 		HX         bool
 		ComComp    bool
@@ -414,6 +418,8 @@ func (s *Servidor) mostrar(w http.ResponseWriter, r *http.Request, status int, m
 	if p.Detalhe != nil {
 		d.Detalhe = RenderizarMarkdown(*p.Detalhe)
 	}
+	d.Spec, d.TemSpec = s.specDaValidacao(r, ref, p)
+	d.Cheia = d.TemSpec
 	if p.ResolvidaEm != nil {
 		d.ResolvidaEm = s.quando(*p.ResolvidaEm)
 	}

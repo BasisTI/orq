@@ -19,6 +19,8 @@ type Fonte interface {
 	ContarPendencias(ctx context.Context, f central.FiltroPendencias) (int, error)
 	Diario(ctx context.Context, coord *central.Coordenador, f central.FiltroDiario) ([]central.Evento, error)
 	ContarDiario(ctx context.Context, coord *central.Coordenador, f central.FiltroDiario) (int, error)
+	// LerSpecCache é a spec da US com a versão guardada do SHA (vazio é a da ref atual).
+	LerSpecCache(ctx context.Context, u refs.US, sha string) (central.SpecCache, error)
 }
 
 var _ Fonte = (*central.Store)(nil)
