@@ -107,3 +107,9 @@
 - **Origem:** TG-61#P2, rodada de ajuste r2, fechamento
 - **Decisão:** a migration desta US cria a versão do registro da spec, calculada para os registros existentes pelas substituições já feitas; o registro com `--substituir` a incrementa; o aviso na página da spec da Central entra nesta US.
 - **Fala:** "Aprovado"
+
+## D19 — Spec aprovada
+- **Data:** 2026-11-22
+- **Origem:** TG-61#P3, respondida em 2026-11-22
+- **Decisão:** spec, plano e decisões aprovados no SHA `8586a39aeaaa63625ec9e69e510fa42d0a722d3e`.
+- **Fala:** "Aprovar"
