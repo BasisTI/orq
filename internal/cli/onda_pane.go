@@ -38,7 +38,7 @@ func (a *App) emitOnda(ctx context.Context, st *central.Store, o central.Onda, t
 		if len(r.Erros) > 0 {
 			prefixo = "aviso: pane"
 		}
-		if _, err := fmt.Fprintf(w, "%s: %s\n", prefixo, q(r.Resumo())); err != nil {
+		if _, err := fmt.Fprintf(w, "%s: %s\n", prefixo, q(r.Resumo(f.ReferenciaViva(ctx, r.Pane)))); err != nil {
 			return err
 		}
 		for _, n := range r.Notas {

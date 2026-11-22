@@ -34,6 +34,7 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		Tokens      map[string]string `json:"tokens"`
 		Cwd         string            `json:"cwd"`
 		FgCwd       string            `json:"foreground_cwd"`
+		TabID       string            `json:"tab_id"`
 	}
 	var r struct {
 		Result *struct {
@@ -42,8 +43,13 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 				Agents     []pane `json:"agents"`
 				Workspaces []struct {
 					WorkspaceID string            `json:"workspace_id"`
+					Label       string            `json:"label"`
 					Tokens      map[string]string `json:"tokens"`
 				} `json:"workspaces"`
+				Tabs []struct {
+					TabID string `json:"tab_id"`
+					Label string `json:"label"`
+				} `json:"tabs"`
 			} `json:"snapshot"`
 		} `json:"result"`
 		Error *struct {
@@ -61,18 +67,24 @@ func ParseSessaoHerdr(b []byte) (central.SessaoHerdr, error) {
 		return central.SessaoHerdr{}, &Falha{Codigo: ErrRespostaInvalida, Mensagem: "herdr api snapshot sem result.snapshot"}
 	}
 	snap := r.Result.Snapshot
-	s := central.SessaoHerdr{Panes: map[string]central.PaneHerdr{}, Workspaces: map[string]central.WorkspaceHerdr{}}
+	s := central.SessaoHerdr{Panes: map[string]central.PaneHerdr{}, Workspaces: map[string]central.WorkspaceHerdr{}, Tabs: map[string]central.TabHerdr{}}
 	for _, w := range snap.Workspaces {
-		s.Workspaces[w.WorkspaceID] = central.WorkspaceHerdr{Tokens: w.Tokens}
+		s.Workspaces[w.WorkspaceID] = central.WorkspaceHerdr{Rotulo: w.Label, Tokens: w.Tokens}
+	}
+	for _, t := range snap.Tabs {
+		s.Tabs[t.TabID] = central.TabHerdr{Rotulo: t.Label}
 	}
 	for _, p := range snap.Panes {
-		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), Rotulo: deref(p.Label), WorkspaceID: p.WorkspaceID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
+		s.Panes[p.PaneID] = central.PaneHerdr{Status: valorOu(p.AgentStatus, "unknown"), Agente: deref(p.Agent), Nome: deref(p.Name), Rotulo: deref(p.Label), WorkspaceID: p.WorkspaceID, TabID: p.TabID, Tokens: p.Tokens, Cwd: p.Cwd, CwdPrimeiroPlano: p.FgCwd}
 	}
 	// O registro do agente é o de `herdr agent list`: vale mais que o do pane.
 	for _, a := range snap.Agents {
 		p, ok := s.Panes[a.PaneID]
 		if !ok {
-			p = central.PaneHerdr{WorkspaceID: a.WorkspaceID, Tokens: a.Tokens}
+			p = central.PaneHerdr{WorkspaceID: a.WorkspaceID, TabID: a.TabID, Tokens: a.Tokens}
+		}
+		if p.TabID == "" {
+			p.TabID = a.TabID
 		}
 		p.Status = valorOu(a.AgentStatus, p.Status)
 		if a.Agent != nil {

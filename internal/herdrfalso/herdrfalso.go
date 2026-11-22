@@ -45,6 +45,8 @@ type Estado struct {
 	Workspaces map[string]string `json:"workspaces"` // id → rótulo
 	Abas       map[string]*No    `json:"abas"`       // aba → árvore
 	AbaWS      map[string]string `json:"aba_ws"`
+	// AbaRotulo é o rótulo de cada tab (sem entrada, a tab não tem nome), lido por api snapshot.
+	AbaRotulo  map[string]string `json:"aba_rotulo,omitempty"`
 	Panes      map[string]*Pane  `json:"panes"`
 	ProxPane   int               `json:"prox_pane"`
 	ProxAba    int               `json:"prox_aba"`
@@ -436,16 +438,20 @@ func Main(args []string, dir string) int {
 			if aba := e.AbaDe(id); aba != "" {
 				ws = e.AbaWS[aba]
 			}
-			panes = append(panes, map[string]any{"pane_id": id, "workspace_id": ws, "label": p.Rotulo, "agent_status": "unknown"})
+			panes = append(panes, map[string]any{"pane_id": id, "workspace_id": ws, "tab_id": e.AbaDe(id), "label": p.Rotulo, "agent_status": "unknown"})
 			if p.Status != "" {
 				agentes = append(agentes, map[string]any{"pane_id": id, "workspace_id": ws, "agent": "claude", "name": p.Nome, "agent_status": p.Status})
 			}
 		}
 		wss := []map[string]any{}
 		for id := range e.Workspaces {
-			wss = append(wss, map[string]any{"workspace_id": id})
+			wss = append(wss, map[string]any{"workspace_id": id, "label": e.Workspaces[id]})
 		}
-		return res(map[string]any{"snapshot": map[string]any{"panes": panes, "agents": agentes, "workspaces": wss}})
+		tabs := []map[string]any{}
+		for aba, ws := range e.AbaWS {
+			tabs = append(tabs, map[string]any{"tab_id": aba, "workspace_id": ws, "label": e.AbaRotulo[aba]})
+		}
+		return res(map[string]any{"snapshot": map[string]any{"panes": panes, "agents": agentes, "workspaces": wss, "tabs": tabs}})
 	case "pane run":
 		if !e.TUINaoSobe {
 			e.Panes[rest[0]].Argv = desaspar(rest[1])

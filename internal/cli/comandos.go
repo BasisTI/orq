@@ -33,7 +33,7 @@ func (a *App) coordCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emit(c, func(w io.Writer) error { return textoCoord(w, c) })
+			return a.emit(c, func(w io.Writer) error { return textoCoord(w, c, refPane(ctx, st, c)) })
 		},
 	}
 	registrar.Flags().StringVar(&pane, "pane", "", "pane do Herdr do coordenador (padrão: $HERDR_PANE_ID)")
@@ -55,7 +55,7 @@ func (a *App) coordCmd() *cobra.Command {
 			}
 			return a.emit(cs, func(w io.Writer) error {
 				for _, c := range cs {
-					if err := textoCoord(w, c); err != nil {
+					if err := textoCoord(w, c, refPane(ctx, st, c)); err != nil {
 						return err
 					}
 				}

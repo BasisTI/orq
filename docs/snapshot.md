@@ -84,6 +84,7 @@ Herdr {                                    # estado vivo de um pane
   "agente": string|null,                   # "claude", "codex"
   "nome": string|null,                     # nome do agente no Herdr
   "workspace_id": string|null,
+  "referencia": string|null,               # o pane como a pessoa o acha: "workspace/pane (id)", "workspace/tab (id)" sem nome no pane, só o id se o Herdr não deu nome; nulo sem sessão do Herdr e com o pane ausente (status "ausente": o Herdr não o tem, não há nome a citar) (campo novo, aditivo: não sobe `versao`)
   "atualizado_em": data|null,
   "erro": Erro|null                        # a última consulta ao Herdr falhou: o resto é o último valor bom
 }

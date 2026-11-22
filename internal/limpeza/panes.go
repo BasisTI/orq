@@ -50,7 +50,7 @@ func (l *Limpador) planejarPanes(ctx context.Context, u refs.US, rec *Recursos) 
 	var itens []*Item
 	for _, id := range ids {
 		p := sessao.Panes[id]
-		it := &Item{Tipo: "pane", Alvo: fmt.Sprintf("%s (%s)", id, p.Nome)}
+		it := &Item{Tipo: "pane", Alvo: sessao.Referencia(id)}
 		nome := p.Nome
 		outra := l.outraUS(ctx, u, id, nome)
 		fora := foraDoWorktree(p, rec)
@@ -99,7 +99,7 @@ func (l *Limpador) listarPanesSoltos(ctx context.Context, u refs.US, rec *Recurs
 	sort.Strings(ids)
 	var itens []*Item
 	for _, id := range ids {
-		itens = append(itens, &Item{Tipo: "pane_nao_registrado", Alvo: fmt.Sprintf("%s (%s)", id, sessao.Panes[id].Nome),
+		itens = append(itens, &Item{Tipo: "pane_nao_registrado", Alvo: sessao.Referencia(id),
 			Estado: Preservado, Motivo: "não registrado no recursos.json, preservado: o nome parece da US, mas pode ser de outro board (registre com orq recursos gravar --pane)"})
 	}
 	return itens
@@ -202,7 +202,7 @@ func (l *Limpador) fecharPane(ctx context.Context, u refs.US, rec *Recursos, id,
 		return nil
 	}
 	if p.Nome != nome {
-		return preservar(fmt.Sprintf("o pane %s agora se chama %q", id, p.Nome))
+		return preservar(fmt.Sprintf("o pane %s agora se chama %q", sessao.Referencia(id), p.Nome))
 	}
 	if motivo := foraDoWorktree(p, rec); motivo != "" {
 		return preservar(motivo)

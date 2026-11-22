@@ -35,8 +35,22 @@ func (r RenomeioPane) Evento() central.EventoExterno {
 	return central.EventoExterno{Tipo: "onda.pane_nome", Detalhe: d}
 }
 
-// Resumo é a linha de texto do renomeio, para a saída dos comandos e o log do daemon.
-func (r RenomeioPane) Resumo() string {
+// ReferenciaViva cita o pane como a pessoa o acha (workspace/pane (id)), lendo o Herdr agora:
+// depois de um renomeio o cache ainda traz o nome velho. Herdr indisponível: o id.
+func (f Ferramentas) ReferenciaViva(ctx context.Context, pane string) string {
+	s, err := f.ConsultarHerdr(ctx)
+	if err != nil {
+		return pane
+	}
+	return s.Referencia(pane)
+}
+
+// Resumo é a linha de texto do renomeio, para a saída dos comandos e o log do daemon. ref é o
+// pane pelo nome (ReferenciaViva); vazio cai no id.
+func (r RenomeioPane) Resumo(ref string) string {
+	if ref == "" {
+		ref = r.Pane
+	}
 	var ok []string
 	if r.Rotulo {
 		ok = append(ok, "rótulo")
@@ -44,7 +58,7 @@ func (r RenomeioPane) Resumo() string {
 	if r.Agente {
 		ok = append(ok, "agente")
 	}
-	s := fmt.Sprintf("pane %s do coordenador %s", r.Pane, r.Coordenador)
+	s := fmt.Sprintf("pane %s do coordenador %s", ref, r.Coordenador)
 	if len(ok) > 0 {
 		s += ": " + strings.Join(ok, " e ") + " com o nome " + r.Nome
 	}
@@ -158,7 +172,7 @@ func (n *Nomes) Ciclo(ctx context.Context) error {
 			return err
 		}
 		if n.Log != nil {
-			n.Log("nome do pane divergia da onda %d: %s", p.OndaID, r.Resumo())
+			n.Log("nome do pane divergia da onda %d: %s", p.OndaID, r.Resumo(n.F.ReferenciaViva(ctx, r.Pane)))
 		}
 	}
 	return nil
