@@ -27,6 +27,8 @@
 
 - Ainda versão 1, US #59: a `US` ganhou `spec` (objeto ou nulo, nulo até `orq spec registrar`) e a `Pendencia` ganhou `sha_validacao` (omitido fora da `validacao`). Aditivo, `versao` não sobe; a migration 0011 cria as tabelas `spec` e `spec_conferencia`, acrescenta `sha_validacao` em `pendencia` e refaz `pendencia` para o `tipo` aceitar `validacao`; declara leitor 4 e escritor 5. O diário ganhou o evento `spec.registrar` (com o registro anterior quando `--substituir`), e `pend.add` traz `sha` na validação.
 
+- Ainda versão 1, US #61: a `spec` da `US` ganhou `versao` (inteiro: 1 no registro inicial, +1 a cada `orq spec registrar --substituir`; `atualizada_em` é de quando foi substituída por último). Aditivo, `versao` do snapshot não sobe; a migration 0013 cria a coluna (nos registros existentes: 1 mais as substituições do diário), a tabela `spec_link` (links públicos; só o hash do código fica no banco) e as colunas `caminho` e `mr_url` de `spec_versao`; declara leitor 4 e escritor 13. O diário ganhou os eventos `spec.link.gerar` e `spec.link.revogar` (id e rótulo, nunca o código), e `spec.registrar` com `--substituir` traz `versao` e `links_ativos`. Os links não vão no snapshot.
+
 - Ainda versão 1, US #64: a `Onda` ganhou `mensagens` (`[Mensagem]`, em ordem decrescente de envio). Aditivo; a migration 0008 cria a tabela `mensagem` e declara leitor 4 e escritor 5.
 
 - Ainda versão 1, US #19: a `MR` ganhou `situacao_em` e `situacao_erro` (aditivo, sem migration; ficam no mesmo valor em cache). Falha da consulta extra do GitHub mantém o último pipeline e a última aprovação; check `STALE` ou desconhecido deixa de ser `sucesso`.
@@ -167,7 +169,8 @@ Spec {
   # em_validacao; respondida com Aprovar é aprovada (ou mudou, se a conferência do daemon achou mudança além do
   # decisoes.md); qualquer outra (nenhuma, Pedir ajustes) é registrada.
   "registrada_em": data,
-  "atualizada_em": data,
+  "atualizada_em": data,                    # último registro ou --substituir
+  "versao": int,                           # 1 no registro inicial, +1 a cada --substituir (campo novo, aditivo: não sobe `versao` do snapshot)
   "validacao": string|null,                # id da última `validacao` ("TG-59#P1")
   "sha_validacao": string|null,            # cabeça da MR da spec que o orq gravou ao importá-la
   "sha_aprovado": string|null,             # o mesmo SHA, quando essa validação foi aprovada

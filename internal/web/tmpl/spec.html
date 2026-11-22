@@ -6,6 +6,7 @@ links comuns (?aba=…): sem script, e o botão Voltar funciona. O painel é o m
 <span class="spec-ref"><strong>{{.Ref}}</strong></span>
 {{if .Tem}}<span class="spec-sha" title="SHA {{.SHA}}">SHA <code>{{.SHACurto}}</code> <span class="apagado">({{.Versao}})</span></span>
 <span class="apagado spec-lida">lida em {{.LidaEm}}</span>{{end}}
+{{if .AvisoVersao}}<span class="spec-versao">{{.AvisoVersao}}</span>{{end}}
 {{if .MRURL}}<a class="spec-mr" href="{{.MRURL}}" target="_blank" rel="noopener noreferrer">MR da spec<svg class="ic ic-p" aria-hidden="true"><use href="#i-externo"/></svg></a>{{end}}
 </div>
 {{if .Erro}}<p class="aviso erro" role="alert">A última leitura na forja falhou{{if .ErroEm}} ({{.ErroEm}}){{end}}: {{.Erro}}.{{if .Tem}} Abaixo, o último conteúdo guardado, lido em {{.LidaEm}} (SHA {{.SHACurto}}).{{end}}</p>{{end}}

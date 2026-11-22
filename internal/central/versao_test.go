@@ -96,7 +96,7 @@ func TestMigrationGravaOMinimo(t *testing.T) {
 	}
 	defer s.Close()
 	e, err := s.Versoes(ctx)
-	if err != nil || e.Banco != Schema() || e.LeitorMinimo != 4 || e.EscritorMinimo != 5 {
+	if err != nil || e.Banco != Schema() || e.LeitorMinimo != 4 || e.EscritorMinimo != 13 {
 		t.Fatalf("estado = %+v, %v", e, err)
 	}
 	// Sem a diretiva, a migration vale o próprio número: só abre quem a tem.
@@ -206,7 +206,7 @@ func TestBancoSemOMinimoGravado(t *testing.T) {
 	}
 	defer s.Close()
 	e, err := s.Versoes(ctx)
-	if err != nil || e.Banco != Schema() || e.LeitorMinimo != 4 || e.EscritorMinimo != 5 || de != 3 || para != Schema() {
+	if err != nil || e.Banco != Schema() || e.LeitorMinimo != 4 || e.EscritorMinimo != 13 || de != 3 || para != Schema() {
 		t.Fatalf("estado = %+v, %v; migração %d→%d", e, err, de, para)
 	}
 }
@@ -286,7 +286,7 @@ func TestMigracaoConcorrenteRespeitaATrava(t *testing.T) {
 // da MR da 0006, o modelo da US da 0007 nem a tabela mensagem da 0008), para simular um banco anterior à 0005.
 func desfazer0005(t *testing.T, s *Store) {
 	t.Helper()
-	for _, q := range []string{"DROP TABLE spec_arquivo", "DROP TABLE spec_versao", "DROP TABLE spec_leitura", "DROP TABLE spec", "DROP TABLE spec_conferencia", "ALTER TABLE pendencia DROP COLUMN sha_validacao", "DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
+	for _, q := range []string{"DROP TABLE spec_link", "ALTER TABLE spec DROP COLUMN versao", "ALTER TABLE spec_versao DROP COLUMN caminho", "ALTER TABLE spec_versao DROP COLUMN mr_url", "DROP TABLE spec_arquivo", "DROP TABLE spec_versao", "DROP TABLE spec_leitura", "DROP TABLE spec", "DROP TABLE spec_conferencia", "ALTER TABLE pendencia DROP COLUMN sha_validacao", "DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome"} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

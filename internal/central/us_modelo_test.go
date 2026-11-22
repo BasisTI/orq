@@ -99,7 +99,7 @@ func TestBancoComModeloAbreNoBinarioAnterior(t *testing.T) {
 	if _, _, err := novo.AtualizarStatus(ctx, &a, us(t, "1"), MudancaStatus{Status: "exec", Modelo: &m}); err != nil {
 		t.Fatal(err)
 	}
-	if e, err := novo.Versoes(ctx); err != nil || e.LeitorMinimo != 4 || e.EscritorMinimo != 5 || e.Banco != Schema() {
+	if e, err := novo.Versoes(ctx); err != nil || e.LeitorMinimo != 4 || e.EscritorMinimo != 13 || e.Banco != Schema() {
 		t.Fatalf("versões = %+v, %v", e, err)
 	}
 	_ = novo.Close()

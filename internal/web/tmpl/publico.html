@@ -1,0 +1,52 @@
+{{/* A página pública da spec (US #61): uma página só, com a faixa, o índice de âncoras e uma seção por arquivo.
+Nada da Central: sem navegação, sem usuário, sem sprite, sem script, e nenhum href além das âncoras da página, dos
+estáticos e dos links externos do próprio conteúdo. O nome da US, a ref, o SHA e a MR não existem nos dados. */}}
+{{define "publico"}}<!doctype html>
+<html lang="pt-BR" data-theme="basis-interno">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex, nofollow">
+<title>{{.Titulo}} · orq</title>
+<link rel="icon" type="image/png" href="/estatico/orq-icon-64.png">
+<link rel="stylesheet" href="/estatico/app.css?v={{ver "app.css"}}">
+</head>
+<body>
+<header class="cab"><div class="cab-in"><span class="marca"><img src="/estatico/orq-icon-64.png" alt="" width="32" height="32"><span class="marca-nome">orq</span><span class="marca-sub">Especificação</span></span></div></header>
+<main id="principal" class="pagina"><div class="estreita larga">
+<h1 class="t-pagina">{{.Titulo}}</h1>
+<div class="spec-faixa" role="status">
+<span class="selo selo-{{.EstadoCls}}">{{.Estado}}</span>
+{{if .LidaEm}}<span class="apagado spec-lida">lida em {{.LidaEm}}</span>{{end}}
+{{if .AvisoVersao}}<span class="spec-versao">{{.AvisoVersao}}</span>{{end}}
+</div>
+{{if .Secoes}}<nav class="spec-abas pub-indice" aria-label="Índice"><ul>
+{{range .Secoes}}<li><a href="#{{.ID}}">{{.Rotulo}}</a></li>
+{{end}}</ul></nav>
+{{range .Secoes}}<section class="pub-secao" id="{{.ID}}" aria-labelledby="{{.ID}}-t">
+<h2 class="pub-titulo" id="{{.ID}}-t">{{.Rotulo}}</h2>
+{{if .Grande}}<p class="aviso" role="status">Este arquivo é grande demais ({{.KiB}} KiB) para aparecer aqui.</p>
+{{else}}<article class="detalhe spec-corpo" aria-label="{{.Rotulo}}">{{.Conteudo}}</article>{{end}}
+</section>
+{{end}}{{else}}<p class="aviso" role="status">A especificação ainda não está disponível para leitura. Tente de novo em alguns minutos.</p>{{end}}
+</div></main>
+<footer class="rodape">Somente leitura.</footer>
+</body>
+</html>
+{{end}}
+
+{{/* O único 404 do socket público: o mesmo corpo para código inexistente, revogado, expirado e rota desconhecida. */}}
+{{define "publico-404"}}<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Página não encontrada · orq</title>
+</head>
+<body>
+<p>Página não encontrada.</p>
+</body>
+</html>
+{{end}}

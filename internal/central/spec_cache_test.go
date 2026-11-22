@@ -27,7 +27,7 @@ func TestSpecCacheGravaELeVersaoAtual(t *testing.T) {
 	if err != nil || sc.Versao != nil || sc.Leitura != nil || sc.Spec.Caminho == "" {
 		t.Fatalf("antes da leitura: %+v, %v", sc, err)
 	}
-	if err := s.GravarVersaoSpec(ctx, u, "aaaa", true, arquivosCache("v1")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "aaaa", true, arquivosCache("v1")); err != nil {
 		t.Fatal(err)
 	}
 	sc, err = s.LerSpecCache(ctx, u, "")
@@ -66,12 +66,12 @@ func TestSpecCacheMantemSoAAtualEAsDeValidacaoAberta(t *testing.T) {
 		return sc.Versao != nil
 	}
 	for _, sha := range []string{"cab1", "val1"} {
-		if err := s.GravarVersaoSpec(ctx, u, sha, sha == "cab1", arquivosCache("de "+sha)); err != nil {
+		if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, sha, sha == "cab1", arquivosCache("de "+sha)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A cabeça anda: a versão da validação aberta fica, a cabeça velha sai.
-	if err := s.GravarVersaoSpec(ctx, u, "cab2", true, arquivosCache("de cab2")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "cab2", true, arquivosCache("de cab2")); err != nil {
 		t.Fatal(err)
 	}
 	if ha("cab1") || !ha("val1") || !ha("cab2") {
@@ -81,13 +81,14 @@ func TestSpecCacheMantemSoAAtualEAsDeValidacaoAberta(t *testing.T) {
 		t.Fatal("a versão da validação foi substituída")
 	}
 	// Reescrever a versão atual com o mesmo SHA não duplica arquivos.
-	if err := s.GravarVersaoSpec(ctx, u, "cab2", true, arquivosCache("de cab2 de novo")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "cab2", true, arquivosCache("de cab2 de novo")); err != nil {
 		t.Fatal(err)
 	}
 	if sc, _ := s.LerSpecCache(ctx, u, ""); len(sc.Versao.Arquivos) != 3 || sc.Versao.Arquivos[0].Conteudo != "de cab2 de novo" {
 		t.Fatalf("arquivos = %+v", sc.Versao.Arquivos)
 	}
-	// Respondida a validação, a versão dela sai na próxima gravação.
+	// Respondida mas ainda aberta (aberta = 1 até o coordenador resolver), a validação segue
+	// mostrando a spec na versão dela: a versão fica (D7 da orq#60).
 	op := OpcaoPedirAjustes
 	if _, err := s.ResponderPendencia(ctx, &co, refs.Pend{US: u, Numero: p.Numero}, Resposta{Opcao: &op, Por: "ana"}); err != nil {
 		t.Fatal(err)
@@ -95,8 +96,21 @@ func TestSpecCacheMantemSoAAtualEAsDeValidacaoAberta(t *testing.T) {
 	if err := s.MarcarLeituraSpec(ctx, u, ""); err != nil {
 		t.Fatal(err)
 	}
+	if !ha("val1") {
+		t.Fatal("validação respondida e ainda aberta: a versão devia ter ficado")
+	}
+	if ls, _ := s.SpecsParaLer(ctx); len(ls) != 1 || len(ls[0].Validacoes) != 1 || ls[0].Validacoes[0] != "val1" {
+		t.Fatalf("a validação respondida e aberta segue pedindo a versão: %+v", ls)
+	}
+	// Resolvida (aberta = 0), a versão dela sai na próxima gravação.
+	if _, err := s.ResolverPendencia(ctx, &co, refs.Pend{US: u, Numero: p.Numero}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarcarLeituraSpec(ctx, u, ""); err != nil {
+		t.Fatal(err)
+	}
 	if ha("val1") {
-		t.Fatal("validação respondida: a versão devia ter sido descartada")
+		t.Fatal("validação resolvida: a versão devia ter sido descartada")
 	}
 	// A atual nunca é descartada.
 	if !ha("cab2") {
@@ -111,7 +125,7 @@ func TestSpecCacheErroMantemOConteudoEMarcarLimpa(t *testing.T) {
 	if _, err := s.RegistrarSpec(ctx, &co, us(t, "59"), "docs/specs/x/tg-59-y", mrSpec, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.GravarVersaoSpec(ctx, u, "aaaa", true, arquivosCache("v1")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "aaaa", true, arquivosCache("v1")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.GravarErroLeituraSpec(ctx, u, Erro{Codigo: "falha_comando", Mensagem: strings.Repeat("x", 900)}); err != nil {
@@ -143,7 +157,7 @@ func TestSubstituirASpecApagaOCache(t *testing.T) {
 	if _, err := s.RegistrarSpec(ctx, &co, us(t, "59"), "docs/specs/x/tg-59-y", mrSpec, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.GravarVersaoSpec(ctx, u, "aaaa", true, arquivosCache("v1")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "aaaa", true, arquivosCache("v1")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RegistrarSpec(ctx, &co, us(t, "59"), "docs/specs/x/tg-59-z", mrSpec, true); err != nil {
@@ -164,7 +178,7 @@ func TestSpecsParaLer(t *testing.T) {
 	if _, err := s.AbrirValidacao(ctx, &co, us(t, "59"), "val1", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.GravarVersaoSpec(ctx, u, "cab1", true, arquivosCache("v")); err != nil {
+	if err := s.GravarVersaoSpec(ctx, u, "docs/specs/x/tg-59-y", mrSpec, "cab1", true, arquivosCache("v")); err != nil {
 		t.Fatal(err)
 	}
 	ls, err := s.SpecsParaLer(ctx)

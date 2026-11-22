@@ -81,7 +81,7 @@ func bancoV3(t *testing.T, dir string) {
 		"ALTER TABLE pendencia DROP COLUMN arquivo", "ALTER TABLE pendencia DROP COLUMN arquivo_hash", "ALTER TABLE pendencia DROP COLUMN arquivo_alterado", "ALTER TABLE pendencia DROP COLUMN autor",
 		"ALTER TABLE pendencia DROP COLUMN resposta_opcao", "ALTER TABLE pendencia DROP COLUMN respondida_em", "ALTER TABLE pendencia DROP COLUMN respondida_por", "ALTER TABLE pendencia DROP COLUMN avisada_em",
 		"ALTER TABLE pendencia DROP COLUMN abertura_avisada_em", "ALTER TABLE pendencia DROP COLUMN aviso_falhou_em", "ALTER TABLE pendencia DROP COLUMN resposta_versao",
-		"DROP TABLE spec_arquivo", "DROP TABLE spec_versao", "DROP TABLE spec_leitura", "DROP TABLE spec", "DROP TABLE spec_conferencia", "ALTER TABLE pendencia DROP COLUMN sha_validacao", "DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome", "DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
+		"DROP TABLE spec_link", "ALTER TABLE spec DROP COLUMN versao", "ALTER TABLE spec_versao DROP COLUMN caminho", "ALTER TABLE spec_versao DROP COLUMN mr_url", "DROP TABLE spec_arquivo", "DROP TABLE spec_versao", "DROP TABLE spec_leitura", "DROP TABLE spec", "DROP TABLE spec_conferencia", "ALTER TABLE pendencia DROP COLUMN sha_validacao", "DROP TABLE mensagem", "ALTER TABLE mr DROP COLUMN precondicao", "ALTER TABLE us DROP COLUMN espera_motivo", "ALTER TABLE us DROP COLUMN modelo", "ALTER TABLE us DROP COLUMN esforco", "ALTER TABLE onda DROP COLUMN nome", "DROP TABLE banco_meta", "PRAGMA user_version = 3"} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +128,7 @@ func TestAvisaAntesDeMigrarQuemNaoAbreOBanco(t *testing.T) {
 }
 
 func TestNaoAvisaDeQuemAindaAbreEEscreveNoBanco(t *testing.T) {
-	env := ambienteSemFerramentas(t, outroOrq(t, `{"versao":"0.5.0","commit":"cccccccccccc","schema":5}`))
+	env := ambienteSemFerramentas(t, outroOrq(t, fmt.Sprintf(`{"versao":"0.5.0","commit":"cccccccccccc","schema":%d}`, central.Schema())))
 	bancoV3(t, env["ORQ_STATE_DIR"])
 	if r := rodar(t, env, "coord", "list"); r.code != 0 || r.err != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.err)

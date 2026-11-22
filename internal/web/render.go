@@ -69,20 +69,32 @@ func RenderizarSpec(src string, links LinksSpec) template.HTML {
 // markdown do detalhe da pendência fica como está.
 type linksDaSpec struct{}
 
-func (linksDaSpec) Transform(doc *ast.Document, _ text.Reader, pc parser.Context) {
+func (linksDaSpec) Transform(doc *ast.Document, reader text.Reader, pc parser.Context) {
 	links, ok := pc.Get(chaveLinksSpec).(LinksSpec)
 	if !ok {
 		return
 	}
+	fonte := reader.Source()
 	var relativos []*ast.Link
+	var imagens []*ast.Image
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if l, ok := n.(*ast.Link); ok && entering {
-			if d := strings.TrimSpace(string(l.Destination)); d != "" && !strings.HasPrefix(d, "#") && !externoSeguro(d) {
-				relativos = append(relativos, l)
+		switch v := n.(type) {
+		case *ast.Link:
+			if d := strings.TrimSpace(string(v.Destination)); entering && d != "" && !strings.HasPrefix(d, "#") && !externoSeguro(d) {
+				relativos = append(relativos, v)
+			}
+		case *ast.Image:
+			if entering {
+				imagens = append(imagens, v)
 			}
 		}
 		return ast.WalkContinue, nil
 	})
+	// A spec não mostra imagem (a CSP não a carregaria): fica o texto alternativo, sem <img> e sem
+	// src vazio, que o navegador pode ler como o endereço da própria página.
+	for _, img := range imagens {
+		img.Parent().ReplaceChild(img.Parent(), img, ast.NewString(img.Text(fonte)))
+	}
 	for _, l := range relativos {
 		if p, ok := central.ResolverLinkSpec(links.Base, string(l.Destination)); ok && links.Destino != nil {
 			if href, ok := links.Destino(p); ok {

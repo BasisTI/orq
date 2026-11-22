@@ -67,12 +67,17 @@ func (e *estaticos) versao(nome string) string { return e.hashes[nome] }
 // servirEstatico atende /estatico/{caminho...}. Serve só arquivo regular do embed: diretório,
 // caminho com "." ou ".." e o que não existe dão 404; nada sai do embed.
 func (s *Servidor) servirEstatico(w http.ResponseWriter, r *http.Request) {
+	servirEstaticoDe(s.estatico, w, r)
+}
+
+// servirEstaticoDe é o servirEstatico da Central e da página pública, que compartilham os arquivos.
+func servirEstaticoDe(e *estaticos, w http.ResponseWriter, r *http.Request) {
 	nome := r.PathValue("caminho")
 	if nome == "" || strings.HasSuffix(nome, "/") || path.Clean(nome) != nome || !fs.ValidPath(nome) {
 		http.NotFound(w, r)
 		return
 	}
-	b, err := fs.ReadFile(s.estatico.fs, nome)
+	b, err := fs.ReadFile(e.fs, nome)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -85,7 +90,7 @@ func (s *Servidor) servirEstatico(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", tipo)
 	h.Set("Cache-Control", cacheSemHash)
-	if v, ok := s.estatico.hashes[nome]; ok && r.URL.Query().Get("v") == v {
+	if v, ok := e.hashes[nome]; ok && r.URL.Query().Get("v") == v {
 		h.Set("Cache-Control", cacheComHash)
 	}
 	http.ServeContent(w, r, nome, time.Time{}, bytes.NewReader(b))
